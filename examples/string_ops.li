@@ -1,0 +1,104 @@
+// String Operation Tests
+// Tests string manipulation and operations
+
+println("=== String Concatenation ===")
+
+// Basic concatenation
+let hello = "Hello"
+let world = "World"
+let greeting = hello + ", " + world + "!"
+println(greeting)  // Hello, World!
+
+// Concatenation with other types
+let count = 42
+let msg = "The answer is " + count
+println(msg)  // The answer is 42
+
+// Empty string concatenation
+let empty = ""
+let result = empty + "start" + empty + "end"
+println(result)  // startend
+
+println("=== String Length ===")
+
+// Get string length
+let text = "Hello"
+println(len(text))  // 5
+
+let longer = "Hello, World!"
+println(len(longer))  // 13
+
+let empty_str = ""
+println(len(empty_str))  // 0
+
+println("=== String Indexing ===")
+
+// Access individual characters
+let word = "Hello"
+println(word[0])  // H
+println(word[1])  // e
+println(word[4])  // o
+
+// Index from variable
+let idx = 2
+println(word[idx])  // l
+
+println("=== String Comparison ===")
+
+// Equality
+let a = "apple"
+let b = "apple"
+let c = "banana"
+
+if a == b {
+    println("a == b")  // a == b
+}
+
+if a != c {
+    println("a != c")  // a != c
+}
+
+// Note: Lexicographic comparison (< >) not yet supported in type checker
+
+println("=== String in Expressions ===")
+
+// String in if condition
+let name = "Alice"
+if name == "Alice" {
+    println("Hello Alice!")  // Hello Alice!
+} else {
+    println("Who are you?")
+}
+
+// String in match
+let fruit = "orange"
+match fruit {
+    "apple" => println("It's an apple"),
+    "orange" => println("It's an orange"),  // It's an orange
+    "banana" => println("It's a banana"),
+    _ => println("Unknown fruit")
+}
+
+println("=== String in Arrays ===")
+
+// Array of strings
+let fruits = ["apple", "banana", "cherry"]
+for f in fruits {
+    println(f)
+}
+
+// String length in array
+println(len(fruits[0]))  // 5 (apple)
+println(len(fruits[1]))  // 6 (banana)
+println(len(fruits[2]))  // 6 (cherry)
+
+println("=== String Building ===")
+
+// Build string in a loop
+var built = ""
+for i in [1, 2, 3, 4, 5] {
+    built = built + i + " "
+}
+println(built)  // 1 2 3 4 5
+
+println("=== All String Tests Passed ===")

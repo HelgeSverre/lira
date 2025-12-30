@@ -1,0 +1,42 @@
+// Mutual Recursion Test
+// Tests forward references for functions
+
+println("=== Mutual Recursion Test ===")
+
+// is_even calls is_odd (defined later)
+fn is_even(n: int) -> bool {
+    if n == 0 {
+        return true
+    }
+    return is_odd(n - 1)
+}
+
+// is_odd calls is_even (defined earlier)
+fn is_odd(n: int) -> bool {
+    if n == 0 {
+        return false
+    }
+    return is_even(n - 1)
+}
+
+// Test the functions
+println("is_even(0): " + is_even(0))   // true
+println("is_even(4): " + is_even(4))   // true
+println("is_even(7): " + is_even(7))   // false
+println("is_odd(5): " + is_odd(5))     // true
+println("is_odd(8): " + is_odd(8))     // false
+
+println("=== Forward Reference Test ===")
+
+// Function that calls another function defined later
+fn caller() -> int {
+    return callee() + 10
+}
+
+fn callee() -> int {
+    return 5
+}
+
+println("caller(): " + caller())  // 15
+
+println("=== All Mutual Recursion Tests Passed ===")

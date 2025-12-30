@@ -1,0 +1,35 @@
+// Test block expressions (blocks that evaluate to a value)
+// @expect: 15
+// @expect: computed: 42
+// @expect: result: 100
+
+fn main() {
+    // Block expression as a value
+    let x = {
+        let a = 5
+        let b = 10
+        a + b
+    }
+    println(x)
+
+    // Block expression in a more complex context
+    let computed = {
+        let temp = 6
+        let factor = 7
+        temp * factor
+    }
+    println("computed: " + computed)
+
+    // Nested blocks
+    let result = {
+        let outer = 10
+        let inner = {
+            let nested = 5
+            nested * 2
+        }
+        outer * inner
+    }
+    println("result: " + result)
+}
+
+main()

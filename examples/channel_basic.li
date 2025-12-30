@@ -1,0 +1,11 @@
+// Channel Basics Example
+// Demonstrates channel creation and basic operations
+// Note: Full channel operations require fiber mode
+
+// Create a buffered channel
+let ch = chan(5)
+
+println("Channel created with buffer size 5")
+
+// Channel type is available for use
+println("Channel operations ready")

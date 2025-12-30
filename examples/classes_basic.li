@@ -1,0 +1,79 @@
+// Class Tests
+// Tests basic class definitions
+// Currently 'class' works similarly to 'struct' but has type-checking issues
+
+println("=== Class vs Struct ===")
+
+// Using struct (works)
+struct PointS {
+    x: int
+    y: int
+}
+
+let ps = PointS { x: 10, y: 20 }
+println(ps.x)  // 10
+println(ps.y)  // 20
+
+// Using class (works for literals but type checking differs)
+class PointC {
+    x: int
+    y: int
+}
+
+let pc = PointC { x: 30, y: 40 }
+println(pc.x)  // 30
+println(pc.y)  // 40
+
+println("=== Functions with Struct Parameters ===")
+
+struct Rectangle {
+    width: int
+    height: int
+}
+
+fn rect_area(r: Rectangle) -> int {
+    return r.width * r.height
+}
+
+let rect = Rectangle { width: 5, height: 3 }
+println(rect_area(rect))  // 15
+
+println("=== Nested Structs ===")
+
+struct Address {
+    street: string
+    city: string
+}
+
+struct Person {
+    name: string
+    age: int
+}
+
+let addr = Address { street: "123 Main St", city: "Springfield" }
+let person = Person { name: "Alice", age: 30 }
+
+println(person.name + " lives in " + addr.city)
+
+println("=== Array of Structs ===")
+
+let points = [
+    PointS { x: 0, y: 0 },
+    PointS { x: 1, y: 1 },
+    PointS { x: 2, y: 4 }
+]
+
+for p in points {
+    println("Point: " + p.x + ", " + p.y)
+}
+
+println("=== All Class Tests Passed ===")
+
+// ============================================================
+// KNOWN ISSUES / PHASE 7 WORK:
+// - class literals create Struct types in type checker
+// - class inheritance (extends) not parsed
+// - super calls not implemented
+// - this.field in methods not implemented
+// - inline method definitions not implemented
+// ============================================================

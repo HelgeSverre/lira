@@ -1,0 +1,68 @@
+// Collections Module Tests
+// @expect-contains: sum test passed
+// @expect-contains: filter test passed
+// @expect-contains: sort test passed
+// @expect-contains: range test passed
+// @expect-contains: unique test passed
+
+import std.collections
+
+println("=== Collections Module Tests ===")
+
+// Test sum
+let arr = [1, 2, 3, 4, 5]
+let s = sum(arr)
+if s == 15 {
+    println("sum test passed")
+}
+
+// Test product
+let p = product(arr)
+println("product: " + p)
+
+// Test min/max
+let mn = min_of(arr)
+let mx = max_of(arr)
+println("min: " + mn + " max: " + mx)
+
+// Test filter_even
+let evens = filter_even([1, 2, 3, 4, 5, 6])
+if len(evens) == 3 {
+    println("filter test passed")
+}
+
+// Test sort
+let unsorted = [5, 2, 8, 1, 9]
+let sorted = sort(unsorted)
+if sorted[0] == 1 && sorted[4] == 9 {
+    println("sort test passed")
+}
+
+// Test range
+let r = range(0, 5)
+if len(r) == 5 && r[0] == 0 && r[4] == 4 {
+    println("range test passed")
+}
+
+// Test unique
+let dups = [1, 2, 2, 3, 3, 3]
+let uniq = unique(dups)
+if len(uniq) == 3 {
+    println("unique test passed")
+}
+
+// Test contains
+if contains_int(arr, 3) && !contains_int(arr, 10) {
+    println("contains test passed")
+}
+
+// Test reverse
+let rev = reverse_int([1, 2, 3])
+println("reversed: " + rev[0] + "," + rev[1] + "," + rev[2])
+
+// Test take/skip
+let taken = take([1, 2, 3, 4, 5], 3)
+let skipped = skip([1, 2, 3, 4, 5], 2)
+println("take 3: " + len(taken) + " skip 2: " + len(skipped))
+
+println("=== All Collections Tests Passed ===")

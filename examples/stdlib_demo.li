@@ -1,0 +1,88 @@
+// Standard Library Demo
+// Demonstrates patterns from stdlib/ (import system pending Phase 7)
+
+println("=== Core Utilities Demo ===")
+
+// Inline implementations from stdlib/core.li
+
+fn abs(n: int) -> int {
+    if n < 0 { return -n }
+    return n
+}
+
+fn min(a: int, b: int) -> int {
+    if a < b { return a }
+    return b
+}
+
+fn max(a: int, b: int) -> int {
+    if a > b { return a }
+    return b
+}
+
+fn clamp(value: int, min_val: int, max_val: int) -> int {
+    if value < min_val { return min_val }
+    if value > max_val { return max_val }
+    return value
+}
+
+println("abs(-5): " + abs(-5))    // 5
+println("min(3, 7): " + min(3, 7)) // 3
+println("max(3, 7): " + max(3, 7)) // 7
+println("clamp(15, 0, 10): " + clamp(15, 0, 10)) // 10
+
+println("=== File System Demo ===")
+
+// Inline implementations from stdlib/fs.li
+
+fn read_file(path: string) -> string {
+    let fd = file_open(path, 0)
+    if fd < 0 { return "" }
+    let size = file_size(path)
+    let content = file_read(fd, size)
+    file_close(fd)
+    return content
+}
+
+fn write_file(path: string, content: string) -> bool {
+    let fd = file_open(path, 1)
+    if fd < 0 { return false }
+    let bytes = file_write(fd, content)
+    file_close(fd)
+    return bytes > 0
+}
+
+// Create a test file
+let test_path = "/tmp/li_stdlib_demo.txt"
+let test_content = "Hello from stdlib demo!\nLine 2\nLine 3"
+
+let write_ok = write_file(test_path, test_content)
+println("Write successful: " + write_ok)
+
+// Read it back
+let read_content = read_file(test_path)
+println("Read back:\n" + read_content)
+
+// Check file info
+println("File exists: " + file_exists(test_path))
+println("File size: " + file_size(test_path) + " bytes")
+
+println("=== I/O Demo ===")
+
+// Time measurement
+let t1 = time_ms()
+println("Start time: " + t1 + " ms")
+
+// Do some work
+var sum = 0
+var i = 0
+while i < 10000 {
+    sum = sum + i
+    i = i + 1
+}
+println("Sum 0..9999 = " + sum)
+
+let t2 = time_ms()
+println("Elapsed: " + (t2 - t1) + " ms")
+
+println("=== All Demos Passed ===")

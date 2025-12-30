@@ -1,0 +1,35 @@
+// Test tuple types and expressions
+// @expect: 1
+// @expect: hello
+// @expect: 3
+
+fn get_first(t: (int, string)) -> int {
+    return match t {
+        (a, b) => a
+    }
+}
+
+fn get_second(t: (int, string)) -> string {
+    return match t {
+        (a, b) => b
+    }
+}
+
+fn sum_triple(t: (int, int, int)) -> int {
+    return match t {
+        (a, b, c) => a + b + c
+    }
+}
+
+fn main() {
+    // Simple tuple
+    let pair = (1, "hello")
+    println(get_first(pair))
+    println(get_second(pair))
+
+    // Triple tuple
+    let triple = (1, 1, 1)
+    println(sum_triple(triple))
+}
+
+main()

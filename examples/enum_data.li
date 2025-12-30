@@ -1,0 +1,35 @@
+// Test enums with data
+// @expect: 42
+// @expect: none
+// @expect: 100
+
+enum Option {
+    None,
+    Some(int)
+}
+
+fn main() {
+    // Create enum variants with data
+    let some_val = Option::Some(42)
+    let none_val = Option::None
+
+    // Pattern match on the enum
+    match some_val {
+        Option::Some(x) => println(x)
+        Option::None => println("none")
+    }
+
+    match none_val {
+        Option::Some(x) => println(x)
+        Option::None => println("none")
+    }
+
+    // Test with another value
+    let another = Option::Some(100)
+    match another {
+        Option::Some(n) => println(n)
+        Option::None => println("none")
+    }
+}
+
+main()

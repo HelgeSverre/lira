@@ -1,0 +1,32 @@
+// Test optional chaining (?.) and null coalesce (??)
+// @expect: 42
+// @expect: 0
+// @expect: default
+
+fn get_value() -> int? {
+    return 42
+}
+
+fn get_null() -> int? {
+    return null
+}
+
+fn get_string() -> string? {
+    return null
+}
+
+fn main() {
+    // Null coalesce with value
+    let a = get_value() ?? 0
+    println(a)  // 42
+
+    // Null coalesce with null
+    let b = get_null() ?? 0
+    println(b)  // 0
+
+    // Null coalesce with string
+    let s = get_string() ?? "default"
+    println(s)  // default
+}
+
+main()

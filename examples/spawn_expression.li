@@ -1,0 +1,27 @@
+// Test spawn expressions for fiber creation
+// Note: Actual fiber execution requires fiber mode in VM
+// @expect: Fiber syntax test
+// @expect: Worker spawned
+// @expect: Computation spawned
+
+fn worker(id: int) {
+    println("Worker " + id + " running")
+}
+
+fn compute(a: int, b: int) -> int {
+    return a + b
+}
+
+fn main() {
+    println("Fiber syntax test")
+
+    // Spawn a simple function call
+    spawn worker(1)
+    println("Worker spawned")
+
+    // Spawn a computation
+    spawn compute(10, 20)
+    println("Computation spawned")
+}
+
+main()

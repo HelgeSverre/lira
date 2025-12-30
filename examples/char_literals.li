@@ -1,0 +1,25 @@
+// Test char literals and operations
+// @expect: a
+// @expect: 97
+// @expect: newline test
+
+fn main() {
+    // Basic char literal
+    let c = 'a'
+    println(c)
+
+    // Char to int conversion
+    let code = c as int
+    println(code)
+
+    // Escape sequences in chars
+    let newline = '\n'
+    let tab = '\t'
+    let quote = '\''
+    let backslash = '\\'
+
+    print("newline test")
+    print(newline)
+}
+
+main()

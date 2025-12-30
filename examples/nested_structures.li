@@ -1,0 +1,181 @@
+// Nested Structures Tests
+// Tests deeply nested arrays, objects, and mixed structures
+
+println("=== Nested Arrays ===")
+
+// 2D array (matrix)
+let matrix = [
+    [1, 2, 3],
+    [4, 5, 6],
+    [7, 8, 9]
+]
+
+// Access elements
+println(matrix[0][0])  // 1
+println(matrix[1][1])  // 5
+println(matrix[2][2])  // 9
+
+// Sum all elements
+var sum = 0
+for row in matrix {
+    for elem in row {
+        sum = sum + elem
+    }
+}
+println("Matrix sum: " + sum)  // 45
+
+// 3D array
+let cube = [
+    [[1, 2], [3, 4]],
+    [[5, 6], [7, 8]]
+]
+
+println(cube[0][0][0])  // 1
+println(cube[0][0][1])  // 2
+println(cube[0][1][0])  // 3
+println(cube[1][0][0])  // 5
+println(cube[1][1][1])  // 8
+
+println("=== Nested Structs ===")
+
+// Define nested structures
+struct Address {
+    street: string
+    city: string
+    zip: int
+}
+
+struct Person {
+    name: string
+    age: int
+}
+
+// Create nested struct
+let addr = Address {
+    street: "123 Main St",
+    city: "Springfield",
+    zip: 12345
+}
+
+println(addr.street)
+println(addr.city)
+println(addr.zip)
+
+let person = Person {
+    name: "Alice",
+    age: 30
+}
+
+println(person.name)
+println(person.age)
+
+println("=== Arrays of Structs ===")
+
+// Array of structs
+let people = [
+    Person { name: "Alice", age: 25 },
+    Person { name: "Bob", age: 30 },
+    Person { name: "Charlie", age: 35 }
+]
+
+for p in people {
+    println(p.name + " is " + p.age + " years old")
+}
+
+// Find oldest
+var oldest_age = 0
+var oldest_name = ""
+for p in people {
+    if p.age > oldest_age {
+        oldest_age = p.age
+        oldest_name = p.name
+    }
+}
+println("Oldest: " + oldest_name)  // Charlie
+
+println("=== Simulating Struct with Array ===")
+
+let team_name = "Alpha"
+let team_members = ["Alice", "Bob", "Charlie"]
+
+println("Team: " + team_name)
+for member in team_members {
+    println("- " + member)
+}
+
+println("=== Mixed Nested Structures ===")
+
+// Array of arrays of different sizes
+let ragged = [
+    [1],
+    [2, 3],
+    [4, 5, 6],
+    [7, 8, 9, 10]
+]
+
+var total = 0
+for row in ragged {
+    println("Row length: " + len(row))
+    for elem in row {
+        total = total + elem
+    }
+}
+println("Total: " + total)  // 55
+
+println("=== Nested Control Flow ===")
+
+// Nested loops with nested conditions
+let grid = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
+var found_five = false
+
+for row in grid {
+    if found_five {
+        break
+    }
+    for elem in row {
+        if elem == 5 {
+            println("Found 5!")
+            found_five = true
+            break
+        }
+    }
+}
+
+println("=== Deep Nesting Performance ===")
+
+// Create deeply nested array access
+let deep = [[[[1, 2], [3, 4]], [[5, 6], [7, 8]]], [[[9, 10], [11, 12]], [[13, 14], [15, 16]]]]
+println(deep[0][0][0][0])  // 1
+println(deep[1][1][1][1])  // 16
+
+// Sum deep array
+var deep_sum = 0
+for a in deep {
+    for b in a {
+        for c in b {
+            for d in c {
+                deep_sum = deep_sum + d
+            }
+        }
+    }
+}
+println("Deep sum: " + deep_sum)  // 136 (1+2+...+16)
+
+println("=== Nested Function Calls ===")
+
+fn add(a: int, b: int) -> int {
+    return a + b
+}
+
+fn mul(a: int, b: int) -> int {
+    return a * b
+}
+
+// Nested function calls
+println(add(mul(2, 3), mul(4, 5)))  // 6 + 20 = 26
+println(mul(add(1, 2), add(3, 4)))  // 3 * 7 = 21
+
+// Deeply nested
+println(add(add(add(1, 2), 3), 4))  // ((1+2)+3)+4 = 10
+
+println("=== All Nested Structure Tests Passed ===")

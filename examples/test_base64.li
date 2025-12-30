@@ -1,0 +1,49 @@
+// Base64 Encoding Tests
+// @expect-contains: encode hello: SGVsbG8gV29ybGQh
+// @expect-contains: decode: Hello World!
+// @expect-contains: roundtrip passed
+// @expect-contains: url encode passed
+
+println("=== Base64 Encoding Tests ===")
+
+// Test basic encode
+let encoded = base64_encode("Hello World!")
+println("encode hello: " + encoded)
+
+// Test basic decode
+let decoded = base64_decode("SGVsbG8gV29ybGQh")
+println("decode: " + decoded)
+
+// Test roundtrip
+let original = "The quick brown fox jumps over the lazy dog"
+let enc = base64_encode(original)
+let dec = base64_decode(enc)
+if dec == original {
+    println("roundtrip passed")
+}
+
+// Test URL-safe encoding
+let url_enc = base64_encode_url("test?foo=bar&baz=qux")
+let url_dec = base64_decode_url(url_enc)
+if url_dec == "test?foo=bar&baz=qux" {
+    println("url encode passed")
+}
+
+// Test with special characters
+let special = "Hello\nWorld\t!"
+let special_enc = base64_encode(special)
+let special_dec = base64_decode(special_enc)
+println("special chars: " + (special_dec == special))
+
+// Test empty string
+let empty_enc = base64_encode("")
+let empty_dec = base64_decode(empty_enc)
+println("empty roundtrip: " + (empty_dec == ""))
+
+// Test numbers and symbols
+let symbols = "1234567890!@#$%^&*()"
+let sym_enc = base64_encode(symbols)
+let sym_dec = base64_decode(sym_enc)
+println("symbols roundtrip: " + (sym_dec == symbols))
+
+println("=== All Base64 Tests Passed ===")

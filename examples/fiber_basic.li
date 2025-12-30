@@ -1,0 +1,14 @@
+// Fiber (Green Thread) Example
+// Demonstrates spawn syntax and fiber operations
+// Note: Actual fiber execution requires fiber mode enabled in VM
+
+fn worker(id: int) {
+    println("Worker started: " + id)
+}
+
+// Single-fiber mode test: just verify syntax parses
+println("Fiber example")
+println("Use spawn worker(1) to create fibers in fiber mode")
+
+// fiber_id() and fiber_yield() are available as built-ins
+println("Fiber primitives available")

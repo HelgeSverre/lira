@@ -1,0 +1,92 @@
+// Smoke Test - File System Integration
+// Tests file I/O with write, read, and verification
+// @expect-contains: Smoke Test PASSED
+
+import std.fs
+
+println("=== Lira File System Smoke Test ===")
+
+// 1. Get current working directory
+let pwd = env_get("PWD")
+if pwd != null {
+    println("Current directory: " + pwd)
+} else {
+    println("Warning: Could not get PWD")
+}
+
+// 2. Generate some "random" content using timestamp
+let timestamp = time_ms()
+let test_content = "Lira smoke test at " + timestamp + "\n" +
+    "Line 2: Testing file operations\n" +
+    "Line 3: timestamp=" + timestamp + "\n"
+
+println("Generated content:")
+println(test_content)
+
+// 3. Write to test file
+let test_file = "/tmp/li_smoke_test.txt"
+println("Writing to " + test_file + "...")
+
+let write_ok = write_file(test_file, test_content)
+if write_ok {
+    println("Write successful!")
+} else {
+    println("ERROR: Write failed!")
+}
+
+// 4. Verify file exists
+if exists(test_file) {
+    println("File exists: true")
+} else {
+    println("ERROR: File does not exist after write!")
+}
+
+// 5. Check file size
+let file_size = size(test_file)
+println("File size: " + file_size + " bytes")
+
+// 6. Read content back
+println("Reading file back...")
+let read_content = read_file(test_file)
+println("Read content:")
+println(read_content)
+
+// 7. Verify content matches
+if read_content == test_content {
+    println("Content verification: MATCH")
+} else {
+    println("ERROR: Content mismatch!")
+    println("Expected length: " + len(test_content))
+    println("Got length: " + len(read_content))
+}
+
+// 8. Test append
+println("Testing append...")
+let append_text = "Appended line at " + time_ms() + "\n"
+let append_ok = append_file(test_file, append_text)
+if append_ok {
+    println("Append successful!")
+} else {
+    println("ERROR: Append failed!")
+}
+
+// 9. Read again to verify append
+let final_content = read_file(test_file)
+let final_size = size(test_file)
+println("Final file size: " + final_size + " bytes")
+
+// 10. Summary
+println("")
+println("=== Test Summary ===")
+println("Write test: " + write_ok)
+println("Read test: " + (len(read_content) > 0))
+println("Append test: " + append_ok)
+println("Size increased: " + (final_size > file_size))
+
+if write_ok && len(read_content) > 0 && append_ok && final_size > file_size {
+    println("")
+    println("Smoke Test PASSED")
+} else {
+    println("")
+    println("Smoke Test FAILED")
+}

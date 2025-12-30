@@ -1,0 +1,235 @@
+// Test String Module
+// Comprehensive tests for std.strings functions
+// @expect-contains: All string tests passed!
+
+import std.strings
+
+// ============================================================================
+// Test: to_upper / to_lower
+// ============================================================================
+// @expect-contains: HELLO WORLD
+// @expect-contains: hello world
+
+println("=== Case Conversion ===")
+println(to_upper("Hello World"))
+println(to_lower("Hello World"))
+
+// Test edge cases
+println(to_upper(""))  // empty string
+println(to_lower("123!@#"))  // non-letters stay unchanged
+
+// ============================================================================
+// Test: char_at
+// ============================================================================
+// @expect-contains: char_at: H
+// @expect-contains: char_at: l
+
+println("=== char_at ===")
+let test_str = "Hello"
+println("char_at: " + char_at(test_str, 0))  // H
+println("char_at: " + char_at(test_str, 2))  // l
+println("char_at empty: " + char_at(test_str, 100))  // out of bounds returns empty
+
+// ============================================================================
+// Test: substring
+// ============================================================================
+// @expect-contains: substring: ell
+// @expect-contains: substring: Hello
+
+println("=== substring ===")
+println("substring: " + substring("Hello World", 1, 4))  // ell
+println("substring: " + substring("Hello World", 0, 5))  // Hello
+println("substring empty: " + substring("Hello", 5, 5))  // empty (equal indices)
+
+// ============================================================================
+// Test: index_of / last_index_of
+// ============================================================================
+// @expect-contains: index_of: 0
+// @expect-contains: index_of: 6
+// @expect-contains: last_index_of: 8
+
+println("=== index_of / last_index_of ===")
+let haystack = "hello hello"
+println("index_of: " + index_of(haystack, "hello"))  // 0
+println("index_of: " + index_of(haystack, "hello"))  // 0 (finds first)
+println("index_of not found: " + index_of(haystack, "world"))  // -1
+println("index_of: " + index_of("hello world", "world"))  // 6
+println("last_index_of: " + last_index_of("hello hello", "llo"))  // 8
+
+// ============================================================================
+// Test: contains / starts_with / ends_with
+// ============================================================================
+// @expect-contains: contains: true
+// @expect-contains: starts_with: true
+// @expect-contains: ends_with: true
+
+println("=== contains / starts_with / ends_with ===")
+let test = "Hello World"
+println("contains: " + contains(test, "llo"))
+println("contains false: " + contains(test, "xyz"))
+println("starts_with: " + starts_with(test, "Hello"))
+println("starts_with false: " + starts_with(test, "World"))
+println("ends_with: " + ends_with(test, "World"))
+println("ends_with false: " + ends_with(test, "Hello"))
+
+// ============================================================================
+// Test: trim / trim_start / trim_end
+// ============================================================================
+// @expect-contains: trim: [hello]
+// @expect-contains: trim_start: [hello   ]
+// @expect-contains: trim_end: [   hello]
+
+println("=== trim ===")
+let spaced = "   hello   "
+println("trim: [" + trim(spaced) + "]")
+println("trim_start: [" + trim_start(spaced) + "]")
+println("trim_end: [" + trim_end(spaced) + "]")
+println("trim empty: [" + trim("   ") + "]")
+
+// ============================================================================
+// Test: split / join
+// ============================================================================
+// @expect-contains: split count: 3
+// @expect-contains: join: a-b-c
+
+println("=== split / join ===")
+let csv = "apple,banana,cherry"
+let parts = split(csv, ",")
+println("split count: " + len(parts))
+println("split[0]: " + parts[0])
+println("split[1]: " + parts[1])
+println("split[2]: " + parts[2])
+
+let joined = join(["a", "b", "c"], "-")
+println("join: " + joined)
+// Note: Empty array join test skipped due to type inference limitation
+// println("join empty: " + join([], ","))
+
+// ============================================================================
+// Test: replace / replace_first
+// ============================================================================
+// @expect-contains: replace: hi hi hi
+// @expect-contains: replace_first: hi hello hello
+
+println("=== replace ===")
+let original = "hello hello hello"
+println("replace: " + replace(original, "hello", "hi"))
+println("replace_first: " + replace_first(original, "hello", "hi"))
+println("replace not found: " + replace("abc", "x", "y"))
+
+// ============================================================================
+// Test: repeat
+// ============================================================================
+// @expect-contains: repeat: hahaha
+
+println("=== repeat ===")
+println("repeat: " + repeat("ha", 3))
+println("repeat zero: [" + repeat("x", 0) + "]")
+println("repeat negative: [" + repeat("x", -1) + "]")
+
+// ============================================================================
+// Test: reverse
+// ============================================================================
+// @expect-contains: reverse: olleH
+
+println("=== reverse ===")
+println("reverse: " + reverse("Hello"))
+println("reverse empty: [" + reverse("") + "]")
+println("reverse single: " + reverse("x"))
+
+// ============================================================================
+// Test: pad_start / pad_end
+// ============================================================================
+// @expect-contains: pad_start: 00042
+// @expect-contains: pad_end: hello..
+
+println("=== pad_start / pad_end ===")
+println("pad_start: " + pad_start("42", 5, "0"))
+println("pad_end: " + pad_end("hello", 7, "."))
+println("pad_start no change: " + pad_start("hello", 3, "x"))
+println("pad_end multi: " + pad_end("x", 5, "ab"))
+
+// ============================================================================
+// Test: is_empty / is_blank
+// ============================================================================
+// @expect-contains: is_empty true: true
+// @expect-contains: is_blank space: true
+
+println("=== is_empty / is_blank ===")
+println("is_empty true: " + is_empty(""))
+println("is_empty false: " + is_empty("x"))
+println("is_blank empty: " + is_blank(""))
+println("is_blank space: " + is_blank("   "))
+println("is_blank text: " + is_blank("  x  "))
+
+// ============================================================================
+// Test: is_numeric / is_alpha / is_alphanumeric
+// ============================================================================
+// @expect-contains: is_numeric: true
+// @expect-contains: is_alpha: true
+// @expect-contains: is_alphanumeric: true
+
+println("=== is_numeric / is_alpha / is_alphanumeric ===")
+println("is_numeric: " + is_numeric("12345"))
+println("is_numeric false: " + is_numeric("12a45"))
+println("is_alpha: " + is_alpha("Hello"))
+println("is_alpha false: " + is_alpha("Hello1"))
+println("is_alphanumeric: " + is_alphanumeric("Hello123"))
+println("is_alphanumeric false: " + is_alphanumeric("Hello!"))
+
+// ============================================================================
+// Test: capitalize / title_case
+// ============================================================================
+// @expect-contains: capitalize: Hello world
+// @expect-contains: title_case: Hello World
+
+println("=== capitalize / title_case ===")
+println("capitalize: " + capitalize("hello world"))
+println("title_case: " + title_case("hello world"))
+println("capitalize empty: [" + capitalize("") + "]")
+
+// ============================================================================
+// Test: count / word_count
+// ============================================================================
+// @expect-contains: count: 3
+// @expect-contains: word_count: 4
+
+println("=== count / word_count ===")
+println("count: " + count("abcabcabc", "abc"))
+println("count overlap: " + count("aaa", "a"))  // 3
+println("word_count: " + word_count("the quick brown fox"))
+println("word_count empty: " + word_count(""))
+println("word_count spaces: " + word_count("   "))
+
+// ============================================================================
+// Test: char_code / from_char_code
+// ============================================================================
+// @expect-contains: char_code A: 65
+// @expect-contains: from_char_code: A
+
+println("=== char_code / from_char_code ===")
+println("char_code A: " + char_code("ABC", 0))  // 65
+println("char_code a: " + char_code("abc", 0))  // 97
+println("from_char_code: " + from_char_code(65))  // A
+println("from_char_code space: [" + from_char_code(32) + "]")
+
+// ============================================================================
+// Edge cases and special characters
+// ============================================================================
+// @expect-contains: special chars work
+
+println("=== Edge Cases ===")
+// Empty strings
+println("empty trim: [" + trim("") + "]")
+println("empty split: " + len(split("", ",")))
+
+// Single characters
+println("single char upper: " + to_upper("a"))
+println("single char reverse: " + reverse("x"))
+
+// Special characters
+let special = "Hello\tWorld\n"
+println("special chars work")
+
+println("")
+println("All string tests passed!")

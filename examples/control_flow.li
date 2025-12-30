@@ -1,0 +1,70 @@
+// Control Flow Demo
+// Demonstrates if/else, while loops, and nested control flow
+
+// Simple if/else
+let x = 42
+if x > 0 {
+    println("x is positive")
+} else {
+    println("x is not positive")
+}
+
+// Nested if
+let grade = 85
+if grade >= 90 {
+    println("Grade: A")
+} else {
+    if grade >= 80 {
+        println("Grade: B")
+    } else {
+        if grade >= 70 {
+            println("Grade: C")
+        } else {
+            println("Grade: F")
+        }
+    }
+}
+
+// While loop with counter
+println("Counting to 5:")
+var count = 1
+while count <= 5 {
+    println(count)
+    count = count + 1
+}
+
+// Nested loops - multiplication table
+println("Multiplication table (3x3):")
+var row = 1
+while row <= 3 {
+    var col = 1
+    while col <= 3 {
+        let product = row * col
+        println(product)
+        col = col + 1
+    }
+    row = row + 1
+}
+
+// FizzBuzz (1-15)
+println("FizzBuzz:")
+var n = 1
+while n <= 15 {
+    let by3 = n % 3 == 0
+    let by5 = n % 5 == 0
+
+    if by3 && by5 {
+        println("FizzBuzz")
+    } else {
+        if by3 {
+            println("Fizz")
+        } else {
+            if by5 {
+                println("Buzz")
+            } else {
+                println(n)
+            }
+        }
+    }
+    n = n + 1
+}

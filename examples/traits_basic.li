@@ -1,0 +1,41 @@
+// Test trait declarations and implementations
+// @expect: Dog says: Woof!
+// @expect: Cat says: Meow!
+
+// Define a trait
+trait Speak {
+    fn speak(self) -> string
+}
+
+// Struct that implements the trait
+struct Dog {
+    name: string
+}
+
+struct Cat {
+    name: string
+}
+
+// Implement trait for Dog
+impl Speak for Dog {
+    fn speak(self) -> string {
+        return "Woof!"
+    }
+}
+
+// Implement trait for Cat
+impl Speak for Cat {
+    fn speak(self) -> string {
+        return "Meow!"
+    }
+}
+
+fn main() {
+    let dog = Dog { name: "Buddy" }
+    let cat = Cat { name: "Whiskers" }
+
+    println("Dog says: " + dog.speak())
+    println("Cat says: " + cat.speak())
+}
+
+main()

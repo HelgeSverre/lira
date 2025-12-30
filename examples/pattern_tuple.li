@@ -1,0 +1,34 @@
+// Tuple Pattern Matching Tests
+// Tests destructuring tuples in match expressions
+// @expect: first is 1
+// @expect: sum is 6
+// @expect: nested first is 1
+
+fn get_first(t: (int, int)) -> int {
+    return match t {
+        (a, b) => a
+    }
+}
+
+fn sum_tuple(t: (int, int, int)) -> int {
+    return match t {
+        (a, b, c) => a + b + c
+    }
+}
+
+// Test basic tuple pattern
+let pair = (1, 2)
+println("first is " + get_first(pair))
+
+// Test triple tuple
+let triple = (1, 2, 3)
+println("sum is " + sum_tuple(triple))
+
+// Test nested tuple pattern
+let nested = ((1, 2), 3)
+fn get_nested_first(t: ((int, int), int)) -> int {
+    return match t {
+        ((a, b), c) => a
+    }
+}
+println("nested first is " + get_nested_first(nested))

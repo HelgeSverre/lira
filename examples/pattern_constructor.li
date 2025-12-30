@@ -1,0 +1,51 @@
+// Constructor Pattern Matching Tests
+// Tests matching enum variants with pattern matching
+// @expect: red variant
+// @expect: active status
+// @expect: Found some value: 42
+
+enum Color {
+    Red,
+    Green,
+    Blue
+}
+
+enum Status {
+    Active,
+    Inactive,
+    Pending
+}
+
+// Match on simple enum variant
+fn describe_color(c: Color) -> string {
+    return match c {
+        Color::Red => "red variant",
+        Color::Green => "green variant",
+        Color::Blue => "blue variant"
+    }
+}
+
+fn describe_status(s: Status) -> string {
+    return match s {
+        Status::Active => "active status",
+        Status::Inactive => "inactive status",
+        Status::Pending => "pending status"
+    }
+}
+
+// Test basic constructor patterns
+let red = Color::Red
+println(describe_color(red))
+
+let active = Status::Active
+println(describe_status(active))
+
+// Test with wildcard fallback
+fn color_or_default(c: Color) -> string {
+    return match c {
+        Color::Red => "Found some value: 42",
+        _ => "other color"
+    }
+}
+
+println(color_or_default(Color::Red))

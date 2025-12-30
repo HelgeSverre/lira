@@ -1,0 +1,167 @@
+// Compound Assignment Tests
+// Tests +=, -=, *=, /=, %=, and bitwise compound assignments
+
+println("=== Arithmetic Compound Assignments ===")
+
+// Addition assignment
+var x = 10
+x += 5
+println(x)  // 15
+
+x += 10
+println(x)  // 25
+
+x += -5
+println(x)  // 20
+
+// Subtraction assignment
+var y = 100
+y -= 30
+println(y)  // 70
+
+y -= 20
+println(y)  // 50
+
+y -= -10
+println(y)  // 60
+
+// Multiplication assignment
+var z = 5
+z *= 3
+println(z)  // 15
+
+z *= 2
+println(z)  // 30
+
+z *= -1
+println(z)  // -30
+
+// Division assignment
+var d = 100
+d /= 2
+println(d)  // 50
+
+d /= 5
+println(d)  // 10
+
+d /= 2
+println(d)  // 5
+
+// Modulo assignment
+var m = 100
+m %= 30
+println(m)  // 10
+
+m %= 3
+println(m)  // 1
+
+println("=== Bitwise Compound Assignments ===")
+
+// Bitwise AND assignment
+var a = 255
+a &= 15
+println(a)  // 15 (0xFF & 0x0F = 0x0F)
+
+a &= 7
+println(a)  // 7 (0x0F & 0x07 = 0x07)
+
+// Bitwise OR assignment
+var b = 0
+b |= 1
+println(b)  // 1
+
+b |= 2
+println(b)  // 3
+
+b |= 4
+println(b)  // 7
+
+// Bitwise XOR assignment
+var c = 15
+c ^= 5
+println(c)  // 10 (0x0F ^ 0x05 = 0x0A)
+
+c ^= 10
+println(c)  // 0 (0x0A ^ 0x0A = 0x00)
+
+// Shift left assignment
+var s = 1
+s <<= 1
+println(s)  // 2
+
+s <<= 2
+println(s)  // 8
+
+s <<= 3
+println(s)  // 64
+
+// Shift right assignment
+var r = 64
+r >>= 1
+println(r)  // 32
+
+r >>= 2
+println(r)  // 8
+
+r >>= 3
+println(r)  // 1
+
+println("=== Compound Assignment in Loops ===")
+
+// Sum using +=
+var sum = 0
+for i in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] {
+    sum += i
+}
+println(sum)  // 55
+
+// Product using *=
+var product = 1
+for i in [1, 2, 3, 4, 5] {
+    product *= i
+}
+println(product)  // 120
+
+// Bitwise OR accumulator
+var flags = 0
+for bit in [1, 2, 4, 8] {
+    flags |= bit
+}
+println(flags)  // 15
+
+println("=== Compound Assignment with Expressions ===")
+
+// Compound with expression on right side
+var v = 10
+v += 2 * 3
+println(v)  // 16 (10 + 6)
+
+v -= 4 + 2
+println(v)  // 10 (16 - 6)
+
+v *= 1 + 1
+println(v)  // 20 (10 * 2)
+
+v /= 10 / 5
+println(v)  // 10 (20 / 2)
+
+println("=== Chained Compound Assignments ===")
+
+var w = 0
+w += 10
+w += 20
+w += 30
+println(w)  // 60
+
+w -= 5
+w -= 5
+w -= 5
+println(w)  // 45
+
+w *= 2
+println(w)  // 90
+
+w /= 3
+println(w)  // 30
+
+println("=== All Compound Assignment Tests Passed ===")

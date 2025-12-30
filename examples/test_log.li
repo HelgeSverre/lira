@@ -1,0 +1,99 @@
+// Log Module Tests
+// @expect-contains: [INFO]
+// @expect-contains: [WARN]
+// @expect-contains: [ERROR]
+// @expect-contains: timing test passed
+// @expect-contains: assertion test passed
+// @expect-contains: structured logging test passed
+// @expect-contains: level filtering test passed
+
+import std.log
+
+println("=== Log Module Tests ===")
+
+// Test basic logging (always prints)
+debug("This is a debug message")
+info("This is an info message")
+warn("This is a warning message")
+error("This is an error message")
+fatal("This is a fatal message")
+
+// Test level filtering with log_* functions
+println("")
+println("--- Level Filtering Test ---")
+// When current_level is 2 (WARN), only WARN and above should print
+log_debug(2, "This debug should NOT appear")
+log_info(2, "This info should NOT appear")
+log_warn(2, "This warning SHOULD appear")
+log_error(2, "This error SHOULD appear")
+println("level filtering test passed")
+
+// Test structured logging with key-value pairs
+println("")
+println("--- Structured Logging Test ---")
+log_kv(1, "User action", "user_id", "123")
+log_kv2(1, "Request", "method", "GET", "path", "/api/users")
+log_kv3(0, "Connection", "host", "localhost", "port", "8080", "protocol", "http")
+
+// Test convenience key-value functions
+debug_kv("Debug event", "key", "value")
+info_kv("Info event", "status", "ok")
+warn_kv("Warning event", "retries", "3")
+error_kv("Error event", "code", "500")
+println("structured logging test passed")
+
+// Test timing
+println("")
+println("--- Timing Test ---")
+let start = time_ms()
+// Do some work (simple loop)
+var counter = 0
+while counter < 1000 {
+    counter = counter + 1
+}
+log_timing("Loop operation", start)
+println("timing test passed")
+
+// Test assertions
+println("")
+println("--- Assertion Test ---")
+assert_true(1 == 1, "Basic equality")
+assert_true(2 + 2 == 4, "Math works")
+assert_equal(2 + 2, 4, "Math check")
+assert_equal_str("hello", "hello", "String equality")
+
+// Test assertion failure logging (will log error but continue)
+assert_true(false, "This assertion should fail and log error")
+assert_equal(1, 2, "This equality should fail and log error")
+println("assertion test passed")
+
+// Test generic log function with levels
+println("")
+println("--- Generic Log Test ---")
+log(0, "Generic debug")
+log(1, "Generic info")
+log(2, "Generic warn")
+log(3, "Generic error")
+log(4, "Generic fatal")
+
+// Test level name utilities
+println("")
+println("--- Level Name Test ---")
+println("Level 0 name: " + level_name(0))
+println("Level 1 name: " + level_name(1))
+println("Level 2 name: " + level_name(2))
+println("Level 3 name: " + level_name(3))
+println("Level 4 name: " + level_name(4))
+
+// Test parsing level names
+println("Parse 'debug': " + parse_level("debug"))
+println("Parse 'INFO': " + parse_level("INFO"))
+println("Parse 'warning': " + parse_level("warning"))
+println("Parse 'ERROR': " + parse_level("ERROR"))
+println("Parse 'unknown': " + parse_level("unknown"))
+
+// Test timing with level
+log_timing_level(0, "Debug timing", start)
+
+println("")
+println("=== All Log Tests Passed ===")

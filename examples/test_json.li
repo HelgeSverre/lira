@@ -1,0 +1,93 @@
+// JSON Module Tests
+// @expect-contains: parse int: 42
+// @expect-contains: parse string: hello
+// @expect-contains: parse bool: true
+// @expect-contains: parse null: null
+// @expect-contains: parse array length: 3
+// @expect-contains: parse object name: John
+// @expect-contains: stringify object
+// @expect-contains: roundtrip passed
+// @expect-contains: nested access: world
+
+println("=== JSON Module Tests ===")
+
+// Test parsing primitives
+let int_val = json_parse("42")
+println("parse int: " + int_val)
+
+let str_val = json_parse("\"hello\"")
+println("parse string: " + str_val)
+
+let bool_val = json_parse("true")
+println("parse bool: " + bool_val)
+
+let null_val = json_parse("null")
+println("parse null: " + null_val)
+
+// Test parsing array
+let arr = json_parse("[1, 2, 3]")
+println("parse array length: " + len(arr))
+
+// Test parsing object
+let obj = json_parse("{\"name\": \"John\", \"age\": 30}")
+println("parse object name: " + obj["name"])
+
+// Test stringify - use a parsed object since anonymous literals are not directly supported
+let data = json_parse("{\"x\": 1}")
+let data_str = json_stringify(data)
+println("stringify object: " + data_str)
+
+// Test roundtrip
+let original = "{\"a\":1,\"b\":\"test\"}"
+let parsed = json_parse(original)
+let stringified = json_stringify(parsed)
+let reparsed = json_parse(stringified)
+if reparsed["a"] == 1 {
+    println("roundtrip passed")
+}
+
+// Test nested structures
+let nested_json = "{\"outer\": {\"inner\": \"world\"}}"
+let nested = json_parse(nested_json)
+let inner_val = nested["outer"]["inner"]
+println("nested access: " + inner_val)
+
+// Test array in object
+let complex = json_parse("{\"items\": [10, 20, 30]}")
+let items = complex["items"]
+println("array in object first: " + items[0])
+
+// Test pretty printing - compare lengths
+let pretty_data = json_parse("{\"name\": \"test\", \"count\": 5}")
+let pretty = json_pretty(pretty_data)
+let compact = json_stringify(pretty_data)
+if len(pretty) > len(compact) {
+    println("pretty printing works")
+}
+
+// Test float parsing
+let float_val = json_parse("3.14159")
+println("parse float: " + float_val)
+
+// Test negative numbers
+let neg_val = json_parse("-42")
+println("parse negative: " + neg_val)
+
+// Test boolean false
+let false_val = json_parse("false")
+println("parse false: " + false_val)
+
+// Test empty array
+let empty_arr = json_parse("[]")
+println("empty array length: " + len(empty_arr))
+
+// Test empty object
+let empty_obj = json_parse("{}")
+let empty_str = json_stringify(empty_obj)
+println("empty object: " + empty_str)
+
+// Test array of objects
+let arr_of_obj = json_parse("[{\"a\":1},{\"a\":2}]")
+println("array of objects first a: " + arr_of_obj[0]["a"])
+
+println("=== All JSON Tests Passed ===")

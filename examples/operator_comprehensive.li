@@ -1,0 +1,239 @@
+// Comprehensive Operator Tests
+// Tests ALL operators with various edge cases
+
+println("=== Arithmetic Operators ===")
+
+// Addition
+println(1 + 1)        // 2
+println(0 + 0)        // 0
+println(-1 + 1)       // 0
+println(-1 + -1)      // -2
+println(100 + 200)    // 300
+
+// Subtraction
+println(5 - 3)        // 2
+println(3 - 5)        // -2
+println(0 - 0)        // 0
+println(-5 - -3)      // -2
+println(100 - 200)    // -100
+
+// Multiplication
+println(3 * 4)        // 12
+println(0 * 100)      // 0
+println(-3 * 4)       // -12
+println(-3 * -4)      // 12
+println(1 * 1)        // 1
+
+// Division
+println(10 / 2)       // 5
+println(10 / 3)       // 3 (integer division)
+println(-10 / 3)      // -3
+println(10 / -3)      // -3
+println(1 / 1)        // 1
+
+// Modulo
+println(10 % 3)       // 1
+println(10 % 5)       // 0
+println(-10 % 3)      // -1
+println(10 % -3)      // 1
+println(0 % 5)        // 0
+
+println("=== Comparison Operators ===")
+
+// Equal
+println(5 == 5)       // true
+println(5 == 6)       // false
+println(-5 == -5)     // true
+println(0 == 0)       // true
+
+// Not Equal
+println(5 != 6)       // true
+println(5 != 5)       // false
+println(-5 != 5)      // true
+
+// Less Than
+println(3 < 5)        // true
+println(5 < 3)        // false
+println(5 < 5)        // false
+println(-5 < -3)      // true
+println(-5 < 0)       // true
+
+// Less Than or Equal
+println(3 <= 5)       // true
+println(5 <= 5)       // true
+println(6 <= 5)       // false
+println(-5 <= -5)     // true
+
+// Greater Than
+println(5 > 3)        // true
+println(3 > 5)        // false
+println(5 > 5)        // false
+println(-3 > -5)      // true
+println(0 > -5)       // true
+
+// Greater Than or Equal
+println(5 >= 3)       // true
+println(5 >= 5)       // true
+println(3 >= 5)       // false
+println(-5 >= -5)     // true
+
+println("=== Logical Operators ===")
+
+// Logical AND
+println(true && true)   // true
+println(true && false)  // false
+println(false && true)  // false
+println(false && false) // false
+
+// Logical OR
+println(true || true)   // true
+println(true || false)  // true
+println(false || true)  // true
+println(false || false) // false
+
+// Logical NOT
+println(!true)          // false
+println(!false)         // true
+println(!!true)         // true
+println(!!false)        // false
+
+// Complex logical expressions
+println((5 > 3) && (2 < 4))   // true && true = true
+println((5 < 3) || (2 < 4))   // false || true = true
+println(!((5 > 3) && (2 > 4))) // !(true && false) = !false = true
+
+println("=== Bitwise Operators ===")
+
+// Bitwise AND
+println(12 & 10)      // 8 (1100 & 1010 = 1000)
+println(255 & 15)     // 15
+println(0 & 255)      // 0
+println(-1 & 255)     // 255
+
+// Bitwise OR
+println(12 | 10)      // 14 (1100 | 1010 = 1110)
+println(0 | 0)        // 0
+println(1 | 2)        // 3
+println(4 | 8)        // 12
+
+// Bitwise XOR
+println(12 ^ 10)      // 6 (1100 ^ 1010 = 0110)
+println(5 ^ 5)        // 0
+println(0 ^ 255)      // 255
+println(255 ^ 255)    // 0
+
+// Bitwise NOT
+println(~0)           // -1
+println(~(-1))        // 0
+println(~1)           // -2
+println(~255)         // -256
+
+// Shift Left
+println(1 << 0)       // 1
+println(1 << 1)       // 2
+println(1 << 4)       // 16
+println(5 << 2)       // 20
+
+// Shift Right (arithmetic)
+println(16 >> 1)      // 8
+println(16 >> 2)      // 4
+println(16 >> 4)      // 1
+println(-16 >> 1)     // -8 (sign preserved)
+
+// Unsigned Shift Right
+println(16 >>> 1)     // 8
+println(16 >>> 2)     // 4
+// Note: -16 >>> 1 would give large positive number
+
+println("=== Operator Precedence ===")
+
+// Multiplication before addition
+println(2 + 3 * 4)        // 14 (not 20)
+println(10 - 2 * 3)       // 4 (not 24)
+
+// Division before subtraction
+println(20 - 10 / 2)      // 15 (not 5)
+println(100 / 10 - 5)     // 5 (not 20)
+
+// Parentheses override precedence
+println((2 + 3) * 4)      // 20
+println((10 - 2) * 3)     // 24
+println(20 / (10 - 5))    // 4
+println((100 - 50) / 5)   // 10
+
+// Comparison before logical
+println(5 > 3 && 2 < 4)   // true
+println(5 < 3 || 2 < 4)   // true
+
+// Complex expression
+println(1 + 2 * 3 - 4 / 2 + 5 % 3)  // 1 + 6 - 2 + 2 = 7
+
+println("=== Unary Operators ===")
+
+// Unary minus
+let a = 5
+println(-a)           // -5
+println(-(-a))        // 5
+
+// Prefix increment/decrement
+var x = 10
+println(++x)          // 11 (x is now 11)
+println(x)            // 11
+println(--x)          // 10 (x is now 10)
+println(x)            // 10
+
+// Postfix increment/decrement
+var y = 20
+println(y++)          // 20 (returns old value, y is now 21)
+println(y)            // 21
+println(y--)          // 21 (returns old value, y is now 20)
+println(y)            // 20
+
+// Logical not on comparisons
+println(!(5 > 3))     // false
+println(!(5 < 3))     // true
+
+// Bitwise not
+println(~(~5))        // 5
+
+println("=== String Operators ===")
+
+// String concatenation
+println("Hello" + " " + "World")  // Hello World
+println("" + "test")              // test
+println("test" + "")              // test
+
+// String with numbers
+println("Value: " + 42)           // Value: 42
+println("Pi: " + 3.14)            // Pi: 3.14
+println("Flag: " + true)          // Flag: true
+
+// String comparison
+println("apple" == "apple")       // true
+println("apple" == "banana")      // false
+println("apple" != "banana")      // true
+
+println("=== Mixed Type Operations ===")
+
+// Int and Float
+let i = 10
+let f = 3.5
+println(i + f)    // 13.5
+println(i - f)    // 6.5
+println(i * f)    // 35.0
+println(i / f)    // ~2.857
+
+// Float comparisons
+println(3.14 > 3.0)   // true
+println(3.14 < 4.0)   // true
+println(3.14 == 3.14) // true
+
+println("=== Operator Associativity ===")
+
+// Left-to-right for most operators
+println(100 - 50 - 20)    // 30 (not 70)
+println(100 / 10 / 2)     // 5 (not 20)
+
+// Assignment is right-to-left (tested in compound_assign.li)
+
+println("=== All Operator Tests Passed ===")

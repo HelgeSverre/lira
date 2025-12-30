@@ -1,0 +1,36 @@
+// Test if expressions (if used as expression, not statement)
+// @expect: positive
+// @expect: 10
+// @expect: even
+// @expect: large
+
+fn main() {
+    // If expression returning value
+    let x = 5
+    let sign = if x > 0 { "positive" } else { "non-positive" }
+    println(sign)
+
+    // Nested if expression
+    let a = 10
+    let b = 20
+    let max = if a > b { a } else { b }
+    println(max)
+
+    // If expression with multiple conditions
+    let n = 4
+    let parity = if n % 2 == 0 { "even" } else { "odd" }
+    println(parity)
+
+    // Chained if-else expression
+    let value = 100
+    let category = if value < 10 {
+        "small"
+    } else if value < 50 {
+        "medium"
+    } else {
+        "large"
+    }
+    println(category)
+}
+
+main()

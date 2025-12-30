@@ -1,0 +1,95 @@
+// Null Value Tests
+// Tests null values and null comparisons
+
+println("=== Null Basics ===")
+
+// Null literal
+let n = null
+println(n)  // null
+
+// Null in comparisons
+println(null == null)   // true
+println(null != null)   // false
+
+// Check for null explicitly
+let maybe_null = null
+if maybe_null == null {
+    println("value is null")
+} else {
+    println("value is not null")
+}
+
+println("=== Null in Pattern Matching ===")
+
+// Match with null-like patterns (using 0 as sentinel)
+fn describe_value(x: int) -> string {
+    match x {
+        0 => "zero (null-like)",
+        1 => "one",
+        _ => "other"
+    }
+}
+
+println(describe_value(0))   // zero (null-like)
+println(describe_value(1))   // one
+println(describe_value(42))  // other
+
+println("=== Null Comparison Patterns ===")
+
+// Comparing values to null
+let maybe1 = null
+let maybe2 = 42
+
+if maybe1 == null {
+    println("maybe1 is null")
+}
+
+// The practical pattern - use 0 or empty as sentinel
+fn safe_divide(a: int, b: int) -> int {
+    if b == 0 {
+        return 0  // Return 0 for division by zero
+    }
+    return a / b
+}
+
+println(safe_divide(10, 2))  // 5
+println(safe_divide(10, 0))  // 0 (safe!)
+
+println("=== Null Coalescing ===")
+
+// Null coalescing operator (??)
+let val1 = null ?? 42
+println(val1)  // 42 (null was replaced)
+
+let val2 = 100 ?? 42
+println(val2)  // 100 (non-null value kept)
+
+// Chained null coalescing
+let a = null
+let b = null
+let c = 30
+let result = a ?? b ?? c
+println(result)  // 30
+
+// Null coalescing with expressions
+let x = null ?? (10 + 20)
+println(x)  // 30
+
+// Null coalescing preserves non-null values
+let y = 5 ?? 999
+println(y)  // 5
+
+println("=== Null Boolean Tests ===")
+
+// Boolean operations (type checker requires bool)
+let t = true
+let f = false
+
+println(t && t)   // true
+println(t && f)   // false
+println(f || t)   // true
+println(f || f)   // false
+println(!t)       // false
+println(!f)       // true
+
+println("=== All Null Tests Passed ===")

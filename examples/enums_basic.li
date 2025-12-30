@@ -1,0 +1,47 @@
+// Enum Tests
+// Tests enum definitions and variant access
+
+println("=== Simple Enum Definition ===")
+
+// Simple enum (C-style, no data)
+enum Color {
+    Red,
+    Green,
+    Blue
+}
+
+// Create enum variants using :: syntax
+let red = Color::Red
+let green = Color::Green
+let blue = Color::Blue
+
+println("Created Color variants")
+
+// Access enum info via __enum and __variant fields
+println("red.__enum: " + red.__enum)       // Color
+println("red.__variant: " + red.__variant) // Red
+println("green.__variant: " + green.__variant) // Green
+println("blue.__variant: " + blue.__variant)   // Blue
+
+println("=== Status Enum ===")
+
+enum Status {
+    Active,
+    Inactive,
+    Pending
+}
+
+let s = Status::Active
+println("Status: " + s.__variant) // Active
+
+println("=== Comparison ===")
+
+// Compare by variant name
+let c1 = Color::Red
+let c2 = Color::Red
+let c3 = Color::Blue
+
+println("c1.__variant == c2.__variant: " + (c1.__variant == c2.__variant)) // true
+println("c1.__variant == c3.__variant: " + (c1.__variant == c3.__variant)) // false
+
+println("=== All Enum Tests Passed ===")

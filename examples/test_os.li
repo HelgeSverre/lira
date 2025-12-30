@@ -1,0 +1,152 @@
+// OS Module Tests
+// Tests for the std.os module
+// @expect-contains: getcwd passed
+// @expect-contains: mkdir passed
+// @expect-contains: is_dir passed
+// @expect-contains: listdir passed
+// @expect-contains: cleanup passed
+
+import std.os
+import std.fs
+
+println("=== OS Module Tests ===")
+
+// Test getcwd
+let cwd = getcwd()
+if len(cwd) > 0 {
+    println("getcwd passed")
+    println("cwd: " + cwd)
+} else {
+    println("getcwd FAILED")
+}
+
+// Test mkdir
+let timestamp = time_ms()
+let test_dir = "/tmp/li_os_test_" + timestamp
+if mkdir(test_dir) {
+    println("mkdir passed")
+} else {
+    println("mkdir FAILED")
+}
+
+// Test is_dir
+if is_dir(test_dir) {
+    println("is_dir passed")
+} else {
+    println("is_dir FAILED")
+}
+
+// Test that it's not a file
+if !is_file(test_dir) {
+    println("is_file (dir check) passed")
+} else {
+    println("is_file (dir check) FAILED")
+}
+
+// Test creating a file in the directory
+let test_file = test_dir + "/test.txt"
+write_file(test_file, "hello from Lira")
+
+// Test is_file
+if is_file(test_file) {
+    println("is_file passed")
+} else {
+    println("is_file FAILED")
+}
+
+// Test listdir
+let entries = listdir(test_dir)
+if len(entries) > 0 {
+    println("listdir passed")
+    println("entries: " + len(entries))
+} else {
+    println("listdir FAILED")
+}
+
+// Test copy
+let copy_file = test_dir + "/test_copy.txt"
+if copy(test_file, copy_file) {
+    println("copy passed")
+} else {
+    println("copy FAILED")
+}
+
+// Verify copy exists
+if is_file(copy_file) {
+    println("copy verification passed")
+} else {
+    println("copy verification FAILED")
+}
+
+// Test rename
+let renamed_file = test_dir + "/renamed.txt"
+if rename(copy_file, renamed_file) {
+    println("rename passed")
+} else {
+    println("rename FAILED")
+}
+
+// Verify rename worked
+if is_file(renamed_file) && !is_file(copy_file) {
+    println("rename verification passed")
+} else {
+    println("rename verification FAILED")
+}
+
+// Test remove (delete files)
+remove(test_file)
+remove(renamed_file)
+
+// Test rmdir (should work now that directory is empty)
+if rmdir(test_dir) {
+    println("cleanup passed")
+} else {
+    println("cleanup FAILED (rmdir)")
+}
+
+// Verify cleanup
+if !is_dir(test_dir) {
+    println("cleanup verification passed")
+} else {
+    println("cleanup verification FAILED")
+}
+
+// Test mkdir_all with nested directories
+let nested_dir = "/tmp/li_os_nested_" + timestamp + "/a/b/c"
+if mkdir_all(nested_dir) {
+    println("mkdir_all passed")
+} else {
+    println("mkdir_all FAILED")
+}
+
+// Verify nested directory was created
+if is_dir(nested_dir) {
+    println("mkdir_all verification passed")
+} else {
+    println("mkdir_all verification FAILED")
+}
+
+// Test remove_all (recursive delete)
+let nested_root = "/tmp/li_os_nested_" + timestamp
+if remove_all(nested_root) {
+    println("remove_all passed")
+} else {
+    println("remove_all FAILED")
+}
+
+// Verify remove_all worked
+if !is_dir(nested_root) {
+    println("remove_all verification passed")
+} else {
+    println("remove_all verification FAILED")
+}
+
+// Test exists helper from stdlib
+let test_exists_dir = "/tmp"
+if exists(test_exists_dir) {
+    println("exists passed")
+} else {
+    println("exists FAILED")
+}
+
+println("=== All OS Tests Passed ===")

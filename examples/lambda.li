@@ -1,0 +1,85 @@
+// Lambda Expression Tests
+// Tests anonymous functions with closures
+
+println("=== Basic Lambdas ===")
+
+// Simple lambda
+let double = |x: int| x * 2
+println(double(5))   // 10
+println(double(21))  // 42
+
+// Lambda with multiple parameters
+let add = |a: int, b: int| a + b
+println(add(3, 4))   // 7
+
+// Empty parameter lambda
+let get_ten = || 10
+println(get_ten())   // 10
+
+println("=== Lambda with Expressions ===")
+
+// Lambda with complex expression body
+let square = |x: int| x * x
+println(square(4))   // 16
+println(square(7))   // 49
+
+// Lambda stored and called multiple times
+let increment = |n: int| n + 1
+println(increment(0))  // 1
+println(increment(increment(0)))  // 2
+println(increment(increment(increment(0))))  // 3
+
+// Immediately invoked lambda
+let result = (|x: int| x * x)(4)
+println(result)  // 16
+
+println("=== Higher-Order Functions ===")
+
+// Function that takes a lambda as parameter
+fn apply_twice(f: fn(int) -> int, x: int) -> int {
+    return f(f(x))
+}
+
+println(apply_twice(double, 3))  // 12 (3 * 2 * 2)
+println(apply_twice(square, 2))  // 16 (2^2=4, 4^2=16)
+
+// Lambda as a function argument
+println(apply_twice(|x: int| x + 10, 0))  // 20 (0+10=10, 10+10=20)
+
+println("=== Closures (Captured Variables) ===")
+
+// Function that returns a closure capturing its parameter
+fn make_adder(n: int) -> fn(int) -> int {
+    return |x: int| x + n
+}
+
+let add5 = make_adder(5)
+let add10 = make_adder(10)
+
+println(add5(3))   // 8
+println(add5(7))   // 12
+println(add10(3))  // 13
+println(add10(7))  // 17
+
+// Multiple captured variables
+fn make_linear(a: int, b: int) -> fn(int) -> int {
+    return |x: int| a * x + b
+}
+
+let f = make_linear(2, 3)  // f(x) = 2x + 3
+println(f(0))   // 3
+println(f(5))   // 13
+println(f(10))  // 23
+
+// Nested closures
+fn make_multiplier(n: int) -> fn(int) -> int {
+    return |x: int| x * n
+}
+
+let times3 = make_multiplier(3)
+let times7 = make_multiplier(7)
+
+println(times3(4))   // 12
+println(times7(4))   // 28
+
+println("=== All Lambda Tests Passed ===")

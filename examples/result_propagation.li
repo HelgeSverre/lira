@@ -1,0 +1,33 @@
+// Test Result type with ? operator
+// @expect: 100
+// @expect: error: division by zero
+
+fn divide(a: int, b: int) -> Result<int, string> {
+    if b == 0 {
+        return Result::Err("division by zero")
+    }
+    return Result::Ok(a / b)
+}
+
+fn calculate(x: int, y: int) -> Result<int, string> {
+    let result = divide(x, y)?
+    return Result::Ok(result * 10)
+}
+
+fn main() {
+    // Test successful case
+    let r1 = calculate(100, 10)
+    match r1 {
+        Result::Ok(v) => println(v)
+        Result::Err(e) => println("error: " + e)
+    }
+
+    // Test error propagation
+    let r2 = calculate(100, 0)
+    match r2 {
+        Result::Ok(v) => println(v)
+        Result::Err(e) => println("error: " + e)
+    }
+}
+
+main()

@@ -1,0 +1,17 @@
+// Fibonacci Sequence
+// Demonstrates recursion and functions
+
+fn fib(n: int) -> int {
+    if n <= 1 {
+        return n
+    }
+    return fib(n - 1) + fib(n - 2)
+}
+
+// Print first 15 fibonacci numbers
+var i = 0
+while i < 15 {
+    let result = fib(i)
+    println(result)
+    i = i + 1
+}

@@ -1,0 +1,84 @@
+// File I/O Tests
+// Tests file operations using host primitives
+
+println("=== File I/O Tests ===")
+
+// Test file_exists
+println("Testing file_exists...")
+let exists = file_exists("/tmp/test_li_file.txt")
+println("File exists before write: " + exists)  // false
+
+// Test file_open (write mode = 1)
+println("Testing file_open (write)...")
+let fd = file_open("/tmp/test_li_file.txt", 1)
+println("File descriptor: " + fd)  // Should be >= 10
+
+// Test file_write
+println("Testing file_write...")
+let bytes = file_write(fd, "Hello from Lira!\nThis is line 2.\n")
+println("Bytes written: " + bytes)  // 37
+
+// Test file_close
+println("Testing file_close...")
+let closed = file_close(fd)
+println("File closed: " + closed)  // true
+
+// Test file_exists after write
+let exists2 = file_exists("/tmp/test_li_file.txt")
+println("File exists after write: " + exists2)  // true
+
+// Test file_size
+println("Testing file_size...")
+let size = file_size("/tmp/test_li_file.txt")
+println("File size: " + size + " bytes")  // 37
+
+// Test file_open (read mode = 0)
+println("Testing file_open (read)...")
+let fd2 = file_open("/tmp/test_li_file.txt", 0)
+println("Read file descriptor: " + fd2)
+
+// Test file_read
+println("Testing file_read...")
+let content = file_read(fd2, 100)
+println("Content read: " + content)
+
+file_close(fd2)
+
+println("=== Environment Tests ===")
+
+// Test env_get
+println("Testing env_get...")
+let home = env_get("HOME")
+if home != null {
+    println("HOME: " + home)
+} else {
+    println("HOME not set")
+}
+
+let missing = env_get("NONEXISTENT_VAR_12345")
+if missing == null {
+    println("Missing var is null: true")
+} else {
+    println("Missing var is null: false")
+}
+
+// Test env_args
+println("Testing env_args...")
+let args = env_args()
+println("Number of args: " + len(args))
+
+println("=== Time Tests ===")
+
+// Test time_ms
+println("Testing time_ms...")
+let t1 = time_ms()
+println("Current time (ms): " + t1)
+
+// Test sleep
+println("Testing sleep (100ms)...")
+sleep(100)
+let t2 = time_ms()
+let elapsed = t2 - t1
+println("Elapsed time: " + elapsed + " ms")
+
+println("=== All File I/O Tests Passed ===")

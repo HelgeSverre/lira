@@ -1,0 +1,32 @@
+// Test break and continue statements
+// @expect: 0
+// @expect: 2
+// @expect: 4
+// @expect: 6
+// @expect: 8
+// @expect: found 5
+
+fn main() {
+    // Continue to skip odd numbers
+    var i = 0
+    while i < 10 {
+        if i % 2 != 0 {
+            i = i + 1
+            continue
+        }
+        println(i)
+        i = i + 1
+    }
+
+    // Break when found
+    var j = 0
+    while j < 100 {
+        if j == 5 {
+            println("found " + j)
+            break
+        }
+        j = j + 1
+    }
+}
+
+main()

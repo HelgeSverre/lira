@@ -1,0 +1,43 @@
+// Bitwise Operations Example
+// Demonstrates AND, OR, XOR, NOT, and shift operations
+
+let a = 0b1100  // 12
+let b = 0b1010  // 10
+
+println("a = 12 (0b1100)")
+println("b = 10 (0b1010)")
+
+// Bitwise AND
+let and_result = a & b  // 0b1000 = 8
+println("a & b =")
+println(and_result)
+
+// Bitwise OR
+let or_result = a | b  // 0b1110 = 14
+println("a | b =")
+println(or_result)
+
+// Bitwise XOR
+let xor_result = a ^ b  // 0b0110 = 6
+println("a ^ b =")
+println(xor_result)
+
+// Bitwise NOT
+let not_result = ~a  // Inverts all bits
+println("~a =")
+println(not_result)
+
+// Shift left
+let shl_result = a << 2  // 12 << 2 = 48
+println("a << 2 =")
+println(shl_result)
+
+// Shift right
+let shr_result = a >> 1  // 12 >> 1 = 6
+println("a >> 1 =")
+println(shr_result)
+
+// Combining operations
+let combined = (a & b) | (a ^ b)  // 8 | 6 = 14
+println("(a & b) | (a ^ b) =")
+println(combined)

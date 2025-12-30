@@ -1,0 +1,25 @@
+// Array Type Annotation Tests
+// Tests [T] syntax in function parameters
+
+println("=== Array Type Parameters ===")
+
+fn sum_array(arr: [int]) -> int {
+    var total = 0
+    for item in arr {
+        total = total + item
+    }
+    return total
+}
+
+let nums = [1, 2, 3, 4, 5]
+let s = sum_array(nums)
+println("Sum: " + s)
+
+fn count_items(arr: [string]) -> int {
+    return len(arr)
+}
+
+let words = ["a", "b", "c"]
+println("Count: " + count_items(words))
+
+println("=== Done ===")

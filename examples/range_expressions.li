@@ -1,0 +1,21 @@
+// Range Expression Tests
+// Tests range creation and access
+// @expect-contains: range start: 1
+// @expect-contains: range end: 10
+// @expect-contains: inclusive: false
+// @expect-contains: inclusive: true
+
+println("=== Range Expressions ===")
+
+// Exclusive range (1..10 means 1 to 9)
+let r = 1..10
+println("range start: " + r.start)
+println("range end: " + r.end)
+println("inclusive: " + r.inclusive)
+
+// Inclusive range (1..=10 means 1 to 10)
+let ri = 1..=10
+println("inclusive range end: " + ri.end)
+println("inclusive: " + ri.inclusive)
+
+println("=== All Range Tests Passed ===")

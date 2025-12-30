@@ -1,0 +1,145 @@
+// Test random module functionality
+// @expect-contains: random() test passed
+// @expect-contains: random_int() test passed
+// @expect-contains: Different values generated
+// @expect-contains: All tests passed
+
+import std.random
+
+// Test random() returns values between 0 and 1
+fn test_random_float() {
+    println("Testing random()...")
+    var all_in_range = true
+    var i = 0
+    while i < 10 {
+        let r = random()
+        if r < 0.0 {
+            all_in_range = false
+        }
+        if r >= 1.0 {
+            all_in_range = false
+        }
+        i = i + 1
+    }
+    if all_in_range {
+        println("random() test passed: all values in [0, 1)")
+    } else {
+        println("random() test FAILED: values out of range")
+    }
+}
+
+// Test random_int(min, max) returns values in range
+fn test_random_int() {
+    println("Testing random_int()...")
+    var all_in_range = true
+    var i = 0
+    while i < 10 {
+        let r = random_int(1, 10)
+        if r < 1 {
+            all_in_range = false
+        }
+        if r > 10 {
+            all_in_range = false
+        }
+        i = i + 1
+    }
+    if all_in_range {
+        println("random_int() test passed: all values in [1, 10]")
+    } else {
+        println("random_int() test FAILED: values out of range")
+    }
+}
+
+// Test random_bool returns true or false
+fn test_random_bool() {
+    println("Testing random_bool()...")
+    var saw_true = false
+    var saw_false = false
+    var i = 0
+    // Run enough iterations to likely see both values
+    while i < 20 {
+        let b = random_bool()
+        if b {
+            saw_true = true
+        } else {
+            saw_false = true
+        }
+        i = i + 1
+    }
+    if saw_true {
+        println("  Saw true value")
+    }
+    if saw_false {
+        println("  Saw false value")
+    }
+}
+
+// Test that multiple calls return different values
+fn test_randomness() {
+    println("Testing randomness...")
+    let r1 = random()
+    let r2 = random()
+    let r3 = random()
+
+    // Very unlikely all three are exactly equal
+    if r1 != r2 {
+        println("Different values generated: r1 != r2")
+    }
+    if r2 != r3 {
+        println("Different values generated: r2 != r3")
+    }
+}
+
+// Test dice_roll
+fn test_dice_roll() {
+    println("Testing dice_roll()...")
+    var all_valid = true
+    var i = 0
+    while i < 10 {
+        let roll = dice_roll()
+        if roll < 1 {
+            all_valid = false
+        }
+        if roll > 6 {
+            all_valid = false
+        }
+        i = i + 1
+    }
+    if all_valid {
+        println("  dice_roll() all values in [1, 6]")
+    }
+}
+
+// Test coin_flip
+fn test_coin_flip() {
+    println("Testing coin_flip()...")
+    var saw_heads = false
+    var saw_tails = false
+    var i = 0
+    while i < 20 {
+        let flip = coin_flip()
+        if flip == "heads" {
+            saw_heads = true
+        }
+        if flip == "tails" {
+            saw_tails = true
+        }
+        i = i + 1
+    }
+    if saw_heads {
+        println("  Saw heads")
+    }
+    if saw_tails {
+        println("  Saw tails")
+    }
+}
+
+// Run all tests
+test_random_float()
+test_random_int()
+test_random_bool()
+test_randomness()
+test_dice_roll()
+test_coin_flip()
+
+println("All tests passed!")

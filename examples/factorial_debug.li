@@ -1,0 +1,25 @@
+// Factorial debug
+
+fn factorial(n: int) -> int {
+    println("factorial called with n=" + n)
+    if n <= 1 {
+        println("returning 1")
+        return 1
+    }
+    var result = 1
+    var i = 2
+    println("starting loop")
+    while i <= n {
+        println("i=" + i + " result=" + result)
+        result = result * i
+        i = i + 1
+    }
+    println("returning " + result)
+    return result
+}
+
+println("Testing factorial...")
+println("factorial(1):")
+println(factorial(1))
+println("factorial(2):")
+println(factorial(2))

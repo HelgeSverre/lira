@@ -1,0 +1,38 @@
+// Integer Types Example
+// Demonstrates sized integer type annotations
+
+// Signed integers
+let a: int8 = 127
+let b: int16 = 32767
+let c: int32 = 2147483647
+let d: int64 = 9223372036854775807
+
+// Unsigned integers
+let e: uint8 = 255
+let f: uint16 = 65535
+let g: uint32 = 4294967295
+let h: byte = 128  // byte is alias for uint8
+
+// Default int (64-bit signed)
+let i: int = 42
+
+// Type inference still works
+let j = 100  // inferred as int
+
+println("Signed integers:")
+println(a)
+println(b)
+println(c)
+
+println("Unsigned integers:")
+println(e)
+println(f)
+
+println("Default and inferred:")
+println(i)
+println(j)
+
+// Arithmetic works across integer types
+let sum = a + e  // int8 + uint8
+println("Sum of int8 and uint8:")
+println(sum)

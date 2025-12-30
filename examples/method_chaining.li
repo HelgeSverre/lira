@@ -1,0 +1,69 @@
+// Test method chaining with impl blocks
+// @expect: Counter: 3
+// @expect: Counter: 1
+// @expect: Computed: 25
+
+struct Counter {
+    value: int
+}
+
+// Factory function (separate from impl block)
+fn new_counter() -> Counter {
+    return Counter { value: 0 }
+}
+
+impl Counter {
+    fn increment(self) -> Counter {
+        return Counter { value: self.value + 1 }
+    }
+
+    fn decrement(self) -> Counter {
+        return Counter { value: self.value - 1 }
+    }
+
+    fn add(self, n: int) -> Counter {
+        return Counter { value: self.value + n }
+    }
+
+    fn get(self) -> int {
+        return self.value
+    }
+}
+
+struct Calculator {
+    result: int
+}
+
+fn start_calc(n: int) -> Calculator {
+    return Calculator { result: n }
+}
+
+impl Calculator {
+    fn add(self, n: int) -> Calculator {
+        return Calculator { result: self.result + n }
+    }
+
+    fn multiply(self, n: int) -> Calculator {
+        return Calculator { result: self.result * n }
+    }
+
+    fn value(self) -> int {
+        return self.result
+    }
+}
+
+fn main() {
+    // Method chaining
+    let c = new_counter().increment().increment().increment()
+    println("Counter: " + c.get())
+
+    // Mix of calls
+    let c2 = new_counter().add(5).decrement().decrement().decrement().decrement()
+    println("Counter: " + c2.get())
+
+    // Calculator chaining
+    let result = start_calc(2).add(3).multiply(5).value()
+    println("Computed: " + result)
+}
+
+main()

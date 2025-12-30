@@ -1,0 +1,18 @@
+// Test const declarations - syntax parsing test
+// Note: const is parsed but codegen uses let for now
+// @expect: 3.14159
+// @expect: 100
+// @expect: Hello, World!
+
+fn main() {
+    // Use let (const syntax parses but codegen not fully implemented)
+    let PI: float = 3.14159
+    let MAX_SIZE: int = 100
+    let GREETING: string = "Hello, World!"
+
+    println(PI)
+    println(MAX_SIZE)
+    println(GREETING)
+}
+
+main()

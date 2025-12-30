@@ -1,0 +1,52 @@
+// Test interface declarations and implementations
+// @expect: Shape area: 50
+// @expect: Shape area: 78
+
+// Define an interface for shapes
+interface Drawable {
+    fn area() -> int
+    fn perimeter() -> int
+}
+
+// Struct that will implement the interface
+struct Rectangle {
+    width: int,
+    height: int
+}
+
+// Implement methods for Rectangle
+impl Rectangle {
+    fn area(self) -> int {
+        return self.width * self.height
+    }
+
+    fn perimeter(self) -> int {
+        return 2 * (self.width + self.height)
+    }
+}
+
+struct Circle {
+    radius: int
+}
+
+impl Circle {
+    fn area(self) -> int {
+        // Approximate pi * r^2 as 3 * r^2 for integer math
+        return 3 * self.radius * self.radius
+    }
+
+    fn perimeter(self) -> int {
+        // Approximate 2 * pi * r as 6 * r
+        return 6 * self.radius
+    }
+}
+
+fn main() {
+    let rect = Rectangle { width: 10, height: 5 }
+    println("Shape area: " + rect.area())
+
+    let circle = Circle { radius: 5 }
+    println("Shape area: " + circle.area())
+}
+
+main()

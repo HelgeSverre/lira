@@ -1,0 +1,22 @@
+// Import Test
+// Tests the module import system
+
+import std.core
+import std.fs
+
+println("=== Import Test ===")
+
+// Use functions from std.core
+println("abs(-5): " + abs(-5))
+println("min(3, 7): " + min(3, 7))
+println("max(3, 7): " + max(3, 7))
+
+// Use functions from std.fs
+let test_file = "/tmp/import_test.txt"
+let ok = write_file(test_file, "Hello from import test!")
+println("write_file success: " + ok)
+
+let content = read_file(test_file)
+println("read_file: " + content)
+
+println("=== Import Test Passed ===")

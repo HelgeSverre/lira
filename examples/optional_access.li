@@ -1,0 +1,20 @@
+// Optional Access Tests
+// Tests null-safe field access with ?.
+// @expect-contains: name from valid: Alice
+// @expect-contains: name from null: null
+
+println("=== Optional Access (?.) ===")
+
+struct Person {
+    name: string,
+    age: int
+}
+
+let p = Person { name: "Alice", age: 30 }
+println("name from valid: " + p?.name)
+
+// Use null directly with optional access
+let empty = null
+println("name from null: " + empty?.name)
+
+println("=== All Optional Access Tests Passed ===")

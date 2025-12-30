@@ -1,0 +1,22 @@
+// Test string escape sequences
+// @expect: Hello	World
+// @expect: Line 1
+// @expect: Line 2
+// @expect: She said "Hi"
+// @expect: Path: C:\Users
+
+fn main() {
+    // Tab escape
+    println("Hello\tWorld")
+
+    // Newline escape
+    print("Line 1\nLine 2\n")
+
+    // Quote escape
+    println("She said \"Hi\"")
+
+    // Backslash escape
+    println("Path: C:\\Users")
+}
+
+main()

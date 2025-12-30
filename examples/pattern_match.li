@@ -1,0 +1,43 @@
+// Pattern Matching Example
+// Demonstrates match expressions with literal and wildcard patterns
+
+fn grade(score: int) -> string {
+    return match score {
+        100 => "Perfect!",
+        90 => "A",
+        80 => "B",
+        70 => "C",
+        60 => "D",
+        _ => "F"
+    }
+}
+
+// Test literal patterns
+println("Testing literal patterns:")
+println(grade(100))
+println(grade(90))
+println(grade(80))
+println(grade(75))
+println(grade(50))
+
+// Test wildcard
+fn always_zero(x: int) -> int {
+    return match x {
+        _ => 0
+    }
+}
+
+println("Testing wildcard:")
+println(always_zero(42))
+println(always_zero(100))
+
+// Test variable binding in pattern
+fn double_it(x: int) -> int {
+    return match x {
+        n => n * 2
+    }
+}
+
+println("Testing variable binding:")
+println(double_it(5))
+println(double_it(21))

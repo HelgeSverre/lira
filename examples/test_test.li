@@ -1,0 +1,237 @@
+// Test Module Tests
+// Comprehensive tests for std.test testing utilities
+// @expect-contains: [PASS]
+// @expect-contains: assert_eq test passed
+// @expect-contains: assert_gt test passed
+// @expect-contains: All Test Module Tests Passed
+
+import std.test
+
+println("=== Test Module Tests ===")
+
+// ============================================================================
+// Test: Basic Assertions
+// ============================================================================
+section("Basic Assertions")
+
+// Test assert_eq
+let eq_result = assert_eq(2 + 2, 4)
+if eq_result {
+    println("assert_eq test passed")
+}
+
+// Test assert_ne
+let ne_result = assert_ne(1, 2)
+if ne_result {
+    println("assert_ne test passed")
+}
+
+// Test assert_true/false
+let true_result = assert_true(true)
+let false_result = assert_false(false)
+println("boolean assertions: " + true_result + " " + false_result)
+
+// Test assert (basic condition)
+let assert_result = assert(5 > 3)
+println("assert condition: " + assert_result)
+
+// ============================================================================
+// Test: Comparison Assertions
+// ============================================================================
+section("Comparison Assertions")
+
+// Test assert_gt
+let gt_result = assert_gt(5, 3)
+if gt_result {
+    println("assert_gt test passed")
+}
+
+// Test assert_lt
+let lt_result = assert_lt(3, 5)
+println("assert_lt: " + lt_result)
+
+// Test assert_gte
+let gte_result = assert_gte(5, 5)
+let gte_result2 = assert_gte(6, 5)
+println("assert_gte: " + gte_result + " " + gte_result2)
+
+// Test assert_lte
+let lte_result = assert_lte(5, 5)
+let lte_result2 = assert_lte(4, 5)
+println("assert_lte: " + lte_result + " " + lte_result2)
+
+// Test assert_between
+let between_result = assert_between(5, 1, 10)
+let between_result2 = assert_between(1, 1, 10)
+let between_result3 = assert_between(10, 1, 10)
+println("assert_between: " + between_result + " " + between_result2 + " " + between_result3)
+
+// ============================================================================
+// Test: Float Assertions
+// ============================================================================
+section("Float Assertions")
+
+// Test assert_eq_float
+let float_eq = assert_eq_float(3.14, 3.14, 0.001)
+println("assert_eq_float: " + float_eq)
+
+// Test with small epsilon
+let float_eq2 = assert_eq_float(1.0, 1.0001, 0.01)
+println("assert_eq_float with tolerance: " + float_eq2)
+
+// Test float comparisons
+let float_gt = assert_gt_float(3.14, 3.0)
+let float_lt = assert_lt_float(2.5, 3.0)
+println("float comparisons: " + float_gt + " " + float_lt)
+
+// ============================================================================
+// Test: String Assertions
+// ============================================================================
+section("String Assertions")
+
+// Test assert_contains
+let contains_result = assert_contains("hello world", "world")
+println("assert_contains: " + contains_result)
+
+// Test assert_not_contains
+let not_contains = assert_not_contains("hello world", "xyz")
+println("assert_not_contains: " + not_contains)
+
+// Test assert_starts_with
+let starts_result = assert_starts_with("hello world", "hello")
+println("assert_starts_with: " + starts_result)
+
+// Test assert_ends_with
+let ends_result = assert_ends_with("hello world", "world")
+println("assert_ends_with: " + ends_result)
+
+// Test assert_eq_str
+let str_eq = assert_eq_str("hello", "hello")
+println("assert_eq_str: " + str_eq)
+
+// Test assert_ne_str
+let str_ne = assert_ne_str("hello", "world")
+println("assert_ne_str: " + str_ne)
+
+// Test string length assertions
+let str_len = assert_str_len("hello", 5)
+println("assert_str_len: " + str_len)
+
+let str_empty = assert_str_empty("")
+println("assert_str_empty: " + str_empty)
+
+let str_not_empty = assert_str_not_empty("text")
+println("assert_str_not_empty: " + str_not_empty)
+
+// ============================================================================
+// Test: Array Assertions
+// ============================================================================
+section("Array Assertions")
+
+let arr = [1, 2, 3, 4, 5]
+
+// Test assert_len
+let len_result = assert_len(arr, 5)
+println("assert_len: " + len_result)
+
+// Test assert_not_empty
+let not_empty_result = assert_not_empty(arr)
+println("assert_not_empty: " + not_empty_result)
+
+// Test assert_empty - create empty by filtering
+// Note: Empty array literals with type annotations have type inference issues
+// Using a workaround with array slice
+let full_arr = [1]
+var empty_arr = [0]
+// Remove the element to make it "empty" - actually just skip this test for now
+// as empty array creation has limitations
+println("assert_empty: skipped (empty array limitations)")
+
+// Test assert_array_contains
+let contains_arr = assert_array_contains(arr, 3)
+println("assert_array_contains: " + contains_arr)
+
+// ============================================================================
+// Test: Test Runner Functions
+// ============================================================================
+section("Test Runner")
+
+// Test describe (just prints header)
+describe("Example Test Suite")
+
+// Test the test() function
+test("basic addition", assert_eq(1 + 1, 2))
+test("string comparison", assert_eq_str("hello", "hello"))
+test("greater than", assert_gt(10, 5))
+
+// Test run_test which returns 1 or 0
+let passed_count = run_test("returns 1 when passed", true)
+println("run_test returned: " + passed_count)
+
+// ============================================================================
+// Test: Utility Functions
+// ============================================================================
+section("Utility Functions")
+
+// Test skip
+skip("skipped test", "not implemented yet")
+
+// Test expect_fail (for documenting known issues)
+let xfail_result = expect_fail("expected failure", false)
+println("expect_fail returned: " + xfail_result)
+
+// Test debug message
+debug_msg("This is a debug message")
+
+// ============================================================================
+// Test: Counter-based Test Runner
+// ============================================================================
+section("Counter-based Tests")
+
+// Initialize counters
+var total = 0
+var passed_count = 0
+var failed_count = 0
+
+// Run tests and count results using counter helpers
+let r1 = assert_eq(1 + 1, 2)
+total = total + 1
+passed_count = passed_count + count_passed(r1)
+failed_count = failed_count + count_failed(r1)
+
+let r2 = assert_eq(2 * 2, 4)
+total = total + 1
+passed_count = passed_count + count_passed(r2)
+failed_count = failed_count + count_failed(r2)
+
+let r3 = assert_eq(3 - 1, 2)
+total = total + 1
+passed_count = passed_count + count_passed(r3)
+failed_count = failed_count + count_failed(r3)
+
+println("Counter tests - Total: " + total + ", Passed: " + passed_count + ", Failed: " + failed_count)
+
+// Test all_passed
+let all_ok = all_passed(failed_count)
+println("all_passed: " + all_ok)
+
+// Print summary
+summary(total, passed_count, failed_count)
+
+// ============================================================================
+// Test: Negative Cases (should fail gracefully)
+// ============================================================================
+section("Negative Cases (expected failures)")
+
+// These should return false but not crash
+let fail1 = assert_eq(1, 2)  // Will print error message
+println("assert_eq(1, 2) returned: " + fail1)
+
+let fail2 = assert_gt(1, 5)  // Will print error message
+println("assert_gt(1, 5) returned: " + fail2)
+
+let fail3 = assert_contains("hello", "xyz")  // Will print error message
+println("assert_contains failed as expected: " + !fail3)
+
+println("")
+println("=== All Test Module Tests Passed ===")

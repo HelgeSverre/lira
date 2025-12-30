@@ -1,0 +1,39 @@
+// Test ? operator with Optional types
+// @expect: 42
+// @expect: got null
+
+fn get_some() -> int? {
+    return 42
+}
+
+fn get_none() -> int? {
+    return null
+}
+
+fn try_get_some() -> int? {
+    let x = get_some()?
+    return x
+}
+
+fn try_get_none() -> int? {
+    let x = get_none()?
+    return x
+}
+
+fn main() {
+    let result1 = try_get_some()
+    if result1 != null {
+        println(result1)
+    } else {
+        println("got null")
+    }
+
+    let result2 = try_get_none()
+    if result2 != null {
+        println(result2)
+    } else {
+        println("got null")
+    }
+}
+
+main()

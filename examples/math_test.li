@@ -1,0 +1,14 @@
+// Simple math module test
+
+import std.math
+
+println("Testing math module...")
+println("square(5): " + square(5))
+println("cube(3): " + cube(3))
+
+println("Testing factorial...")
+println("factorial(1): " + factorial(1))
+println("factorial(2): " + factorial(2))
+println("factorial(3): " + factorial(3))
+
+println("Done!")

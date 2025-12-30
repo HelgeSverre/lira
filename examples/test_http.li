@@ -1,0 +1,84 @@
+// HTTP Module Tests
+// @expect-contains: http module loaded
+// @expect-contains: is_success test passed
+// @expect-contains: is_client_error test passed
+// @expect-contains: is_server_error test passed
+// @expect-contains: is_redirect test passed
+// @expect-contains: is_error test passed
+// @expect-contains: status check passed
+
+import std.http
+
+println("=== HTTP Module Tests ===")
+println("http module loaded")
+
+// Test status helpers (don't require network)
+if is_success(200) && is_success(201) && is_success(204) && !is_success(404) && !is_success(500) {
+    println("is_success test passed")
+} else {
+    println("is_success test FAILED")
+}
+
+if is_client_error(400) && is_client_error(404) && is_client_error(403) && !is_client_error(200) && !is_client_error(500) {
+    println("is_client_error test passed")
+} else {
+    println("is_client_error test FAILED")
+}
+
+if is_server_error(500) && is_server_error(502) && is_server_error(503) && !is_server_error(200) && !is_server_error(404) {
+    println("is_server_error test passed")
+} else {
+    println("is_server_error test FAILED")
+}
+
+if is_redirect(301) && is_redirect(302) && is_redirect(307) && !is_redirect(200) && !is_redirect(404) {
+    println("is_redirect test passed")
+} else {
+    println("is_redirect test FAILED")
+}
+
+if is_error(400) && is_error(404) && is_error(500) && !is_error(200) && !is_error(301) {
+    println("is_error test passed")
+} else {
+    println("is_error test FAILED")
+}
+
+println("status check passed")
+
+// Network tests (commented out for CI, uncomment to test with network)
+// These tests require internet connectivity and may fail in offline environments
+
+// println("--- Network Tests (may fail without internet) ---")
+//
+// // Test http_get with a reliable endpoint
+// let result = http_get("https://httpbin.org/get")
+// let status = result[0]
+// println("GET status: " + status)
+// if status == 200 {
+//     println("http_get test passed")
+// } else {
+//     println("http_get test failed (status=" + status + ")")
+// }
+//
+// // Test http_post
+// let post_result = http_post("https://httpbin.org/post", "{\"test\": true}", "application/json")
+// let post_status = post_result[0]
+// println("POST status: " + post_status)
+// if post_status == 200 {
+//     println("http_post test passed")
+// } else {
+//     println("http_post test failed")
+// }
+//
+// // Test wrapper functions
+// let body = get("https://httpbin.org/get")
+// if len(body) > 0 {
+//     println("get() wrapper test passed")
+// }
+//
+// let json_body = post_json("https://httpbin.org/post", "{\"hello\": \"world\"}")
+// if len(json_body) > 0 {
+//     println("post_json() wrapper test passed")
+// }
+
+println("=== All HTTP Tests Passed ===")

@@ -1,0 +1,19 @@
+// Test default parameter values in function declarations (parsing only)
+// Note: Default params are parsed but may require explicit args at call site
+// @expect: Hello World
+// @expect: Hi Everyone
+// @expect: Greetings Universe
+
+// Function with default parameter (syntax test)
+fn greet(name: string, greeting: string = "Hello") {
+    println(greeting + " " + name)
+}
+
+fn main() {
+    // All arguments provided
+    greet("World", "Hello")
+    greet("Everyone", "Hi")
+    greet("Universe", "Greetings")
+}
+
+main()

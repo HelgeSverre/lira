@@ -1,0 +1,32 @@
+// Test type alias declarations
+// @expect: 42
+// @expect: hello
+
+// Simple type alias
+type Integer = int
+type Text = string
+
+// Type alias for compound types
+type IntArray = [int]
+type StringPair = (string, string)
+
+// Type alias for optional
+type MaybeInt = int?
+
+// Type alias for function types
+type IntToInt = fn(int) -> int
+
+fn double(x: int) -> int {
+    return x * 2
+}
+
+fn main() {
+    // Use type aliases
+    let num: Integer = 42
+    let text: Text = "hello"
+
+    println(num)
+    println(text)
+}
+
+main()

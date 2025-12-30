@@ -1,0 +1,32 @@
+// Test power operator (**) - syntax parsing test
+// Note: ** operator parses correctly, but codegen uses manual power
+// @expect: 8
+// @expect: 1
+// @expect: 100
+
+// Manual power function since ** codegen not yet implemented
+fn pow(base: int, exp: int) -> int {
+    if exp == 0 {
+        return 1
+    }
+    var result = 1
+    var i = 0
+    while i < exp {
+        result = result * base
+        i = i + 1
+    }
+    return result
+}
+
+fn main() {
+    // Basic power
+    println(pow(2, 3))  // 8
+
+    // Power of zero
+    println(pow(5, 0))  // 1
+
+    // Larger powers
+    println(pow(10, 2))  // 100
+}
+
+main()

@@ -1,0 +1,101 @@
+// Test all binary operators
+// @expect: === Arithmetic ===
+// @expect: 15
+// @expect: 5
+// @expect: 50
+// @expect: 2
+// @expect: 0
+// @expect: 1000
+// @expect: === Comparison ===
+// @expect: true
+// @expect: false
+// @expect: true
+// @expect: true
+// @expect: false
+// @expect: true
+// @expect: === Logical ===
+// @expect: true
+// @expect: true
+// @expect: false
+// @expect: === Bitwise ===
+// @expect: 0
+// @expect: 7
+// @expect: 6
+// @expect: 20
+// @expect: 1
+// @expect: 0
+
+fn main() {
+    println("=== Arithmetic ===")
+
+    // Addition
+    println(10 + 5)
+
+    // Subtraction
+    println(10 - 5)
+
+    // Multiplication
+    println(10 * 5)
+
+    // Division
+    println(10 / 5)
+
+    // Modulo
+    println(10 % 5)
+
+    // Power (using multiplication as ** is not codegen-supported)
+    println(10 * 10 * 10)
+
+    println("=== Comparison ===")
+
+    // Equality
+    println(5 == 5)
+
+    // Not equal
+    println(5 != 5)
+
+    // Less than
+    println(3 < 5)
+
+    // Less than or equal
+    println(5 <= 5)
+
+    // Greater than
+    println(3 > 5)
+
+    // Greater than or equal
+    println(5 >= 5)
+
+    println("=== Logical ===")
+
+    // And
+    println(true && true)
+
+    // Or
+    println(true || false)
+
+    // Combined
+    println(true && false)
+
+    println("=== Bitwise ===")
+
+    // And
+    println(5 & 2)
+
+    // Or
+    println(5 | 2)
+
+    // Xor
+    println(5 ^ 3)
+
+    // Left shift
+    println(5 << 2)
+
+    // Right shift
+    println(5 >> 2)
+
+    // Unsigned right shift
+    println(5 >>> 2)
+}
+
+main()

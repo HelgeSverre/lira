@@ -1,0 +1,8 @@
+// Simple tuple pattern test
+// @expect: a is 1
+
+let pair = (1, 2)
+let result = match pair {
+    (a, b) => a
+}
+println("a is " + result)

@@ -1,0 +1,92 @@
+// Recursion Stress Tests
+// Tests deep recursion and various recursive patterns
+
+println("=== Factorial Recursion ===")
+
+fn factorial(n: int) -> int {
+    if n <= 1 {
+        return 1
+    }
+    return n * factorial(n - 1)
+}
+
+println(factorial(0))   // 1
+println(factorial(1))   // 1
+println(factorial(5))   // 120
+println(factorial(10))  // 3628800
+
+println("=== Fibonacci Recursion ===")
+
+fn fib(n: int) -> int {
+    if n <= 1 {
+        return n
+    }
+    return fib(n - 1) + fib(n - 2)
+}
+
+println(fib(0))   // 0
+println(fib(1))   // 1
+println(fib(10))  // 55
+println(fib(15))  // 610
+
+println("=== Mutual Recursion ===")
+
+// Mutual recursion now works with forward references!
+fn is_even(n: int) -> bool {
+    if n == 0 { return true }
+    return is_odd(n - 1)
+}
+
+fn is_odd(n: int) -> bool {
+    if n == 0 { return false }
+    return is_even(n - 1)
+}
+
+println("is_even(0): " + is_even(0))   // true
+println("is_even(4): " + is_even(4))   // true
+println("is_even(7): " + is_even(7))   // false
+println("is_odd(5): " + is_odd(5))     // true
+
+println("=== GCD Recursion ===")
+
+fn gcd(a: int, b: int) -> int {
+    if b == 0 {
+        return a
+    }
+    return gcd(b, a % b)
+}
+
+println(gcd(48, 18))   // 6
+println(gcd(100, 25))  // 25
+println(gcd(17, 13))   // 1
+
+println("=== Power Recursion ===")
+
+fn power(base: int, exp: int) -> int {
+    if exp == 0 {
+        return 1
+    }
+    return base * power(base, exp - 1)
+}
+
+println(power(2, 0))   // 1
+println(power(2, 10))  // 1024
+println(power(3, 5))   // 243
+
+// NOTE: Array type annotations in function parameters ([int]) not yet supported
+// This would be Phase 7 work: fn sum_array(arr: [int], idx: int) -> int { ... }
+
+println("=== Deep Recursion Test ===")
+
+fn countdown(n: int) -> int {
+    if n <= 0 {
+        return 0
+    }
+    return countdown(n - 1)
+}
+
+// Test reasonably deep recursion
+println(countdown(100))   // 0
+println(countdown(500))   // 0
+
+println("=== All Recursion Tests Passed ===")

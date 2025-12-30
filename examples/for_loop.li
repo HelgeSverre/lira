@@ -1,0 +1,89 @@
+// For-In Loop Tests
+// Tests iteration over arrays
+
+println("=== Basic For-In Loop ===")
+
+// Simple array iteration
+let numbers = [1, 2, 3, 4, 5]
+var sum = 0
+for n in numbers {
+    sum = sum + n
+}
+println(sum)  // 15
+
+// Iterate over empty array (should print nothing)
+let empty = []
+for x in empty {
+    println(x)
+}
+println("after empty")  // after empty
+
+println("=== For-In with Different Types ===")
+
+// Array of strings
+let fruits = ["apple", "banana", "cherry"]
+for fruit in fruits {
+    println(fruit)
+}
+
+// Array of bools
+let flags = [true, false, true]
+for flag in flags {
+    println(flag)
+}
+
+println("=== Nested For Loops ===")
+
+// Nested iteration
+let matrix = [[1, 2], [3, 4], [5, 6]]
+var total = 0
+for row in matrix {
+    for val in row {
+        total = total + val
+    }
+}
+println(total)  // 21 (1+2+3+4+5+6)
+
+println("=== For-In with Expressions ===")
+
+// Inline array expression
+var product = 1
+for n in [2, 3, 4] {
+    product = product * n
+}
+println(product)  // 24
+
+println("=== For-In with Break ===")
+
+// Break from loop
+var found = 0
+for n in [1, 2, 3, 99, 4, 5] {
+    if n == 99 {
+        found = n
+        break
+    }
+}
+println(found)  // 99
+
+println("=== For-In with Continue ===")
+
+// Continue in loop - sum only even numbers
+var even_sum = 0
+for n in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] {
+    if n % 2 != 0 {
+        continue
+    }
+    even_sum = even_sum + n
+}
+println(even_sum)  // 30 (2+4+6+8+10)
+
+println("=== For-In Counter ===")
+
+// Using loop variable to count
+var count = 0
+for i in [1, 1, 1, 1, 1] {
+    count = count + 1
+}
+println(count)  // 5
+
+println("=== All For-In Tests Passed ===")

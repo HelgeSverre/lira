@@ -1,0 +1,40 @@
+// Hash Module Tests
+// @expect-contains: md5 empty: d41d8cd98f00b204e9800998ecf8427e
+// @expect-contains: md5 hello: 5d41402abc4b2a76b9719d911017c592
+// @expect-contains: sha1 hello: aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d
+// @expect-contains: sha256 hello: 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
+// @expect-contains: sha512 starts with: 9b71d224bd62
+
+println("=== Hash Module Tests ===")
+
+// Test MD5
+let md5_empty = md5("")
+println("md5 empty: " + md5_empty)
+
+let md5_hello = md5("hello")
+println("md5 hello: " + md5_hello)
+
+// Test SHA1
+let sha1_hello = sha1("hello")
+println("sha1 hello: " + sha1_hello)
+
+// Test SHA256
+let sha256_hello = sha256("hello")
+println("sha256 hello: " + sha256_hello)
+
+// Test SHA512 (just check prefix due to length)
+let sha512_hello = sha512("hello")
+let sha512_prefix = str_substring(sha512_hello, 0, 12)
+println("sha512 starts with: " + sha512_prefix)
+
+// Test consistency - same input should give same hash
+let h1 = sha256("test")
+let h2 = sha256("test")
+println("consistency: " + (h1 == h2))
+
+// Test different inputs give different hashes
+let ha = sha256("a")
+let hb = sha256("b")
+println("different: " + (ha != hb))
+
+println("=== All Hash Tests Passed ===")

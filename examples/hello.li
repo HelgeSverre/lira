@@ -1,0 +1,5 @@
+// Hello World Example
+// Demonstrates basic output
+
+println("Hello, World!")
+println("Welcome to Lira!")

@@ -1,0 +1,53 @@
+// Pattern Matching with Guards
+// Tests conditional guards on match arms
+
+fn classify_number(n: int) -> string {
+    return match n {
+        0 => "zero",
+        x if x < 0 => "negative",
+        x if x > 100 => "large",
+        x if x % 2 == 0 => "even",
+        _ => "odd"
+    }
+}
+
+println("Testing pattern guards:")
+println(classify_number(0))     // zero
+println(classify_number(-5))    // negative
+println(classify_number(200))   // large
+println(classify_number(42))    // even
+println(classify_number(7))     // odd
+
+// Test with multiple conditions
+fn grade_score(score: int) -> string {
+    return match score {
+        s if s >= 90 => "A",
+        s if s >= 80 => "B",
+        s if s >= 70 => "C",
+        s if s >= 60 => "D",
+        _ => "F"
+    }
+}
+
+println("Testing grade scores:")
+println(grade_score(95))   // A
+println(grade_score(85))   // B
+println(grade_score(75))   // C
+println(grade_score(65))   // D
+println(grade_score(55))   // F
+
+// Test guard with variable binding and computation
+fn fizzbuzz(n: int) -> string {
+    return match n {
+        x if x % 15 == 0 => "FizzBuzz",
+        x if x % 3 == 0 => "Fizz",
+        x if x % 5 == 0 => "Buzz",
+        _ => "number"
+    }
+}
+
+println("Testing FizzBuzz:")
+println(fizzbuzz(15))  // FizzBuzz
+println(fizzbuzz(9))   // Fizz
+println(fizzbuzz(10))  // Buzz
+println(fizzbuzz(7))   // number

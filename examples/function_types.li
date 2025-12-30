@@ -1,0 +1,44 @@
+// Test function types as parameters and return values
+// @expect: 10
+// @expect: 25
+// @expect: 15
+// @expect: 50
+
+// Function that takes a function as parameter
+fn apply(f: fn(int) -> int, x: int) -> int {
+    return f(x)
+}
+
+// Function that takes two functions
+fn compose(f: fn(int) -> int, g: fn(int) -> int, x: int) -> int {
+    return f(g(x))
+}
+
+// Functions to pass around
+fn double(x: int) -> int {
+    return x * 2
+}
+
+fn square(x: int) -> int {
+    return x * x
+}
+
+fn add_five(x: int) -> int {
+    return x + 5
+}
+
+fn main() {
+    // Apply a function
+    println(apply(double, 5))  // 10
+
+    // Apply another function
+    println(apply(square, 5))  // 25
+
+    // Compose functions: add_five(double(5)) = add_five(10) = 15
+    println(compose(add_five, double, 5))
+
+    // Compose functions: double(square(5)) = double(25) = 50
+    println(compose(double, square, 5))
+}
+
+main()

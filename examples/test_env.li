@@ -1,0 +1,66 @@
+// Env Module Tests
+// @expect-contains: env_get passed
+// @expect-contains: env_set passed
+// @expect-contains: env_has passed
+// @expect-contains: home_dir passed
+// @expect-contains: get_or passed
+
+import std.env
+
+println("=== Env Module Tests ===")
+
+// Test env_get (HOME should exist on most systems)
+let home = env_get("HOME")
+if home != null && len(home) > 0 {
+    println("env_get passed")
+    println("HOME: " + home)
+}
+
+// Test env_set and env_has
+env_set("LI_TEST_VAR", "test_value")
+if env_has("LI_TEST_VAR") {
+    println("env_set passed")
+    let val = env_get("LI_TEST_VAR")
+    println("LI_TEST_VAR: " + val)
+}
+
+// Test env_has
+if env_has("HOME") && !env_has("NONEXISTENT_VAR_XYZ123") {
+    println("env_has passed")
+}
+
+// Test env_remove
+env_remove("LI_TEST_VAR")
+if !env_has("LI_TEST_VAR") {
+    println("env_remove passed")
+}
+
+// Test env_home_dir
+let home_dir = env_home_dir()
+if len(home_dir) > 0 {
+    println("home_dir passed")
+    println("Home dir: " + home_dir)
+}
+
+// Test env_temp_dir
+let temp = env_temp_dir()
+println("Temp dir: " + temp)
+
+// Test get_or
+let missing = get_or("NONEXISTENT_VAR", "default_value")
+if missing == "default_value" {
+    println("get_or passed")
+}
+
+// Test get_bool
+env_set("TEST_BOOL", "true")
+if get_bool("TEST_BOOL") {
+    println("get_bool passed")
+}
+env_remove("TEST_BOOL")
+
+// Test user
+let u = user()
+println("User: " + u)
+
+println("=== All Env Tests Passed ===")

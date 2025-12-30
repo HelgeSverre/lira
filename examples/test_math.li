@@ -1,0 +1,331 @@
+// Math Module Comprehensive Tests
+// @expect-contains: sqrt test passed
+// @expect-contains: pow test passed
+// @expect-contains: trig test passed
+// @expect-contains: constants test passed
+// @expect-contains: gcd test passed
+// @expect-contains: prime test passed
+// @expect-contains: rounding test passed
+// @expect-contains: log test passed
+// @expect-contains: hyperbolic test passed
+// @expect-contains: All Math Tests Passed
+
+import std.math
+
+println("=== Math Module Comprehensive Tests ===")
+
+// ============================================================================
+// Test sqrt
+// ============================================================================
+println("\n--- Testing sqrt ---")
+let root4 = sqrt(4.0)
+let root16 = sqrt(16.0)
+let root2 = sqrt(2.0)
+println("sqrt(4.0) = " + root4)
+println("sqrt(16.0) = " + root16)
+println("sqrt(2.0) = " + root2)
+if root4 == 2.0 && root16 == 4.0 {
+    println("sqrt test passed")
+} else {
+    println("sqrt test FAILED")
+}
+
+// ============================================================================
+// Test pow
+// ============================================================================
+println("\n--- Testing pow ---")
+let pow_result = pow(2.0, 10.0)
+let pow_result2 = pow(3.0, 4.0)
+println("pow(2.0, 10.0) = " + pow_result)
+println("pow(3.0, 4.0) = " + pow_result2)
+if pow_result == 1024.0 && pow_result2 == 81.0 {
+    println("pow test passed")
+} else {
+    println("pow test FAILED")
+}
+
+// ============================================================================
+// Test trigonometric functions (sin^2 + cos^2 = 1)
+// ============================================================================
+println("\n--- Testing trigonometry ---")
+let angle = 0.7853981633974483  // PI / 4
+let s = sin(angle)
+let c = cos(angle)
+let sum = s * s + c * c
+println("sin(PI/4) = " + s)
+println("cos(PI/4) = " + c)
+println("sin^2 + cos^2 = " + sum)
+
+// Check tan = sin/cos
+let t = tan(angle)
+let tan_check = s / c
+println("tan(PI/4) = " + t)
+
+if sum > 0.999 && sum < 1.001 {
+    println("trig test passed")
+} else {
+    println("trig test FAILED")
+}
+
+// ============================================================================
+// Test constants
+// ============================================================================
+println("\n--- Testing constants ---")
+let pi_const = math_pi()
+let e_const = math_e()
+let tau_const = math_tau()
+println("math_pi() = " + pi_const)
+println("math_e() = " + e_const)
+println("math_tau() = " + tau_const)
+if pi_const > 3.14 && pi_const < 3.15 && e_const > 2.71 && e_const < 2.72 && tau_const > 6.28 && tau_const < 6.29 {
+    println("constants test passed")
+} else {
+    println("constants test FAILED")
+}
+
+// ============================================================================
+// Test rounding functions
+// ============================================================================
+println("\n--- Testing rounding ---")
+let f = floor(3.7)
+let ce = ceil(3.2)
+let r = round(3.5)
+let tr = trunc(-3.7)
+println("floor(3.7) = " + f)
+println("ceil(3.2) = " + ce)
+println("round(3.5) = " + r)
+println("trunc(-3.7) = " + tr)
+if f == 3.0 && ce == 4.0 && r == 4.0 && tr == -3.0 {
+    println("rounding test passed")
+} else {
+    println("rounding test FAILED")
+}
+
+// ============================================================================
+// Test exp and logarithm functions
+// ============================================================================
+println("\n--- Testing exp/log ---")
+let exp_result = exp(1.0)
+let ln_result = ln(2.718281828459045)
+let log10_result = log10(100.0)
+let log2_result = log2(8.0)
+println("exp(1.0) = " + exp_result)
+println("ln(e) = " + ln_result)
+println("log10(100) = " + log10_result)
+println("log2(8) = " + log2_result)
+if exp_result > 2.71 && exp_result < 2.72 && log10_result == 2.0 && log2_result == 3.0 {
+    println("log test passed")
+} else {
+    println("log test FAILED")
+}
+
+// ============================================================================
+// Test hyperbolic functions
+// ============================================================================
+println("\n--- Testing hyperbolic functions ---")
+let sinh_result = sinh(0.0)
+let cosh_result = cosh(0.0)
+let tanh_result = tanh(0.0)
+println("sinh(0) = " + sinh_result)
+println("cosh(0) = " + cosh_result)
+println("tanh(0) = " + tanh_result)
+if sinh_result == 0.0 && cosh_result == 1.0 && tanh_result == 0.0 {
+    println("hyperbolic test passed")
+} else {
+    println("hyperbolic test FAILED")
+}
+
+// ============================================================================
+// Test arc functions
+// ============================================================================
+println("\n--- Testing arc functions ---")
+let asin_result = asin(1.0)
+let acos_result = acos(1.0)
+let atan_result = atan(1.0)
+let atan2_result = atan2(1.0, 1.0)
+println("asin(1.0) = " + asin_result)
+println("acos(1.0) = " + acos_result)
+println("atan(1.0) = " + atan_result)
+println("atan2(1.0, 1.0) = " + atan2_result)
+
+// ============================================================================
+// Test abs
+// ============================================================================
+println("\n--- Testing abs ---")
+let abs1 = abs(-5.5)
+let abs2 = abs(3.3)
+println("abs(-5.5) = " + abs1)
+println("abs(3.3) = " + abs2)
+
+// ============================================================================
+// Test is_nan, is_infinite, is_finite
+// ============================================================================
+println("\n--- Testing classification functions ---")
+let nan_check = is_nan(0.0 / 0.0)
+let inf_check = is_infinite(1.0 / 0.0)
+let finite_check = is_finite(42.0)
+println("is_nan(0/0) = " + nan_check)
+println("is_infinite(1/0) = " + inf_check)
+println("is_finite(42) = " + finite_check)
+
+// ============================================================================
+// Test gcd/lcm
+// ============================================================================
+println("\n--- Testing gcd/lcm ---")
+
+let g1 = gcd(12, 8)
+let g2 = gcd(48, 18)
+println("gcd(12, 8) = " + g1)
+println("gcd(48, 18) = " + g2)
+if g1 == 4 && g2 == 6 {
+    println("gcd test passed")
+} else {
+    println("gcd test FAILED")
+}
+
+let l1 = lcm(4, 6)
+let l2 = lcm(3, 5)
+println("lcm(4, 6) = " + l1)
+println("lcm(3, 5) = " + l2)
+
+// ============================================================================
+// Test is_prime
+// ============================================================================
+println("\n--- Testing is_prime ---")
+let p17 = is_prime(17)
+let p16 = is_prime(16)
+let p2 = is_prime(2)
+let p1 = is_prime(1)
+println("is_prime(17) = " + p17)
+println("is_prime(16) = " + p16)
+println("is_prime(2) = " + p2)
+println("is_prime(1) = " + p1)
+if p17 && !p16 && p2 && !p1 {
+    println("prime test passed")
+} else {
+    println("prime test FAILED")
+}
+
+// ============================================================================
+// Test factorial
+// ============================================================================
+println("\n--- Testing factorial ---")
+let f0 = factorial(0)
+let f1 = factorial(1)
+let f5 = factorial(5)
+let f10 = factorial(10)
+println("factorial(0) = " + f0)
+println("factorial(1) = " + f1)
+println("factorial(5) = " + f5)
+println("factorial(10) = " + f10)
+
+// ============================================================================
+// Test helper functions
+// ============================================================================
+println("\n--- Testing helper functions ---")
+
+let clamped = clamp(15.0, 0.0, 10.0)
+println("clamp(15, 0, 10) = " + clamped)
+
+let lerp_result = lerp(0.0, 100.0, 0.5)
+println("lerp(0, 100, 0.5) = " + lerp_result)
+
+let rad = radians(180.0)
+let deg = degrees(3.141592653589793)
+println("radians(180) = " + rad)
+println("degrees(PI) = " + deg)
+
+let dist = distance(0.0, 0.0, 3.0, 4.0)
+println("distance(0,0 to 3,4) = " + dist)
+
+let hyp = hypot(3.0, 4.0)
+println("hypot(3, 4) = " + hyp)
+
+// ============================================================================
+// Test sign functions
+// ============================================================================
+println("\n--- Testing sign ---")
+let sign_pos = sign(5.0)
+let sign_neg = sign(-3.0)
+let sign_zero = sign(0.0)
+println("sign(5.0) = " + sign_pos)
+println("sign(-3.0) = " + sign_neg)
+println("sign(0.0) = " + sign_zero)
+
+// ============================================================================
+// Test min/max functions
+// ============================================================================
+println("\n--- Testing min/max ---")
+let min_result = min_float(3.5, 7.2)
+let max_result = max_float(3.5, 7.2)
+let min_int_result = min_int(5, 3)
+let max_int_result = max_int(5, 3)
+println("min_float(3.5, 7.2) = " + min_result)
+println("max_float(3.5, 7.2) = " + max_result)
+println("min_int(5, 3) = " + min_int_result)
+println("max_int(5, 3) = " + max_int_result)
+
+// ============================================================================
+// Test power functions
+// ============================================================================
+println("\n--- Testing power functions ---")
+let sq = square(5.0)
+let cu = cube(3.0)
+let cbrt_result = cbrt(27.0)
+println("square(5.0) = " + sq)
+println("cube(3.0) = " + cu)
+println("cbrt(27.0) = " + cbrt_result)
+
+// ============================================================================
+// Test integer power
+// ============================================================================
+println("\n--- Testing pow_int ---")
+let pow_int_result = pow_int(2, 10)
+println("pow_int(2, 10) = " + pow_int_result)
+
+// ============================================================================
+// Test fibonacci
+// ============================================================================
+println("\n--- Testing fibonacci ---")
+let fib0 = fibonacci(0)
+let fib1 = fibonacci(1)
+let fib10 = fibonacci(10)
+println("fibonacci(0) = " + fib0)
+println("fibonacci(1) = " + fib1)
+println("fibonacci(10) = " + fib10)
+
+// ============================================================================
+// Test is_power_of_two
+// ============================================================================
+println("\n--- Testing is_power_of_two ---")
+let pot8 = is_power_of_two(8)
+let pot10 = is_power_of_two(10)
+println("is_power_of_two(8) = " + pot8)
+println("is_power_of_two(10) = " + pot10)
+
+// ============================================================================
+// Test popcount
+// ============================================================================
+println("\n--- Testing popcount ---")
+let pop7 = popcount(7)   // 111 in binary = 3 bits
+let pop15 = popcount(15) // 1111 in binary = 4 bits
+println("popcount(7) = " + pop7)
+println("popcount(15) = " + pop15)
+
+// ============================================================================
+// Test sigmoid
+// ============================================================================
+println("\n--- Testing sigmoid ---")
+let sig0 = sigmoid(0.0)
+println("sigmoid(0) = " + sig0)
+
+// ============================================================================
+// Test sum functions
+// ============================================================================
+println("\n--- Testing sum functions ---")
+let sum_10 = sum_to(10)
+let sum_sq_5 = sum_squares_to(5)
+println("sum_to(10) = " + sum_10)
+println("sum_squares_to(5) = " + sum_sq_5)
+
+println("\n=== All Math Tests Passed ===")

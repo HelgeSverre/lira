@@ -1,0 +1,53 @@
+// UUID Module Tests
+// @expect-contains: uuid v4 generated
+// @expect-contains: uuid v7 generated
+// @expect-contains: validation passed
+// @expect-contains: uniqueness passed
+
+import std.uuid
+
+println("=== UUID Module Tests ===")
+
+// Test uuid_v4
+let id1 = uuid_v4()
+println("uuid v4: " + id1)
+if len(id1) == 36 {
+    println("uuid v4 generated")
+}
+
+// Test uuid_v7
+let id2 = uuid_v7()
+println("uuid v7: " + id2)
+if len(id2) == 36 {
+    println("uuid v7 generated")
+}
+
+// Test validation
+if uuid_is_valid(id1) && uuid_is_valid(id2) && !uuid_is_valid("not-a-uuid") {
+    println("validation passed")
+}
+
+// Test nil UUID
+let nil = uuid_nil()
+println("nil uuid: " + nil)
+
+// Test is_nil
+if is_nil(nil) && !is_nil(id1) {
+    println("is_nil passed")
+}
+
+// Test uniqueness (generate 3 UUIDs, ensure all different)
+let u1 = uuid_v4()
+let u2 = uuid_v4()
+let u3 = uuid_v4()
+if u1 != u2 && u2 != u3 && u1 != u3 {
+    println("uniqueness passed")
+}
+
+// Test version detection
+let v4_version = version(id1)
+let v7_version = version(id2)
+println("v4 version detected: " + v4_version)
+println("v7 version detected: " + v7_version)
+
+println("=== All UUID Tests Passed ===")

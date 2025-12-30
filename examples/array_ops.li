@@ -1,0 +1,73 @@
+// Array Operations Demo
+// Demonstrates array creation, access, and manipulation
+
+// Create an array of numbers
+let numbers = [10, 20, 30, 40, 50]
+
+// Print array length using len()
+println("Array length:")
+println(len(numbers))
+
+// Access individual elements
+println("First element:")
+println(numbers[0])
+
+println("Last element:")
+println(numbers[4])
+
+// Sum all elements
+var sum = 0
+var i = 0
+while i < 5 {
+    sum = sum + numbers[i]
+    i = i + 1
+}
+println("Sum of all elements:")
+println(sum)
+
+// Find the maximum element
+var max = numbers[0]
+i = 1
+while i < 5 {
+    if numbers[i] > max {
+        max = numbers[i]
+    }
+    i = i + 1
+}
+println("Maximum element:")
+println(max)
+
+// Test push and pop operations
+println("")
+println("Testing push/pop:")
+
+let stack = []
+push(stack, 1)
+push(stack, 2)
+push(stack, 3)
+println("Stack length after 3 pushes:")
+println(len(stack))
+
+println("Popping elements (LIFO):")
+println(pop(stack))
+println(pop(stack))
+println(pop(stack))
+
+println("Stack empty, length:")
+println(len(stack))
+
+// Test push on existing array
+push(numbers, 60)
+println("After push(60) to numbers:")
+println(len(numbers))
+println(numbers[5])
+
+// Pop from numbers
+let popped = pop(numbers)
+println("Popped from numbers:")
+println(popped)
+
+// Test string length
+let greeting = "Hello!"
+println("String length:")
+println(len(greeting))

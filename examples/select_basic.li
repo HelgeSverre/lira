@@ -1,0 +1,16 @@
+// Select Statement Example
+// Demonstrates select syntax for channel multiplexing
+// Note: Full select execution requires fiber mode
+
+// Create test channels
+let ch1 = chan(1)
+let ch2 = chan(1)
+
+println("Channels created")
+
+// Select with default case - non-blocking
+select {
+    _ => println("Default case executed (no channels ready)")
+}
+
+println("Select test complete")

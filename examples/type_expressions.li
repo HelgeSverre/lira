@@ -1,0 +1,33 @@
+// Type Expression Tests
+// Tests type checking (is) and type casting (as)
+// @expect-contains: x is int: true
+// @expect-contains: x is string: false
+// @expect-contains: s is string: true
+// @expect-contains: cast float to int: 3
+// @expect-contains: cast int to string: 123
+// @expect-contains: cast string to int: 456
+
+println("=== Type Check (is) ===")
+
+let x = 42
+println("x is int: " + (x is int))
+println("x is string: " + (x is string))
+
+let s = "hello"
+println("s is string: " + (s is string))
+
+println("=== Type Cast (as) ===")
+
+let f = 3.7
+println("cast float to int: " + (f as int))
+
+let n = 42
+println("cast int to float: " + (n as float))
+
+let num = 123
+println("cast int to string: " + (num as string))
+
+let str_num = "456"
+println("cast string to int: " + (str_num as int))
+
+println("=== All Type Expression Tests Passed ===")

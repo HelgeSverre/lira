@@ -1,0 +1,108 @@
+// Comprehensive Module System Tests
+// Tests all aspects of the import system
+
+println("=== Module System Comprehensive Tests ===")
+
+// ============================================================
+// Test 1: Basic stdlib imports
+// ============================================================
+println("\n--- Test 1: Basic stdlib imports ---")
+
+import std.core
+
+println("abs(-42): " + abs(-42))         // 42
+println("min(10, 5): " + min(10, 5))     // 5
+println("max(10, 5): " + max(10, 5))     // 10
+println("clamp(15, 0, 10): " + clamp(15, 0, 10)) // 10
+
+// ============================================================
+// Test 2: Multiple imports
+// ============================================================
+println("\n--- Test 2: Multiple imports ---")
+
+import std.fs
+
+let test_path = "/tmp/module_test.txt"
+let written = write_file(test_path, "Module test content")
+println("write_file: " + written)
+
+let content = read_file(test_path)
+println("read_file: " + content)
+
+// ============================================================
+// Test 3: Selective imports
+// ============================================================
+println("\n--- Test 3: Selective imports ---")
+
+import std.io.{debug, now_ms}
+
+debug("time check", 123)
+let t1 = now_ms()
+println("now_ms returned a value: " + (t1 > 0))
+
+// ============================================================
+// Test 4: Using imported functions with local code
+// ============================================================
+println("\n--- Test 4: Mixed local and imported code ---")
+
+fn calculate_distance(x1: int, y1: int, x2: int, y2: int) -> int {
+    let dx = abs(x2 - x1)
+    let dy = abs(y2 - y1)
+    return dx + dy  // Manhattan distance
+}
+
+println("Manhattan distance (0,0) to (3,4): " + calculate_distance(0, 0, 3, 4)) // 7
+
+fn bounded_value(val: int, low: int, high: int) -> int {
+    return clamp(val, low, high)
+}
+
+println("bounded_value(50, 0, 100): " + bounded_value(50, 0, 100))   // 50
+println("bounded_value(150, 0, 100): " + bounded_value(150, 0, 100)) // 100
+println("bounded_value(-10, 0, 100): " + bounded_value(-10, 0, 100)) // 0
+
+// ============================================================
+// Test 5: File operations integration
+// ============================================================
+println("\n--- Test 5: File operations integration ---")
+
+fn save_and_load(filename: string, data: string) -> string {
+    write_file(filename, data)
+    return read_file(filename)
+}
+
+let result = save_and_load("/tmp/module_test2.txt", "Hello from function!")
+println("save_and_load result: " + result)
+
+// ============================================================
+// Test 6: Core math operations
+// ============================================================
+println("\n--- Test 6: Core math operations ---")
+
+fn complex_calc(n: int) -> int {
+    let a = n * n                 // n^2
+    let b = abs(a - 100)          // |n^2 - 100|
+    let c = min(b, 50)            // cap at 50
+    return c
+}
+
+println("complex_calc(5): " + complex_calc(5))   // min(|25-100|, 50) = 50
+println("complex_calc(10): " + complex_calc(10)) // min(|100-100|, 50) = 0
+println("complex_calc(8): " + complex_calc(8))   // min(|64-100|, 50) = 36
+
+// ============================================================
+// Test 7: Multiple levels of function calls
+// ============================================================
+println("\n--- Test 7: Chained function calls ---")
+
+fn outer_fn(x: int) -> int {
+    return inner_fn(x) + 10
+}
+
+fn inner_fn(x: int) -> int {
+    return abs(x) * 2
+}
+
+println("outer_fn(-5): " + outer_fn(-5)) // abs(-5)*2 + 10 = 20
+
+println("\n=== All Module Tests Passed ===")

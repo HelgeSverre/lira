@@ -1,0 +1,35 @@
+// Test impl blocks and method dispatch
+// @expect: 0
+// @expect: 1
+// @expect: 2
+
+struct Counter {
+    value: int
+}
+
+impl Counter {
+    fn new() -> Counter {
+        return Counter { value: 0 }
+    }
+
+    fn get(self) -> int {
+        return self.value
+    }
+
+    fn increment(self) -> Counter {
+        return Counter { value: self.value + 1 }
+    }
+}
+
+fn main() {
+    let c = Counter.new()
+    println(c.get())
+
+    let c2 = c.increment()
+    println(c2.get())
+
+    let c3 = c2.increment()
+    println(c3.get())
+}
+
+main()

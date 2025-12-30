@@ -1,0 +1,82 @@
+// Regex Module Tests
+// @expect-contains: match test passed
+// @expect-contains: find test passed
+// @expect-contains: replace test passed
+// @expect-contains: split test passed
+// @expect-contains: email test passed
+
+import std.regex
+
+println("=== Regex Module Tests ===")
+
+// Test regex_match
+if regex_match("hello", "hello world") {
+    println("match test passed")
+}
+
+// Test regex_find
+let found = regex_find("[0-9]+", "abc123def456")
+if found == "123" {
+    println("find test passed")
+}
+
+// Test regex_find_all
+let all = regex_find_all("[0-9]+", "a1b2c3")
+if len(all) == 3 {
+    println("find_all count: " + len(all))
+}
+
+// Test regex_replace
+let replaced = regex_replace("[0-9]", "a1b2c3", "X")
+println("replace first: " + replaced)
+
+// Test regex_replace_all
+let replaced_all = regex_replace_all("[0-9]", "a1b2c3", "X")
+if replaced_all == "aXbXcX" {
+    println("replace test passed")
+}
+
+// Test regex_split
+let parts = regex_split("[,;]", "a,b;c,d")
+if len(parts) == 4 {
+    println("split test passed")
+}
+
+// Test email validation
+if is_email("user@example.com") && !is_email("invalid") {
+    println("email test passed")
+}
+
+// Test captures
+let caps = regex_captures("(\\w+)@(\\w+)\\.com", "user@example.com")
+println("captures: " + len(caps))
+
+// Test regex_is_valid
+if regex_is_valid("[a-z]+") && !regex_is_valid("[") {
+    println("is_valid test passed")
+}
+
+// Test helper functions from stdlib
+if is_digits("12345") && !is_digits("abc") {
+    println("is_digits test passed")
+}
+
+if is_alpha("hello") && !is_alpha("hello123") {
+    println("is_alpha test passed")
+}
+
+if is_alphanumeric("hello123") && !is_alphanumeric("hello@123") {
+    println("is_alphanumeric test passed")
+}
+
+let numbers = extract_numbers("abc123def456")
+if len(numbers) == 2 {
+    println("extract_numbers: " + numbers[0] + ", " + numbers[1])
+}
+
+let normalized = normalize_whitespace("hello   world")
+if normalized == "hello world" {
+    println("normalize_whitespace test passed")
+}
+
+println("=== All Regex Tests Passed ===")

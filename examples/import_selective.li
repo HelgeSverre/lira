@@ -1,0 +1,15 @@
+// Selective Import Test
+// Tests importing specific items from a module
+
+import std.core.{abs, min}
+
+println("=== Selective Import Test ===")
+
+// These should work (imported)
+println("abs(-10): " + abs(-10))
+println("min(5, 2): " + min(5, 2))
+
+// Note: max is NOT imported, so this would fail if uncommented:
+// println(max(5, 2))
+
+println("=== Selective Import Test Passed ===")

@@ -1,0 +1,40 @@
+// Test unary operators
+// @expect: -42
+// @expect: false
+// @expect: true
+// @expect: -2
+// @expect: 5
+// @expect: 4
+
+fn main() {
+    // Numeric negation
+    let x = 42
+    let neg_x = -x
+    println(neg_x)
+
+    // Logical not
+    let t = true
+    let not_t = !t
+    println(not_t)
+
+    let f = false
+    let not_f = !f
+    println(not_f)
+
+    // Bitwise not
+    let bits = 1
+    let inverted = ~bits
+    println(inverted)  // -2 in two's complement
+
+    // Pre-increment
+    var counter = 4
+    let pre = ++counter
+    println(pre)  // 5
+
+    // Post-increment
+    var counter2 = 4
+    let post = counter2++
+    println(post)  // 4 (returns old value)
+}
+
+main()

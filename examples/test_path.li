@@ -1,0 +1,214 @@
+// Path Module Tests
+// Tests for the std.path module
+// @expect-contains: dirname: /foo/bar
+// @expect-contains: basename: file.txt
+// @expect-contains: extension: .txt
+// @expect-contains: stem: file
+// @expect-contains: is_absolute: true
+// @expect-contains: is_relative: true
+// @expect-contains: normalize test passed
+// @expect-contains: join test passed
+// @expect-contains: with_extension test passed
+// @expect-contains: components test passed
+// @expect-contains: All Path Tests Passed
+
+import std.path
+
+println("=== Path Module Tests ===")
+
+// Test dirname
+println("dirname: " + dirname("/foo/bar/file.txt"))
+let d1 = dirname("/foo")
+if d1 == "/" {
+    println("dirname /foo: OK")
+} else {
+    println("dirname /foo: FAIL - got " + d1)
+}
+
+let d2 = dirname("foo/bar")
+if d2 == "foo" {
+    println("dirname foo/bar: OK")
+} else {
+    println("dirname foo/bar: FAIL - got " + d2)
+}
+
+let d3 = dirname("foo")
+if d3 == "." {
+    println("dirname foo: OK")
+} else {
+    println("dirname foo: FAIL - got " + d3)
+}
+
+// Test basename
+println("basename: " + basename("/foo/bar/file.txt"))
+
+let b1 = basename("/foo/bar/")
+if b1 == "bar" {
+    println("basename /foo/bar/: OK")
+} else {
+    println("basename /foo/bar/: FAIL - got " + b1)
+}
+
+let b2 = basename("file.txt")
+if b2 == "file.txt" {
+    println("basename file.txt: OK")
+} else {
+    println("basename file.txt: FAIL - got " + b2)
+}
+
+// Test extension
+println("extension: " + extension("/foo/bar/file.txt"))
+
+let e1 = extension("/foo/bar")
+if e1 == "" {
+    println("extension no ext: OK")
+} else {
+    println("extension no ext: FAIL - got '" + e1 + "'")
+}
+
+let e2 = extension("/foo/.hidden")
+if e2 == "" {
+    println("extension hidden: OK")
+} else {
+    println("extension hidden: FAIL - got '" + e2 + "'")
+}
+
+let e3 = extension("archive.tar.gz")
+if e3 == ".gz" {
+    println("extension tar.gz: OK")
+} else {
+    println("extension tar.gz: FAIL - got '" + e3 + "'")
+}
+
+// Test stem
+println("stem: " + stem("/foo/bar/file.txt"))
+
+let s1 = stem("archive.tar.gz")
+if s1 == "archive.tar" {
+    println("stem tar.gz: OK")
+} else {
+    println("stem tar.gz: FAIL - got '" + s1 + "'")
+}
+
+let s2 = stem("noext")
+if s2 == "noext" {
+    println("stem noext: OK")
+} else {
+    println("stem noext: FAIL - got '" + s2 + "'")
+}
+
+// Test is_absolute
+if is_absolute("/foo/bar") {
+    println("is_absolute: true")
+} else {
+    println("is_absolute: false")
+}
+
+// Test is_relative
+if is_relative("foo/bar") {
+    println("is_relative: true")
+} else {
+    println("is_relative: false")
+}
+
+// Test has_extension
+if has_extension("/foo/bar.txt") {
+    println("has_extension true: OK")
+} else {
+    println("has_extension true: FAIL")
+}
+
+if !has_extension("/foo/bar") {
+    println("has_extension false: OK")
+} else {
+    println("has_extension false: FAIL")
+}
+
+// Test normalize
+let n1 = normalize("/foo//bar/../baz")
+if n1 == "/foo/baz" {
+    println("normalize test passed")
+} else {
+    println("normalize test FAILED - got '" + n1 + "'")
+}
+
+let n2 = normalize("foo/./bar")
+if n2 == "foo/bar" {
+    println("normalize with dot: OK")
+} else {
+    println("normalize with dot: FAIL - got '" + n2 + "'")
+}
+
+let n3 = normalize("/")
+if n3 == "/" {
+    println("normalize root: OK")
+} else {
+    println("normalize root: FAIL - got '" + n3 + "'")
+}
+
+let n4 = normalize(".")
+if n4 == "." {
+    println("normalize dot: OK")
+} else {
+    println("normalize dot: FAIL - got '" + n4 + "'")
+}
+
+// Test join
+let j1 = join("/foo", "bar")
+if j1 == "/foo/bar" {
+    println("join test passed")
+} else {
+    println("join test FAILED - got '" + j1 + "'")
+}
+
+let j2 = join("/foo/", "/bar")
+if j2 == "/foo/bar" {
+    println("join slash handling: OK")
+} else {
+    println("join slash handling: FAIL - got '" + j2 + "'")
+}
+
+// Test path_join with array
+let j3 = path_join(["/home", "user", "documents", "file.txt"])
+if j3 == "/home/user/documents/file.txt" {
+    println("path_join array: OK")
+} else {
+    println("path_join array: FAIL - got '" + j3 + "'")
+}
+
+// Test with_extension
+let w1 = with_extension("/foo/bar.txt", ".md")
+if w1 == "/foo/bar.md" {
+    println("with_extension test passed")
+} else {
+    println("with_extension test FAILED - got '" + w1 + "'")
+}
+
+let w2 = with_extension("/foo/bar", ".txt")
+if w2 == "/foo/bar.txt" {
+    println("with_extension add: OK")
+} else {
+    println("with_extension add: FAIL - got '" + w2 + "'")
+}
+
+// Test components
+let c = components("/foo/bar/baz")
+if len(c) == 4 {
+    if c[0] == "" && c[1] == "foo" && c[2] == "bar" && c[3] == "baz" {
+        println("components test passed")
+    } else {
+        println("components test FAILED - wrong values")
+    }
+} else {
+    println("components test FAILED - got " + len(c) + " components")
+}
+
+// Test parent (alias for dirname)
+let p1 = parent("/foo/bar/baz")
+if p1 == "/foo/bar" {
+    println("parent: OK")
+} else {
+    println("parent: FAIL - got '" + p1 + "'")
+}
+
+println("=== All Path Tests Passed ===")

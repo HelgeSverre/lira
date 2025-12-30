@@ -1,0 +1,27 @@
+// Generics Tests
+// Tests generic function and struct syntax parsing
+// @expect-contains: identity int: 42
+// @expect-contains: identity string: hello
+// @expect-contains: box value: 100
+
+println("=== Generic Functions ===")
+
+// Generic identity function
+fn identity<T>(x: T) -> T {
+    return x
+}
+
+println("identity int: " + identity(42))
+println("identity string: " + identity("hello"))
+
+println("=== Generic Structs ===")
+
+// Generic Box struct
+struct Box<T> {
+    value: T
+}
+
+let int_box = Box { value: 100 }
+println("box value: " + int_box.value)
+
+println("=== All Generics Tests Passed ===")

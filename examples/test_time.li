@@ -1,0 +1,109 @@
+// Time Module Tests
+// @expect-contains: time_ms > 0: true
+// @expect-contains: time_secs > 0: true
+// @expect-contains: time_micros > time_secs: true
+// @expect-contains: format test passed
+// @expect-contains: duration test passed
+// @expect-contains: components test passed
+// @expect-contains: parse test passed
+
+import std.time
+
+println("=== Time Module Tests ===")
+
+// Test time_ms
+let ms = time_ms()
+println("time_ms > 0: " + (ms > 0))
+
+// Test time_secs
+let secs = time_secs()
+println("time_secs > 0: " + (secs > 0))
+
+// Test time_micros (should be larger than secs)
+let micros = time_micros()
+println("time_micros > time_secs: " + (micros > secs))
+
+// Test time_nanos exists and works
+let nanos = time_nanos()
+println("time_nanos > 0: " + (nanos > 0))
+
+// Test consistency - time should advance
+let ms2 = time_ms()
+println("time advancing: " + (ms2 >= ms))
+
+// Test format ISO
+let iso = time_format_iso(ms)
+println("ISO format: " + iso)
+if len(iso) > 10 {
+    println("format test passed")
+}
+
+// Test custom format
+let formatted = time_format(ms, "%Y-%m-%d")
+println("Date format: " + formatted)
+
+// Test duration helpers
+let one_hour = hours(1)
+let one_minute = minutes(1)
+let one_second = seconds(1)
+let one_day = days(1)
+if one_hour == 3600000 && one_minute == 60000 && one_second == 1000 && one_day == 86400000 {
+    println("duration test passed")
+}
+
+// Test time_components
+let comp = time_components(ms)
+println("Year: " + comp[0])
+println("Month: " + comp[1])
+println("Day: " + comp[2])
+println("Hour: " + comp[3])
+println("Minute: " + comp[4])
+println("Second: " + comp[5])
+if comp[0] > 2000 && comp[1] >= 1 && comp[1] <= 12 {
+    println("components test passed")
+}
+
+// Test time_from_components (create a known timestamp)
+// January 1, 2024 00:00:00 UTC
+let ts_2024 = time_from_components(2024, 1, 1, 0, 0, 0)
+println("Timestamp 2024-01-01: " + ts_2024)
+let comp_2024 = time_components(ts_2024)
+if comp_2024[0] == 2024 && comp_2024[1] == 1 && comp_2024[2] == 1 {
+    println("from_components test passed")
+}
+
+// Test time_parse_iso (round-trip test)
+let test_iso = "2024-06-15T12:30:45+00:00"
+let parsed = time_parse_iso(test_iso)
+println("Parsed ISO: " + parsed)
+if parsed > 0 {
+    println("parse test passed")
+}
+
+// Test timezone offset (just verify it returns a number)
+let tz_offset = time_timezone_offset()
+println("Timezone offset (min): " + tz_offset)
+
+// Test helper functions
+println("Today: " + today())
+println("Now time: " + now_time())
+println("Now ISO: " + now_iso())
+
+// Test elapsed time
+let start = time_ms()
+sleep(50)
+let elapsed = elapsed_ms(start)
+println("Elapsed after sleep(50): " + elapsed + "ms")
+
+// Test is_past/is_future
+let past_ts = time_ms() - days(1)
+let future_ts = time_ms() + days(1)
+println("is_past(yesterday): " + is_past(past_ts))
+println("is_future(tomorrow): " + is_future(future_ts))
+
+// Test date formatting functions
+println("format_date: " + format_date(ms))
+println("format_time: " + format_time(ms))
+println("format_datetime: " + format_datetime(ms))
+
+println("=== All Time Tests Completed ===")

@@ -1,0 +1,151 @@
+// Arithmetic Edge Cases Tests
+// Tests overflow, division, floats, and boundary conditions
+
+println("=== Float Arithmetic ===")
+
+// Basic float operations
+let f1 = 3.14159
+let f2 = 2.71828
+println(f1 + f2)  // ~5.85987
+println(f1 - f2)  // ~0.42331
+println(f1 * f2)  // ~8.53972
+println(f1 / f2)  // ~1.15573
+
+// Float with integer mixing
+let i = 10
+let f = 2.5
+println(i + f)  // 12.5 (int promoted to float)
+println(i - f)  // 7.5
+println(i * f)  // 25.0
+println(i / f)  // 4.0
+
+// Very small floats
+let tiny = 0.000001
+println(tiny * 1000000)  // Should be close to 1.0
+
+// Negative floats
+let neg_f = -3.14
+println(neg_f + 1.0)   // -2.14
+println(neg_f * -1.0)  // 3.14
+println(neg_f / 2.0)   // -1.57
+
+println("=== Integer Boundaries ===")
+
+// Large positive integer
+let large = 1000000000
+println(large * 2)  // 2000000000
+
+// Large multiplication
+let big1 = 100000
+let big2 = 100000
+println(big1 * big2)  // 10000000000
+
+// Negative integers
+let neg = -42
+println(neg + 100)  // 58
+println(neg - 100)  // -142
+println(neg * -1)   // 42
+println(neg * 2)    // -84
+
+// Zero operations
+println(0 + 0)   // 0
+println(0 - 0)   // 0
+println(0 * 100) // 0
+println(0 / 1)   // 0
+println(100 / 1) // 100
+
+println("=== Modulo Operations ===")
+
+// Basic modulo
+println(17 % 5)   // 2
+println(20 % 4)   // 0
+println(7 % 3)    // 1
+println(100 % 7)  // 2
+
+// Negative modulo
+println(-17 % 5)  // -2 (sign of dividend)
+println(17 % -5)  // 2 (sign of dividend)
+println(-17 % -5) // -2
+
+// Large modulo
+println(1000000007 % 1000000)  // 7
+
+println("=== Negation ===")
+
+// Unary minus
+let x = 42
+println(-x)   // -42
+println(-(-x)) // 42
+println(-0)   // 0
+
+// Negation of floats
+let y = 3.14
+println(-y)   // -3.14
+println(-(-y)) // 3.14
+
+println("=== Comparison Edge Cases ===")
+
+// Float comparisons
+let a = 0.1 + 0.2
+let b = 0.3
+// Note: floating point precision issues may occur
+println(a)
+println(b)
+
+// Comparison with zero
+println(0 < 1)   // true
+println(0 > -1)  // true
+println(0 == 0)  // true
+println(-0 == 0) // true
+
+// Large number comparisons
+let x1 = 1000000000
+let x2 = 1000000001
+println(x1 < x2)  // true
+println(x1 == x2) // false
+println(x1 > x2)  // false
+
+// Negative comparisons
+println(-5 < -3)  // true
+println(-5 > -10) // true
+println(-5 == -5) // true
+
+println("=== Chained Arithmetic ===")
+
+// Complex expressions
+println(1 + 2 * 3)      // 7 (precedence: 1 + (2*3))
+println((1 + 2) * 3)    // 9 (explicit grouping)
+println(10 - 3 - 2)     // 5 (left-associative: (10-3)-2)
+println(100 / 10 / 2)   // 5 (left-associative: (100/10)/2)
+
+// Mixed operations
+println(1 + 2 * 3 - 4 / 2)  // 1 + 6 - 2 = 5
+println(10 % 3 + 5 % 2)     // 1 + 1 = 2
+
+// With variables
+var result = 0
+result = 10 + 5
+println(result)  // 15
+result = result * 2
+println(result)  // 30
+result = result - 10
+println(result)  // 20
+result = result / 4
+println(result)  // 5
+
+println("=== Boolean Arithmetic Context ===")
+
+// Comparisons in expressions
+let cmp1 = 5 > 3
+let cmp2 = 10 < 20
+println(cmp1)  // true
+println(cmp2)  // true
+
+// Chained comparisons (each is separate)
+let in_range = (5 > 0) && (5 < 10)
+println(in_range)  // true
+
+let out_range = (15 > 0) && (15 < 10)
+println(out_range)  // false
+
+println("=== All Arithmetic Edge Case Tests Passed ===")

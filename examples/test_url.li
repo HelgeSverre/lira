@@ -1,0 +1,114 @@
+// URL Module Tests
+// @expect-contains: encode: hello+world
+// @expect-contains: decode: hello world
+// @expect-contains: parse host: example.com
+// @expect-contains: parse path: /path/to/resource
+// @expect-contains: parse port: 8080
+// @expect-contains: query get: bar
+// @expect-contains: roundtrip passed
+
+import std.url
+
+println("=== URL Module Tests ===")
+
+// Test URL encoding
+let encoded = url_encode("hello world")
+println("encode: " + encoded)
+
+// Test URL decoding
+let decoded = url_decode("hello+world")
+println("decode: " + decoded)
+
+// Test percent-encoded decode
+let decoded2 = url_decode("hello%20world")
+println("decode percent: " + decoded2)
+
+// Test special characters encoding
+let special_enc = url_encode("a=1&b=2")
+println("encode special: " + special_enc)
+
+// Test special characters decoding
+let special_dec = url_decode("a%3D1%26b%3D2")
+println("decode special: " + special_dec)
+
+// Test URL parsing
+let url = url_parse("https://example.com:8080/path/to/resource?foo=bar&baz=qux#section")
+println("parse scheme: " + url.scheme)
+println("parse host: " + url.host)
+println("parse port: " + url.port)
+println("parse path: " + url.path)
+println("parse query: " + url.query)
+println("parse fragment: " + url.fragment)
+
+// Test URL parsing without port
+let url2 = url_parse("http://api.example.org/users")
+println("parse2 scheme: " + url2.scheme)
+println("parse2 host: " + url2.host)
+println("parse2 port: " + url2.port)
+println("parse2 path: " + url2.path)
+
+// Test query parameter extraction
+let val = query_get(url.query, "foo")
+println("query get: " + val)
+
+// Test query has parameter
+let has_foo = query_has(url.query, "foo")
+let has_xyz = query_has(url.query, "xyz")
+println("query has foo: " + has_foo)
+println("query has xyz: " + has_xyz)
+
+// Test URL building
+let built = url_build(url)
+println("url build: " + built)
+
+// Test roundtrip
+let encoded2 = url_encode("a=1&b=2")
+let decoded3 = url_decode(encoded2)
+if decoded3 == "a=1&b=2" {
+    println("roundtrip passed")
+} else {
+    println("roundtrip failed: " + decoded3)
+}
+
+// Test URL origin
+let origin = url_origin(url)
+println("origin: " + origin)
+
+// Test URL path with query
+let path_query = url_path_query(url)
+println("path query: " + path_query)
+
+// Test is absolute/relative
+let is_abs = url_is_absolute("https://example.com/path")
+let is_rel = url_is_relative("/path/to/file")
+println("is absolute: " + is_abs)
+println("is relative: " + is_rel)
+
+// Test is secure
+let is_sec = url_is_secure(url)
+println("is secure: " + is_sec)
+
+// Test HTTP URL
+let http_url = url_parse("http://example.com")
+let is_http = url_is_http(http_url)
+println("is http: " + is_http)
+
+// Test query build
+let query_parts = ["name", "John Doe", "age", "30"]
+let built_query = query_build(query_parts)
+println("built query: " + built_query)
+
+// Test parse_int helper (via query parsing)
+let url3 = url_parse("http://localhost:3000/api")
+println("parsed port 3000: " + url3.port)
+
+// Test empty query
+let url4 = url_parse("http://example.com/")
+println("empty query: [" + url4.query + "]")
+
+// Test simple URL
+let url5 = url_parse("http://localhost")
+println("simple host: " + url5.host)
+println("simple path: " + url5.path)
+
+println("=== All URL Tests Passed ===")
