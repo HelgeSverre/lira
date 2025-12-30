@@ -1,0 +1,6 @@
+// hello.li - A simple Lira program
+
+fn main() {
+    let message = "Hello, World!"
+    print(message)
+}
