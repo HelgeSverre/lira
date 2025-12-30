@@ -243,7 +243,8 @@ impl Parser {
     }
 
     fn var_declaration(&mut self, mutable: bool, span: Span) -> Result<Statement, String> {
-        let name = self.expect_identifier("Expected variable name")?;
+        // Parse pattern (supports destructuring: let (a, b) = ..., let { x, y } = ...)
+        let pattern = self.binding_pattern()?;
 
         let type_ann = if self.match_token(&TokenKind::Colon) {
             Some(self.type_expr()?)
@@ -259,11 +260,84 @@ impl Parser {
 
         Ok(Statement {
             kind: StatementKind::VarDecl {
-                name,
+                pattern,
                 mutable,
                 type_ann,
                 initializer,
             },
+            span,
+        })
+    }
+
+    /// Parse a binding pattern for let/var declarations
+    /// Supports: identifier, (a, b), { x, y }
+    fn binding_pattern(&mut self) -> Result<Pattern, String> {
+        let span = self.span();
+
+        // Tuple pattern: (a, b, c)
+        if self.match_token(&TokenKind::LParen) {
+            let mut patterns = Vec::new();
+            if !self.check(&TokenKind::RParen) {
+                loop {
+                    patterns.push(self.binding_pattern()?);
+                    if !self.match_token(&TokenKind::Comma) {
+                        break;
+                    }
+                }
+            }
+            self.consume(&TokenKind::RParen, "Expected ')' after tuple pattern")?;
+            return Ok(Pattern {
+                kind: PatternKind::Tuple(patterns),
+                span,
+            });
+        }
+
+        // Struct pattern: { x, y } or { x: a, y: b }
+        if self.match_token(&TokenKind::LBrace) {
+            let mut fields = Vec::new();
+            if !self.check(&TokenKind::RBrace) {
+                loop {
+                    let field_name = self.expect_identifier("Expected field name in struct pattern")?;
+                    let field_pattern = if self.match_token(&TokenKind::Colon) {
+                        self.binding_pattern()?
+                    } else {
+                        // Shorthand: { x } means { x: x }
+                        Pattern {
+                            kind: PatternKind::Variable(field_name.clone()),
+                            span: self.span(),
+                        }
+                    };
+                    fields.push((field_name, field_pattern));
+                    if !self.match_token(&TokenKind::Comma) {
+                        break;
+                    }
+                }
+            }
+            self.consume(&TokenKind::RBrace, "Expected '}' after struct pattern")?;
+            return Ok(Pattern {
+                kind: PatternKind::Struct {
+                    name: String::new(), // Inferred from RHS
+                    fields,
+                    rest: false,
+                },
+                span,
+            });
+        }
+
+        // Wildcard pattern: _
+        if self.check(&TokenKind::Underscore) ||
+           (matches!(self.peek().kind, TokenKind::Identifier(_)) && self.peek().lexeme == "_") {
+            self.advance();
+            return Ok(Pattern {
+                kind: PatternKind::Wildcard,
+                span,
+            });
+        }
+
+        // Simple variable binding
+        let name = self.expect_identifier("Expected variable name or pattern")?;
+        Ok(Pattern {
+            kind: PatternKind::Variable(name),
             span,
         })
     }
@@ -1420,17 +1494,9 @@ impl Parser {
             TokenKind::LtLtEq => self.compound_assign(left, BinaryOp::Shl, span),
             TokenKind::GtGtEq => self.compound_assign(left, BinaryOp::Shr, span),
 
-            // Call
+            // Call (with named argument support)
             TokenKind::LParen => {
-                let mut args = Vec::new();
-                if !self.check(&TokenKind::RParen) {
-                    loop {
-                        args.push(self.expression()?);
-                        if !self.match_token(&TokenKind::Comma) {
-                            break;
-                        }
-                    }
-                }
+                let args = self.parse_call_arguments()?;
                 self.consume(&TokenKind::RParen, "Expected ')' after arguments")?;
                 Ok(Expression {
                     kind: ExpressionKind::Call {
@@ -1964,6 +2030,71 @@ impl Parser {
 
     // Helper methods for identifiers and type names
 
+    /// Parse function call arguments, supporting both positional and named arguments.
+    /// Named arguments use the syntax: `name: value`
+    /// Positional arguments must come before named arguments.
+    fn parse_call_arguments(&mut self) -> Result<Vec<Argument>, String> {
+        let mut args = Vec::new();
+        let mut seen_named = false;
+
+        if self.check(&TokenKind::RParen) {
+            return Ok(args);
+        }
+
+        loop {
+            let arg_span = self.span();
+
+            // Check if this is a named argument: identifier followed by colon
+            // We need to look ahead to distinguish `name: value` from just `name`
+            let (name, value) = if let TokenKind::Identifier(ident) = &self.peek().kind {
+                let ident = ident.clone();
+                // Peek at the next token to see if it's a colon
+                if self.current + 1 < self.tokens.len()
+                    && matches!(self.tokens[self.current + 1].kind, TokenKind::Colon)
+                {
+                    // This is a named argument
+                    self.advance(); // consume identifier
+                    self.advance(); // consume colon
+                    seen_named = true;
+                    let value = self.expression()?;
+                    (Some(ident), value)
+                } else {
+                    // This is a positional argument
+                    if seen_named {
+                        return Err(format!(
+                            "{}:{}: Positional arguments must come before named arguments",
+                            arg_span.line, arg_span.column
+                        ));
+                    }
+                    let value = self.expression()?;
+                    (None, value)
+                }
+            } else {
+                // Not an identifier, must be a positional argument
+                if seen_named {
+                    return Err(format!(
+                        "{}:{}: Positional arguments must come before named arguments",
+                        arg_span.line, arg_span.column
+                    ));
+                }
+                let value = self.expression()?;
+                (None, value)
+            };
+
+            args.push(Argument {
+                name,
+                value,
+                span: arg_span,
+            });
+
+            if !self.match_token(&TokenKind::Comma) {
+                break;
+            }
+        }
+
+        Ok(args)
+    }
+
     fn expect_identifier(&mut self, message: &str) -> Result<String, String> {
         match &self.peek().kind {
             TokenKind::Identifier(name) => {
@@ -2139,6 +2270,41 @@ mod tests {
     }
 
     #[test]
+    fn test_named_arguments() {
+        // Test parsing: foo(x: 1, y: 2)
+        let expr = parse_expr("foo(x: 1, y: 2)").unwrap();
+        if let ExpressionKind::Call { args, .. } = expr.kind {
+            assert_eq!(args.len(), 2);
+            assert_eq!(args[0].name, Some("x".to_string()));
+            assert_eq!(args[1].name, Some("y".to_string()));
+        } else {
+            panic!("Expected call expression");
+        }
+    }
+
+    #[test]
+    fn test_mixed_positional_and_named_arguments() {
+        // Test parsing: foo(1, y: 2, z: 3)
+        let expr = parse_expr("foo(1, y: 2, z: 3)").unwrap();
+        if let ExpressionKind::Call { args, .. } = expr.kind {
+            assert_eq!(args.len(), 3);
+            assert_eq!(args[0].name, None); // positional
+            assert_eq!(args[1].name, Some("y".to_string()));
+            assert_eq!(args[2].name, Some("z".to_string()));
+        } else {
+            panic!("Expected call expression");
+        }
+    }
+
+    #[test]
+    fn test_positional_after_named_error() {
+        // Positional arguments after named should error
+        let result = parse_expr("foo(x: 1, 2)");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Positional arguments must come before named arguments"));
+    }
+
+    #[test]
     fn test_array_type_annotation() {
         // Test parsing: let arr: [int] = [1, 2, 3]
         let source = "let arr: [int] = [1, 2, 3]";
@@ -2146,8 +2312,12 @@ mod tests {
         let program = parse(&tokens).unwrap();
         assert_eq!(program.statements.len(), 1);
 
-        if let StatementKind::VarDecl { name, type_ann, .. } = &program.statements[0].kind {
-            assert_eq!(name, "arr");
+        if let StatementKind::VarDecl { pattern, type_ann, .. } = &program.statements[0].kind {
+            if let PatternKind::Variable(name) = &pattern.kind {
+                assert_eq!(name, "arr");
+            } else {
+                panic!("Expected variable pattern");
+            }
             assert!(type_ann.is_some());
             let type_expr = type_ann.as_ref().unwrap();
             assert!(matches!(type_expr.kind, TypeExprKind::Array(_)));

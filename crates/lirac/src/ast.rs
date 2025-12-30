@@ -44,8 +44,9 @@ pub struct Statement {
 #[derive(Debug, Clone)]
 pub enum StatementKind {
     /// Variable declaration: let x = expr or var x = expr
+    /// Also supports destructuring: let (a, b) = tuple, let { x, y } = struct
     VarDecl {
-        name: String,
+        pattern: Pattern,
         mutable: bool,
         type_ann: Option<TypeExpr>,
         initializer: Option<Expression>,
@@ -266,10 +267,10 @@ pub enum ExpressionKind {
         op: UnaryOp,
         operand: Box<Expression>,
     },
-    /// Function call
+    /// Function call (supports named arguments)
     Call {
         callee: Box<Expression>,
-        args: Vec<Expression>,
+        args: Vec<Argument>,
     },
     /// Field access
     FieldAccess {
@@ -359,7 +360,7 @@ pub enum ExpressionKind {
     MethodCall {
         receiver: Box<Expression>,
         method: String,
-        args: Vec<Expression>,
+        args: Vec<Argument>,
     },
 }
 
@@ -412,6 +413,16 @@ pub struct MatchArm {
     pub pattern: Pattern,
     pub guard: Option<Expression>,
     pub body: Expression,
+    pub span: Span,
+}
+
+/// Function call argument (supports named arguments)
+#[derive(Debug, Clone)]
+pub struct Argument {
+    /// Optional parameter name for named arguments (e.g., `name:` in `foo(name: "bar")`)
+    pub name: Option<String>,
+    /// The argument value expression
+    pub value: Expression,
     pub span: Span,
 }
 

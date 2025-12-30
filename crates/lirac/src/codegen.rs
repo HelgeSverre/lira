@@ -40,6 +40,10 @@ pub struct CodeGenerator {
     struct_methods: HashMap<String, HashMap<String, usize>>,
     /// Captured variables for current closure (name -> capture index)
     captures: Vec<String>,
+    /// Function default parameter values: fn_name -> [(param_index, default_expr)]
+    function_defaults: FunctionDefaults,
+    /// Module-level constants: name -> constant pool index
+    module_consts: HashMap<String, u16>,
 }
 
 /// Key for constant deduplication
@@ -59,6 +63,9 @@ struct FunctionInfo {
     param_count: u8,
     local_count: u16,
 }
+
+/// Function parameter defaults: fn_name -> vec of (param_index, default_expr)
+type FunctionDefaults = HashMap<String, Vec<(usize, Expression)>>;
 
 /// Loop context for break/continue
 struct LoopContext {
@@ -85,6 +92,8 @@ impl CodeGenerator {
             debug_info: DebugInfo::new(),
             struct_methods: HashMap::new(),
             captures: Vec::new(),
+            function_defaults: HashMap::new(),
+            module_consts: HashMap::new(),
         }
     }
 
@@ -114,6 +123,15 @@ impl CodeGenerator {
                         param_count: params.len() as u8,
                         local_count: 0,
                     });
+                    // Collect default parameter values
+                    let defaults: Vec<(usize, Expression)> = params
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, p)| p.default.clone().map(|d| (i, d)))
+                        .collect();
+                    if !defaults.is_empty() {
+                        self.function_defaults.insert(name.clone(), defaults);
+                    }
                 }
                 StatementKind::ImplDecl {
                     type_name, methods, ..
@@ -129,6 +147,13 @@ impl CodeGenerator {
                                 local_count: 0,
                             });
                         }
+                    }
+                }
+                StatementKind::ConstDecl { name, initializer, .. } => {
+                    // Collect module-level constants
+                    // Only literal values are supported for module-level consts
+                    if let Some(const_idx) = self.eval_const_expr(initializer) {
+                        self.module_consts.insert(name.clone(), const_idx);
                     }
                 }
                 _ => {}
@@ -383,12 +408,173 @@ impl CodeGenerator {
         None
     }
 
+    /// Define local variables for all bindings in a pattern (without initializing)
+    fn define_pattern_locals(&mut self, pattern: &Pattern) {
+        match &pattern.kind {
+            PatternKind::Variable(name) => {
+                self.define_local(name);
+            }
+            PatternKind::Wildcard => {
+                // Wildcard doesn't define any variables
+            }
+            PatternKind::Tuple(patterns) => {
+                for pat in patterns {
+                    self.define_pattern_locals(pat);
+                }
+            }
+            PatternKind::Struct { fields, .. } => {
+                for (_, pat) in fields {
+                    self.define_pattern_locals(pat);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Generate code to bind a pattern to a value on the stack
+    /// The value should already be on the stack when this is called
+    fn generate_pattern_binding(&mut self, pattern: &Pattern, init: &Expression) {
+        match &pattern.kind {
+            PatternKind::Variable(name) => {
+                // Try to infer type from initializer for method dispatch
+                if let ExpressionKind::Call { callee, .. } = &init.kind {
+                    if let ExpressionKind::FieldAccess { object, .. } = &callee.kind {
+                        if let ExpressionKind::Identifier(type_name) = &object.kind {
+                            self.define_local_type(name, type_name);
+                        }
+                    }
+                } else if let ExpressionKind::StructLiteral { name: struct_name, .. } = &init.kind {
+                    if let Some(sn) = struct_name {
+                        self.define_local_type(name, sn);
+                    }
+                }
+
+                // Simple variable binding - store the value
+                let slot = self.define_local(name);
+                self.emit_opcode(Opcode::StoreLocal);
+                self.emit_u16(slot);
+            }
+            PatternKind::Wildcard => {
+                // Wildcard - just pop the value
+                self.emit_opcode(Opcode::Pop);
+            }
+            PatternKind::Tuple(patterns) => {
+                // Tuple/array destructuring
+                // Stack has the tuple/array on top
+                // We need to extract each element and bind it
+                for (i, pat) in patterns.iter().enumerate().rev() {
+                    // Duplicate the tuple for each extraction (except the last)
+                    if i > 0 {
+                        self.emit_opcode(Opcode::Dup);
+                    }
+                    // Load the index
+                    let idx = self.add_constant(Constant::Int(i as i64));
+                    self.emit_opcode(Opcode::LoadConst);
+                    self.emit_u16(idx);
+                    // Get the element
+                    self.emit_opcode(Opcode::ArrayGet);
+                    // Recursively bind this element
+                    self.generate_pattern_binding_simple(pat);
+                }
+            }
+            PatternKind::Struct { fields, .. } => {
+                // Struct destructuring
+                // Stack has the struct object on top
+                for (i, (field_name, pat)) in fields.iter().enumerate().rev() {
+                    // Duplicate the struct for each field extraction (except the last)
+                    if i > 0 {
+                        self.emit_opcode(Opcode::Dup);
+                    }
+                    // Get the field
+                    let field_idx = self.add_constant(Constant::String(field_name.clone()));
+                    self.emit_opcode(Opcode::GetField);
+                    self.emit_u16(field_idx);
+                    // Recursively bind this field
+                    self.generate_pattern_binding_simple(pat);
+                }
+            }
+            _ => {
+                // For other patterns, just pop (shouldn't happen in var declarations)
+                self.emit_opcode(Opcode::Pop);
+            }
+        }
+    }
+
+    /// Simple pattern binding (for nested patterns where we don't need type inference)
+    fn generate_pattern_binding_simple(&mut self, pattern: &Pattern) {
+        match &pattern.kind {
+            PatternKind::Variable(name) => {
+                let slot = self.define_local(name);
+                self.emit_opcode(Opcode::StoreLocal);
+                self.emit_u16(slot);
+            }
+            PatternKind::Wildcard => {
+                self.emit_opcode(Opcode::Pop);
+            }
+            PatternKind::Tuple(patterns) => {
+                for (i, pat) in patterns.iter().enumerate().rev() {
+                    if i > 0 {
+                        self.emit_opcode(Opcode::Dup);
+                    }
+                    let idx = self.add_constant(Constant::Int(i as i64));
+                    self.emit_opcode(Opcode::LoadConst);
+                    self.emit_u16(idx);
+                    self.emit_opcode(Opcode::ArrayGet);
+                    self.generate_pattern_binding_simple(pat);
+                }
+            }
+            PatternKind::Struct { fields, .. } => {
+                for (i, (field_name, pat)) in fields.iter().enumerate().rev() {
+                    if i > 0 {
+                        self.emit_opcode(Opcode::Dup);
+                    }
+                    let field_idx = self.add_constant(Constant::String(field_name.clone()));
+                    self.emit_opcode(Opcode::GetField);
+                    self.emit_u16(field_idx);
+                    self.generate_pattern_binding_simple(pat);
+                }
+            }
+            _ => {
+                self.emit_opcode(Opcode::Pop);
+            }
+        }
+    }
+
     /// Find captured variable index (for closures)
     fn lookup_capture(&self, name: &str) -> Option<u8> {
         self.captures
             .iter()
             .position(|n| n == name)
             .map(|i| i as u8)
+    }
+
+    /// Evaluate a constant expression and add to constant pool
+    /// Returns the constant pool index if successful, None if not a compile-time constant
+    fn eval_const_expr(&mut self, expr: &Expression) -> Option<u16> {
+        match &expr.kind {
+            ExpressionKind::IntLiteral(v) => Some(self.add_constant(Constant::Int(*v))),
+            ExpressionKind::FloatLiteral(v) => Some(self.add_constant(Constant::Float(*v))),
+            ExpressionKind::StringLiteral(v) => Some(self.add_constant(Constant::String(v.clone()))),
+            ExpressionKind::BoolLiteral(v) => Some(self.add_constant(Constant::Bool(*v))),
+            ExpressionKind::CharLiteral(v) => Some(self.add_constant(Constant::Int(*v as i64))),
+            ExpressionKind::Unary { op, operand } => {
+                // Support negation of literals
+                if let UnaryOp::Neg = op {
+                    match &operand.kind {
+                        ExpressionKind::IntLiteral(v) => {
+                            Some(self.add_constant(Constant::Int(-*v)))
+                        }
+                        ExpressionKind::FloatLiteral(v) => {
+                            Some(self.add_constant(Constant::Float(-*v)))
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            }
+            _ => None, // Complex expressions not supported as module-level consts
+        }
     }
 
     /// Resolve a local variable, also checking captures for closures
@@ -423,7 +609,7 @@ impl CodeGenerator {
             ExpressionKind::Call { callee, args } => {
                 self.collect_free_vars(callee, bound, free);
                 for arg in args {
-                    self.collect_free_vars(arg, bound, free);
+                    self.collect_free_vars(&arg.value, bound, free);
                 }
             }
             ExpressionKind::FieldAccess { object, .. } => {
@@ -692,30 +878,17 @@ impl CodeGenerator {
 
         match &stmt.kind {
             StatementKind::VarDecl {
-                name, initializer, ..
+                pattern, initializer, ..
             } => {
-                let slot = self.define_local(name);
-
                 if let Some(init) = initializer {
-                    // Try to infer type from initializer for method dispatch
-                    // Cases: Type.method() or Type { fields }
-                    if let ExpressionKind::Call { callee, .. } = &init.kind {
-                        if let ExpressionKind::FieldAccess { object, .. } = &callee.kind {
-                            if let ExpressionKind::Identifier(type_name) = &object.kind {
-                                // Call like Counter.new() - type is the type_name
-                                self.define_local_type(name, type_name);
-                            }
-                        }
-                    } else if let ExpressionKind::StructLiteral { name: struct_name, .. } = &init.kind {
-                        // Struct literal like Counter { value: 0 }
-                        if let Some(sn) = struct_name {
-                            self.define_local_type(name, sn);
-                        }
-                    }
-
+                    // Generate the initializer value
                     self.generate_expression(init);
-                    self.emit_opcode(Opcode::StoreLocal);
-                    self.emit_u16(slot);
+
+                    // Bind the pattern (handles both simple variables and destructuring)
+                    self.generate_pattern_binding(pattern, init);
+                } else {
+                    // No initializer - just define the variable slots
+                    self.define_pattern_locals(pattern);
                 }
             }
 
@@ -1207,6 +1380,10 @@ impl CodeGenerator {
                     // Load from closure captures
                     self.emit_opcode(Opcode::LoadCapture);
                     self.emit_u8(capture_idx);
+                } else if let Some(&const_idx) = self.module_consts.get(name) {
+                    // Load module-level constant
+                    self.emit_opcode(Opcode::LoadConst);
+                    self.emit_u16(const_idx);
                 } else {
                     // Check if it's a function reference
                     let func_info = self.functions.iter().find(|f| f.name == *name);
@@ -1263,6 +1440,7 @@ impl CodeGenerator {
                     BinaryOp::Mul => Opcode::Mul,
                     BinaryOp::Div => Opcode::Div,
                     BinaryOp::Mod => Opcode::Mod,
+                    BinaryOp::Pow => Opcode::Pow,
                     BinaryOp::Eq => Opcode::Eq,
                     BinaryOp::Ne => Opcode::Ne,
                     BinaryOp::Lt => Opcode::Lt,
@@ -1367,7 +1545,7 @@ impl CodeGenerator {
                     match name.as_str() {
                         "print" | "println" => {
                             for arg in args {
-                                self.generate_expression(arg);
+                                self.generate_expression(&arg.value);
                             }
                             self.emit_opcode(Opcode::Print);
                             return;
@@ -1380,7 +1558,7 @@ impl CodeGenerator {
                                 self.emit_opcode(Opcode::LoadConst);
                                 self.emit_u16(idx);
                             } else {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                             }
                             self.emit_opcode(Opcode::ChanNew);
                             return;
@@ -1388,8 +1566,8 @@ impl CodeGenerator {
                         "send" => {
                             // send(channel, value)
                             if args.len() >= 2 {
-                                self.generate_expression(&args[0]); // channel
-                                self.generate_expression(&args[1]); // value
+                                self.generate_expression(&args[0].value); // channel
+                                self.generate_expression(&args[1].value); // value
                                 self.emit_opcode(Opcode::ChanSend);
                             } else {
                                 self.errors.push("send() requires 2 arguments".to_string());
@@ -1399,7 +1577,7 @@ impl CodeGenerator {
                         "recv" => {
                             // recv(channel) -> (value, ok)
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::ChanRecv);
                             } else {
                                 self.errors.push("recv() requires 1 argument".to_string());
@@ -1409,7 +1587,7 @@ impl CodeGenerator {
                         "close" => {
                             // close(channel)
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::ChanClose);
                             } else {
                                 self.errors.push("close() requires 1 argument".to_string());
@@ -1429,7 +1607,7 @@ impl CodeGenerator {
                         "len" => {
                             // len(array_or_string)
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::ArrayLen);
                             } else {
                                 self.errors.push("len() requires 1 argument".to_string());
@@ -1439,8 +1617,8 @@ impl CodeGenerator {
                         "push" => {
                             // push(array, value)
                             if args.len() >= 2 {
-                                self.generate_expression(&args[0]); // array
-                                self.generate_expression(&args[1]); // value
+                                self.generate_expression(&args[0].value); // array
+                                self.generate_expression(&args[1].value); // value
                                 self.emit_opcode(Opcode::ArrayPush);
                             } else {
                                 self.errors.push("push() requires 2 arguments".to_string());
@@ -1450,7 +1628,7 @@ impl CodeGenerator {
                         "pop" => {
                             // pop(array)
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::ArrayPop);
                             } else {
                                 self.errors.push("pop() requires 1 argument".to_string());
@@ -1465,8 +1643,8 @@ impl CodeGenerator {
                             // file_open(path: string, mode: int) -> int
                             // mode: 0=read, 1=write, 2=append, 3=read+write
                             if args.len() >= 2 {
-                                self.generate_expression(&args[0]); // path
-                                self.generate_expression(&args[1]); // mode
+                                self.generate_expression(&args[0].value); // path
+                                self.generate_expression(&args[1].value); // mode
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(10);
                             } else {
@@ -1478,8 +1656,8 @@ impl CodeGenerator {
                         "file_read" => {
                             // file_read(fd: int, max_bytes: int) -> string
                             if args.len() >= 2 {
-                                self.generate_expression(&args[0]); // fd
-                                self.generate_expression(&args[1]); // max_bytes
+                                self.generate_expression(&args[0].value); // fd
+                                self.generate_expression(&args[1].value); // max_bytes
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(11);
                             } else {
@@ -1491,8 +1669,8 @@ impl CodeGenerator {
                         "file_write" => {
                             // file_write(fd: int, data: string) -> int
                             if args.len() >= 2 {
-                                self.generate_expression(&args[0]); // fd
-                                self.generate_expression(&args[1]); // data
+                                self.generate_expression(&args[0].value); // fd
+                                self.generate_expression(&args[1].value); // data
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(12);
                             } else {
@@ -1504,7 +1682,7 @@ impl CodeGenerator {
                         "file_close" => {
                             // file_close(fd: int) -> bool
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(13);
                             } else {
@@ -1516,7 +1694,7 @@ impl CodeGenerator {
                         "file_exists" => {
                             // file_exists(path: string) -> bool
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(14);
                             } else {
@@ -1528,7 +1706,7 @@ impl CodeGenerator {
                         "file_size" => {
                             // file_size(path: string) -> int
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(15);
                             } else {
@@ -1544,7 +1722,7 @@ impl CodeGenerator {
                         "env_get" => {
                             // env_get(name: string) -> string?
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(20);
                             } else {
@@ -1562,8 +1740,8 @@ impl CodeGenerator {
                         "env_set" => {
                             // env_set(name: string, value: string) -> bool
                             if args.len() >= 2 {
-                                self.generate_expression(&args[0]); // name
-                                self.generate_expression(&args[1]); // value
+                                self.generate_expression(&args[0].value); // name
+                                self.generate_expression(&args[1].value); // value
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(200);
                             } else {
@@ -1575,7 +1753,7 @@ impl CodeGenerator {
                         "env_remove" => {
                             // env_remove(name: string) -> bool
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(201);
                             } else {
@@ -1599,7 +1777,7 @@ impl CodeGenerator {
                         "env_has" => {
                             // env_has(name: string) -> bool
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(204);
                             } else {
@@ -1639,7 +1817,7 @@ impl CodeGenerator {
                         "sleep" => {
                             // sleep(millis: int)
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(5);
                             } else {
@@ -1668,7 +1846,7 @@ impl CodeGenerator {
                         "time_format_iso" => {
                             // time_format_iso(timestamp_ms: int) -> string
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(130);
                             } else {
@@ -1680,8 +1858,8 @@ impl CodeGenerator {
                         "time_format" => {
                             // time_format(timestamp_ms: int, format: string) -> string
                             if args.len() >= 2 {
-                                self.generate_expression(&args[0]); // timestamp_ms
-                                self.generate_expression(&args[1]); // format
+                                self.generate_expression(&args[0].value); // timestamp_ms
+                                self.generate_expression(&args[1].value); // format
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(131);
                             } else {
@@ -1693,7 +1871,7 @@ impl CodeGenerator {
                         "time_parse_iso" => {
                             // time_parse_iso(string) -> int
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(132);
                             } else {
@@ -1711,7 +1889,7 @@ impl CodeGenerator {
                         "time_components" => {
                             // time_components(timestamp_ms: int) -> [int]
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(134);
                             } else {
@@ -1723,12 +1901,12 @@ impl CodeGenerator {
                         "time_from_components" => {
                             // time_from_components(year, month, day, hour, min, sec) -> int
                             if args.len() >= 6 {
-                                self.generate_expression(&args[0]); // year
-                                self.generate_expression(&args[1]); // month
-                                self.generate_expression(&args[2]); // day
-                                self.generate_expression(&args[3]); // hour
-                                self.generate_expression(&args[4]); // min
-                                self.generate_expression(&args[5]); // sec
+                                self.generate_expression(&args[0].value); // year
+                                self.generate_expression(&args[1].value); // month
+                                self.generate_expression(&args[2].value); // day
+                                self.generate_expression(&args[3].value); // hour
+                                self.generate_expression(&args[4].value); // min
+                                self.generate_expression(&args[5].value); // sec
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(135);
                             } else {
@@ -1751,8 +1929,8 @@ impl CodeGenerator {
                         "random_int" => {
                             // random_int(min: int, max: int) -> int
                             if args.len() >= 2 {
-                                self.generate_expression(&args[0]); // min
-                                self.generate_expression(&args[1]); // max
+                                self.generate_expression(&args[0].value); // min
+                                self.generate_expression(&args[1].value); // max
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(41);
                             } else {
@@ -1768,7 +1946,7 @@ impl CodeGenerator {
                         "sqrt" => {
                             // sqrt(x: float) -> float
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(140);
                             } else {
@@ -1779,8 +1957,8 @@ impl CodeGenerator {
                         "pow" => {
                             // pow(base: float, exp: float) -> float
                             if args.len() >= 2 {
-                                self.generate_expression(&args[0]); // base
-                                self.generate_expression(&args[1]); // exp
+                                self.generate_expression(&args[0].value); // base
+                                self.generate_expression(&args[1].value); // exp
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(141);
                             } else {
@@ -1791,7 +1969,7 @@ impl CodeGenerator {
                         "exp" => {
                             // exp(x: float) -> float
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(142);
                             } else {
@@ -1802,7 +1980,7 @@ impl CodeGenerator {
                         "ln" => {
                             // ln(x: float) -> float
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(143);
                             } else {
@@ -1813,7 +1991,7 @@ impl CodeGenerator {
                         "log10" => {
                             // log10(x: float) -> float
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(144);
                             } else {
@@ -1824,7 +2002,7 @@ impl CodeGenerator {
                         "log2" => {
                             // log2(x: float) -> float
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(145);
                             } else {
@@ -1835,7 +2013,7 @@ impl CodeGenerator {
                         "sin" => {
                             // sin(x: float) -> float
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(146);
                             } else {
@@ -1846,7 +2024,7 @@ impl CodeGenerator {
                         "cos" => {
                             // cos(x: float) -> float
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(147);
                             } else {
@@ -1857,7 +2035,7 @@ impl CodeGenerator {
                         "tan" => {
                             // tan(x: float) -> float
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(148);
                             } else {
@@ -1868,7 +2046,7 @@ impl CodeGenerator {
                         "asin" => {
                             // asin(x: float) -> float
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(149);
                             } else {
@@ -1879,7 +2057,7 @@ impl CodeGenerator {
                         "acos" => {
                             // acos(x: float) -> float
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(150);
                             } else {
@@ -1890,7 +2068,7 @@ impl CodeGenerator {
                         "atan" => {
                             // atan(x: float) -> float
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(151);
                             } else {
@@ -1901,8 +2079,8 @@ impl CodeGenerator {
                         "atan2" => {
                             // atan2(y: float, x: float) -> float
                             if args.len() >= 2 {
-                                self.generate_expression(&args[0]); // y
-                                self.generate_expression(&args[1]); // x
+                                self.generate_expression(&args[0].value); // y
+                                self.generate_expression(&args[1].value); // x
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(152);
                             } else {
@@ -1913,7 +2091,7 @@ impl CodeGenerator {
                         "sinh" => {
                             // sinh(x: float) -> float
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(153);
                             } else {
@@ -1924,7 +2102,7 @@ impl CodeGenerator {
                         "cosh" => {
                             // cosh(x: float) -> float
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(154);
                             } else {
@@ -1935,7 +2113,7 @@ impl CodeGenerator {
                         "tanh" => {
                             // tanh(x: float) -> float
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(155);
                             } else {
@@ -1946,7 +2124,7 @@ impl CodeGenerator {
                         "floor" => {
                             // floor(x: float) -> float
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(156);
                             } else {
@@ -1957,7 +2135,7 @@ impl CodeGenerator {
                         "ceil" => {
                             // ceil(x: float) -> float
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(157);
                             } else {
@@ -1968,7 +2146,7 @@ impl CodeGenerator {
                         "round" => {
                             // round(x: float) -> float
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(158);
                             } else {
@@ -1979,7 +2157,7 @@ impl CodeGenerator {
                         "trunc" => {
                             // trunc(x: float) -> float
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(159);
                             } else {
@@ -1990,7 +2168,7 @@ impl CodeGenerator {
                         "is_nan" => {
                             // is_nan(x: float) -> bool
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(160);
                             } else {
@@ -2001,7 +2179,7 @@ impl CodeGenerator {
                         "is_infinite" => {
                             // is_infinite(x: float) -> bool
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(161);
                             } else {
@@ -2013,7 +2191,7 @@ impl CodeGenerator {
                         "is_finite" => {
                             // is_finite(x: float) -> bool
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(162);
                             } else {
@@ -2025,7 +2203,7 @@ impl CodeGenerator {
                         "abs" => {
                             // abs(x: float) -> float
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(163);
                             } else {
@@ -2040,8 +2218,8 @@ impl CodeGenerator {
                         "str_char_code" => {
                             // str_char_code(str: string, index: int) -> int
                             if args.len() >= 2 {
-                                self.generate_expression(&args[0]); // str
-                                self.generate_expression(&args[1]); // index
+                                self.generate_expression(&args[0].value); // str
+                                self.generate_expression(&args[1].value); // index
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(30);
                             } else {
@@ -2053,7 +2231,7 @@ impl CodeGenerator {
                         "str_from_char_code" => {
                             // str_from_char_code(code: int) -> string
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]); // code
+                                self.generate_expression(&args[0].value); // code
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(31);
                             } else {
@@ -2065,7 +2243,7 @@ impl CodeGenerator {
                         "str_to_upper" => {
                             // str_to_upper(str: string) -> string
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(32);
                             } else {
@@ -2077,7 +2255,7 @@ impl CodeGenerator {
                         "str_to_lower" => {
                             // str_to_lower(str: string) -> string
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(33);
                             } else {
@@ -2089,9 +2267,9 @@ impl CodeGenerator {
                         "str_substring" => {
                             // str_substring(str: string, start: int, end: int) -> string
                             if args.len() >= 3 {
-                                self.generate_expression(&args[0]); // str
-                                self.generate_expression(&args[1]); // start
-                                self.generate_expression(&args[2]); // end
+                                self.generate_expression(&args[0].value); // str
+                                self.generate_expression(&args[1].value); // start
+                                self.generate_expression(&args[2].value); // end
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(34);
                             } else {
@@ -2103,8 +2281,8 @@ impl CodeGenerator {
                         "str_index_of" => {
                             // str_index_of(str: string, substr: string) -> int
                             if args.len() >= 2 {
-                                self.generate_expression(&args[0]); // str
-                                self.generate_expression(&args[1]); // substr
+                                self.generate_expression(&args[0].value); // str
+                                self.generate_expression(&args[1].value); // substr
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(35);
                             } else {
@@ -2116,8 +2294,8 @@ impl CodeGenerator {
                         "str_split" => {
                             // str_split(str: string, delimiter: string) -> [string]
                             if args.len() >= 2 {
-                                self.generate_expression(&args[0]); // str
-                                self.generate_expression(&args[1]); // delimiter
+                                self.generate_expression(&args[0].value); // str
+                                self.generate_expression(&args[1].value); // delimiter
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(36);
                             } else {
@@ -2129,7 +2307,7 @@ impl CodeGenerator {
                         "str_trim" => {
                             // str_trim(str: string) -> string
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(37);
                             } else {
@@ -2141,7 +2319,7 @@ impl CodeGenerator {
                         "str_trim_start" => {
                             // str_trim_start(str: string) -> string
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(38);
                             } else {
@@ -2153,7 +2331,7 @@ impl CodeGenerator {
                         "str_trim_end" => {
                             // str_trim_end(str: string) -> string
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(39);
                             } else {
@@ -2169,7 +2347,7 @@ impl CodeGenerator {
                         "base64_encode" => {
                             // base64_encode(input: string) -> string
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(60);
                             } else {
@@ -2181,7 +2359,7 @@ impl CodeGenerator {
                         "base64_decode" => {
                             // base64_decode(input: string) -> string
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(61);
                             } else {
@@ -2193,7 +2371,7 @@ impl CodeGenerator {
                         "base64_encode_url" => {
                             // base64_encode_url(input: string) -> string
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(62);
                             } else {
@@ -2205,7 +2383,7 @@ impl CodeGenerator {
                         "base64_decode_url" => {
                             // base64_decode_url(input: string) -> string
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(63);
                             } else {
@@ -2221,7 +2399,7 @@ impl CodeGenerator {
                         "url_encode" => {
                             // url_encode(input: string) -> string
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(110);
                             } else {
@@ -2233,7 +2411,7 @@ impl CodeGenerator {
                         "url_decode" => {
                             // url_decode(input: string) -> string
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(111);
                             } else {
@@ -2249,7 +2427,7 @@ impl CodeGenerator {
                         "http_get" => {
                             // http_get(url: string) -> [int, string]
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]); // url
+                                self.generate_expression(&args[0].value); // url
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(120);
                             } else {
@@ -2261,9 +2439,9 @@ impl CodeGenerator {
                         "http_post" => {
                             // http_post(url: string, body: string, content_type: string) -> [int, string]
                             if args.len() >= 3 {
-                                self.generate_expression(&args[0]); // url
-                                self.generate_expression(&args[1]); // body
-                                self.generate_expression(&args[2]); // content_type
+                                self.generate_expression(&args[0].value); // url
+                                self.generate_expression(&args[1].value); // body
+                                self.generate_expression(&args[2].value); // content_type
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(121);
                             } else {
@@ -2275,10 +2453,10 @@ impl CodeGenerator {
                         "http_request" => {
                             // http_request(method: string, url: string, headers: string, body: string) -> [int, string]
                             if args.len() >= 4 {
-                                self.generate_expression(&args[0]); // method
-                                self.generate_expression(&args[1]); // url
-                                self.generate_expression(&args[2]); // headers
-                                self.generate_expression(&args[3]); // body
+                                self.generate_expression(&args[0].value); // method
+                                self.generate_expression(&args[1].value); // url
+                                self.generate_expression(&args[2].value); // headers
+                                self.generate_expression(&args[3].value); // body
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(122);
                             } else {
@@ -2294,7 +2472,7 @@ impl CodeGenerator {
                         "md5" => {
                             // md5(input: string) -> string (hex)
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(70);
                             } else {
@@ -2305,7 +2483,7 @@ impl CodeGenerator {
                         "sha1" => {
                             // sha1(input: string) -> string (hex)
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(71);
                             } else {
@@ -2316,7 +2494,7 @@ impl CodeGenerator {
                         "sha256" => {
                             // sha256(input: string) -> string (hex)
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(72);
                             } else {
@@ -2327,7 +2505,7 @@ impl CodeGenerator {
                         "sha512" => {
                             // sha512(input: string) -> string (hex)
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(73);
                             } else {
@@ -2342,7 +2520,7 @@ impl CodeGenerator {
                         "json_parse" => {
                             // json_parse(json_str: string) -> value
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(50);
                             } else {
@@ -2354,7 +2532,7 @@ impl CodeGenerator {
                         "json_stringify" => {
                             // json_stringify(value) -> string
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(51);
                             } else {
@@ -2366,7 +2544,7 @@ impl CodeGenerator {
                         "json_pretty" => {
                             // json_pretty(value) -> string (with pretty printing)
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(52);
                             } else {
@@ -2382,8 +2560,8 @@ impl CodeGenerator {
                         "tcp_connect" => {
                             // tcp_connect(host: string, port: int) -> int
                             if args.len() >= 2 {
-                                self.generate_expression(&args[0]); // host
-                                self.generate_expression(&args[1]); // port
+                                self.generate_expression(&args[0].value); // host
+                                self.generate_expression(&args[1].value); // port
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(80);
                             } else {
@@ -2395,8 +2573,8 @@ impl CodeGenerator {
                         "tcp_write" => {
                             // tcp_write(socket_id: int, data: string) -> int
                             if args.len() >= 2 {
-                                self.generate_expression(&args[0]); // socket_id
-                                self.generate_expression(&args[1]); // data
+                                self.generate_expression(&args[0].value); // socket_id
+                                self.generate_expression(&args[1].value); // data
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(81);
                             } else {
@@ -2408,8 +2586,8 @@ impl CodeGenerator {
                         "tcp_read" => {
                             // tcp_read(socket_id: int, max_bytes: int) -> string
                             if args.len() >= 2 {
-                                self.generate_expression(&args[0]); // socket_id
-                                self.generate_expression(&args[1]); // max_bytes
+                                self.generate_expression(&args[0].value); // socket_id
+                                self.generate_expression(&args[1].value); // max_bytes
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(82);
                             } else {
@@ -2421,7 +2599,7 @@ impl CodeGenerator {
                         "tcp_close" => {
                             // tcp_close(socket_id: int) -> bool
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(83);
                             } else {
@@ -2433,7 +2611,7 @@ impl CodeGenerator {
                         "dns_lookup" => {
                             // dns_lookup(hostname: string) -> string
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(84);
                             } else {
@@ -2455,7 +2633,7 @@ impl CodeGenerator {
                         "chdir" => {
                             // chdir(path: string) -> bool
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(91);
                             } else {
@@ -2466,7 +2644,7 @@ impl CodeGenerator {
                         "mkdir" => {
                             // mkdir(path: string) -> bool
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(92);
                             } else {
@@ -2477,7 +2655,7 @@ impl CodeGenerator {
                         "mkdir_all" => {
                             // mkdir_all(path: string) -> bool
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(93);
                             } else {
@@ -2489,7 +2667,7 @@ impl CodeGenerator {
                         "rmdir" => {
                             // rmdir(path: string) -> bool
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(94);
                             } else {
@@ -2500,7 +2678,7 @@ impl CodeGenerator {
                         "remove" => {
                             // remove(path: string) -> bool
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(95);
                             } else {
@@ -2511,7 +2689,7 @@ impl CodeGenerator {
                         "remove_all" => {
                             // remove_all(path: string) -> bool
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(96);
                             } else {
@@ -2523,7 +2701,7 @@ impl CodeGenerator {
                         "listdir" => {
                             // listdir(path: string) -> [string]
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(97);
                             } else {
@@ -2535,7 +2713,7 @@ impl CodeGenerator {
                         "is_dir" => {
                             // is_dir(path: string) -> bool
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(98);
                             } else {
@@ -2546,7 +2724,7 @@ impl CodeGenerator {
                         "is_file" => {
                             // is_file(path: string) -> bool
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]);
+                                self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(99);
                             } else {
@@ -2558,8 +2736,8 @@ impl CodeGenerator {
                         "rename" => {
                             // rename(from: string, to: string) -> bool
                             if args.len() >= 2 {
-                                self.generate_expression(&args[0]); // from
-                                self.generate_expression(&args[1]); // to
+                                self.generate_expression(&args[0].value); // from
+                                self.generate_expression(&args[1].value); // to
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(100);
                             } else {
@@ -2571,8 +2749,8 @@ impl CodeGenerator {
                         "copy" => {
                             // copy(from: string, to: string) -> bool
                             if args.len() >= 2 {
-                                self.generate_expression(&args[0]); // from
-                                self.generate_expression(&args[1]); // to
+                                self.generate_expression(&args[0].value); // from
+                                self.generate_expression(&args[1].value); // to
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(101);
                             } else {
@@ -2587,8 +2765,8 @@ impl CodeGenerator {
                         "regex_match" => {
                             // regex_match(pattern: string, text: string) -> bool
                             if args.len() >= 2 {
-                                self.generate_expression(&args[0]); // pattern
-                                self.generate_expression(&args[1]); // text
+                                self.generate_expression(&args[0].value); // pattern
+                                self.generate_expression(&args[1].value); // text
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(170);
                             } else {
@@ -2600,8 +2778,8 @@ impl CodeGenerator {
                         "regex_find" => {
                             // regex_find(pattern: string, text: string) -> string
                             if args.len() >= 2 {
-                                self.generate_expression(&args[0]); // pattern
-                                self.generate_expression(&args[1]); // text
+                                self.generate_expression(&args[0].value); // pattern
+                                self.generate_expression(&args[1].value); // text
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(171);
                             } else {
@@ -2613,8 +2791,8 @@ impl CodeGenerator {
                         "regex_find_all" => {
                             // regex_find_all(pattern: string, text: string) -> [string]
                             if args.len() >= 2 {
-                                self.generate_expression(&args[0]); // pattern
-                                self.generate_expression(&args[1]); // text
+                                self.generate_expression(&args[0].value); // pattern
+                                self.generate_expression(&args[1].value); // text
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(172);
                             } else {
@@ -2626,9 +2804,9 @@ impl CodeGenerator {
                         "regex_replace" => {
                             // regex_replace(pattern: string, text: string, replacement: string) -> string
                             if args.len() >= 3 {
-                                self.generate_expression(&args[0]); // pattern
-                                self.generate_expression(&args[1]); // text
-                                self.generate_expression(&args[2]); // replacement
+                                self.generate_expression(&args[0].value); // pattern
+                                self.generate_expression(&args[1].value); // text
+                                self.generate_expression(&args[2].value); // replacement
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(173);
                             } else {
@@ -2640,9 +2818,9 @@ impl CodeGenerator {
                         "regex_replace_all" => {
                             // regex_replace_all(pattern: string, text: string, replacement: string) -> string
                             if args.len() >= 3 {
-                                self.generate_expression(&args[0]); // pattern
-                                self.generate_expression(&args[1]); // text
-                                self.generate_expression(&args[2]); // replacement
+                                self.generate_expression(&args[0].value); // pattern
+                                self.generate_expression(&args[1].value); // text
+                                self.generate_expression(&args[2].value); // replacement
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(174);
                             } else {
@@ -2654,8 +2832,8 @@ impl CodeGenerator {
                         "regex_split" => {
                             // regex_split(pattern: string, text: string) -> [string]
                             if args.len() >= 2 {
-                                self.generate_expression(&args[0]); // pattern
-                                self.generate_expression(&args[1]); // text
+                                self.generate_expression(&args[0].value); // pattern
+                                self.generate_expression(&args[1].value); // text
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(175);
                             } else {
@@ -2667,8 +2845,8 @@ impl CodeGenerator {
                         "regex_captures" => {
                             // regex_captures(pattern: string, text: string) -> [string]
                             if args.len() >= 2 {
-                                self.generate_expression(&args[0]); // pattern
-                                self.generate_expression(&args[1]); // text
+                                self.generate_expression(&args[0].value); // pattern
+                                self.generate_expression(&args[1].value); // text
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(176);
                             } else {
@@ -2680,7 +2858,7 @@ impl CodeGenerator {
                         "regex_is_valid" => {
                             // regex_is_valid(pattern: string) -> bool
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]); // pattern
+                                self.generate_expression(&args[0].value); // pattern
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(177);
                             } else {
@@ -2708,7 +2886,7 @@ impl CodeGenerator {
                         "uuid_is_valid" => {
                             // uuid_is_valid(s: string) -> bool
                             if !args.is_empty() {
-                                self.generate_expression(&args[0]); // string to validate
+                                self.generate_expression(&args[0].value); // string to validate
                                 self.emit_opcode(Opcode::Syscall);
                                 self.emit_u8(192);
                             } else {
@@ -2745,7 +2923,7 @@ impl CodeGenerator {
 
                             // Push arguments
                             for arg in args {
-                                self.generate_expression(arg);
+                                self.generate_expression(&arg.value);
                             }
 
                             // Look up the function
@@ -2784,7 +2962,7 @@ impl CodeGenerator {
 
                                     // Push additional arguments
                                     for arg in args {
-                                        self.generate_expression(arg);
+                                        self.generate_expression(&arg.value);
                                     }
 
                                     // Look up and call the function
@@ -2805,7 +2983,7 @@ impl CodeGenerator {
                                     // No matching method, fall back to field access
                                     self.generate_expression(object);
                                     for arg in args {
-                                        self.generate_expression(arg);
+                                        self.generate_expression(&arg.value);
                                     }
                                     self.generate_expression(object);
                                     let idx = self.add_constant(Constant::String(field.clone()));
@@ -2818,7 +2996,7 @@ impl CodeGenerator {
                                 // No type info, fall back to field access approach
                                 self.generate_expression(object);
                                 for arg in args {
-                                    self.generate_expression(arg);
+                                    self.generate_expression(&arg.value);
                                 }
                                 self.generate_expression(object);
                                 let idx = self.add_constant(Constant::String(field.clone()));
@@ -2833,7 +3011,7 @@ impl CodeGenerator {
                         self.generate_expression(object);
 
                         for arg in args {
-                            self.generate_expression(arg);
+                            self.generate_expression(&arg.value);
                         }
 
                         self.generate_expression(object);
@@ -2872,11 +3050,11 @@ impl CodeGenerator {
                         self.emit_opcode(Opcode::Dup);
                         if args.len() == 1 {
                             // Single argument - store directly
-                            self.generate_expression(&args[0]);
+                            self.generate_expression(&args[0].value);
                         } else {
                             // Multiple arguments - store as array
                             for arg in args {
-                                self.generate_expression(arg);
+                                self.generate_expression(&arg.value);
                             }
                             self.emit_opcode(Opcode::NewArray);
                             self.emit_u16(args.len() as u16);
@@ -2891,12 +3069,30 @@ impl CodeGenerator {
                     // Regular function call
                     // Push arguments first
                     for arg in args {
-                        self.generate_expression(arg);
+                        self.generate_expression(&arg.value);
+                    }
+
+                    // Check if we need to fill in default parameter values
+                    let mut total_args = args.len();
+                    if let ExpressionKind::Identifier(fn_name) = &callee.kind {
+                        if let Some(defaults) = self.function_defaults.get(fn_name).cloned() {
+                            // Find the expected param count
+                            if let Some(func) = self.functions.iter().find(|f| &f.name == fn_name) {
+                                let expected_params = func.param_count as usize;
+                                // Generate code for missing default values
+                                for (param_idx, default_expr) in defaults {
+                                    if param_idx >= args.len() && param_idx < expected_params {
+                                        self.generate_expression(&default_expr);
+                                        total_args += 1;
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     self.generate_expression(callee);
                     self.emit_opcode(Opcode::Call);
-                    self.emit_u8(args.len() as u8);
+                    self.emit_u8(total_args as u8);
                 }
             }
 
@@ -3153,7 +3349,7 @@ impl CodeGenerator {
                     ExpressionKind::Call { callee, args } => {
                         // Push arguments first
                         for arg in args {
-                            self.generate_expression(arg);
+                            self.generate_expression(&arg.value);
                         }
 
                         // Get the function's code offset
@@ -3663,7 +3859,7 @@ impl CodeGenerator {
                 // Swap so we have [method_fn, receiver]
                 // Then generate other args
                 for arg in args {
-                    self.generate_expression(arg);
+                    self.generate_expression(&arg.value);
                 }
                 // Call with receiver + args (args.len() + 1 for self)
                 self.emit_opcode(Opcode::Call);
@@ -5225,6 +5421,78 @@ mod tests {
         assert!(
             result.is_ok(),
             "Default parameter expression should work: {:?}",
+            result.err()
+        );
+    }
+
+    // ==========================================================================
+    // Destructuring Tests (TDD - T7.22)
+    // ==========================================================================
+
+    #[test]
+    fn test_tuple_destructuring_compiles() {
+        // TDD: Tuple destructuring should compile
+        let result = compile_source(
+            r#"
+            let (a, b) = (1, 2)
+            println(a + b)
+        "#,
+        );
+        assert!(
+            result.is_ok(),
+            "Tuple destructuring should compile: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn test_tuple_destructuring_nested_compiles() {
+        // TDD: Nested tuple destructuring should compile
+        let result = compile_source(
+            r#"
+            let (a, (b, c)) = (1, (2, 3))
+            println(a + b + c)
+        "#,
+        );
+        assert!(
+            result.is_ok(),
+            "Nested tuple destructuring should compile: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn test_struct_destructuring_compiles() {
+        // TDD: Struct destructuring should compile
+        let result = compile_source(
+            r#"
+            struct Point { x: int, y: int }
+            let p = Point { x: 10, y: 20 }
+            let { x, y } = p
+            println(x + y)
+        "#,
+        );
+        assert!(
+            result.is_ok(),
+            "Struct destructuring should compile: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn test_destructuring_var_mutable() {
+        // TDD: var destructuring should create mutable bindings
+        let result = compile_source(
+            r#"
+            var (x, y) = (1, 2)
+            x = 10
+            y = 20
+            println(x + y)
+        "#,
+        );
+        assert!(
+            result.is_ok(),
+            "var destructuring should compile: {:?}",
             result.err()
         );
     }

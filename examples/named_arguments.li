@@ -1,0 +1,26 @@
+// Test named arguments in function calls
+// @expect: Hello, Alice! You are 30 years old.
+// @expect: Hello, Bob! You are 25 years old.
+// @expect: Sum: 15
+
+fn greet(name: string, age: int) {
+    println("Hello, " + name + "! You are " + age + " years old.")
+}
+
+fn add(a: int, b: int, c: int) -> int {
+    return a + b + c
+}
+
+fn main() {
+    // Named arguments in order
+    greet(name: "Alice", age: 30)
+
+    // Named arguments (positional works too)
+    greet("Bob", 25)
+
+    // Mixed positional and named
+    let result = add(1, b: 5, c: 9)
+    println("Sum: " + result)
+}
+
+main()

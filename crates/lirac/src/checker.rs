@@ -42,6 +42,8 @@ pub enum Type {
     Function {
         params: Vec<Type>,
         return_type: Box<Type>,
+        /// Number of required parameters (those without defaults)
+        required_params: usize,
     },
 
     // User-defined types
@@ -141,6 +143,15 @@ impl Type {
             // Integer to float coercion
             (a, Type::Float) if a.is_integer() => true,
             (Type::Float, b) if b.is_integer() => true,
+            // Function type compatibility (ignores required_params, compares signatures)
+            (
+                Type::Function { params: a_params, return_type: a_ret, .. },
+                Type::Function { params: b_params, return_type: b_ret, .. },
+            ) => {
+                a_params.len() == b_params.len()
+                    && a_params.iter().zip(b_params.iter()).all(|(a, b)| a.is_compatible_with(b))
+                    && a_ret.is_compatible_with(b_ret)
+            }
             (a, b) => a == b,
         }
     }
@@ -184,7 +195,7 @@ impl Type {
             Type::Result { ok_type, err_type } => {
                 format!("Result<{}, {}>", ok_type.display_name(), err_type.display_name())
             }
-            Type::Function { params, return_type } => {
+            Type::Function { params, return_type, .. } => {
                 let param_str: Vec<_> = params.iter().map(|t| t.display_name()).collect();
                 format!("fn({}) -> {}", param_str.join(", "), return_type.display_name())
             }
@@ -349,6 +360,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Any],
                 return_type: Box::new(Type::Void),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -359,6 +371,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Any],
                 return_type: Box::new(Type::Void),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -371,6 +384,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Int],          // Optional capacity (variadic in practice)
                 return_type: Box::new(Type::Any), // Channel type
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -381,6 +395,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Any, Type::Any], // channel, value
                 return_type: Box::new(Type::Void),
+                required_params: 2,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -391,6 +406,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Any],          // channel
                 return_type: Box::new(Type::Any), // received value
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -401,6 +417,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Any], // channel
                 return_type: Box::new(Type::Void),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -412,6 +429,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![],
                 return_type: Box::new(Type::Void),
+                required_params: 0,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -422,6 +440,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![],
                 return_type: Box::new(Type::Int),
+                required_params: 0,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -433,6 +452,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Any], // array or string
                 return_type: Box::new(Type::Int),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -443,6 +463,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Any, Type::Any], // array, value
                 return_type: Box::new(Type::Void),
+                required_params: 2,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -453,6 +474,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Any], // array
                 return_type: Box::new(Type::Any),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -467,6 +489,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String, Type::Int], // path, mode
                 return_type: Box::new(Type::Int),      // file descriptor
+                required_params: 2,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -477,6 +500,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Int, Type::Int], // fd, max_bytes
                 return_type: Box::new(Type::String),
+                required_params: 2,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -487,6 +511,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Int, Type::String], // fd, data
                 return_type: Box::new(Type::Int),      // bytes written
+                required_params: 2,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -497,6 +522,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Int], // fd
                 return_type: Box::new(Type::Bool),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -507,6 +533,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String], // path
                 return_type: Box::new(Type::Bool),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -517,6 +544,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String], // path
                 return_type: Box::new(Type::Int),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -531,6 +559,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String], // env var name
                 return_type: Box::new(Type::Optional(Box::new(Type::String))),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -541,6 +570,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![],
                 return_type: Box::new(Type::Array(Box::new(Type::String))),
+                required_params: 0,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -551,6 +581,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String, Type::String], // name, value
                 return_type: Box::new(Type::Bool),
+                required_params: 2,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -561,6 +592,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String], // name
                 return_type: Box::new(Type::Bool),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -571,6 +603,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![],
                 return_type: Box::new(Type::Array(Box::new(Type::String))),
+                required_params: 0,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -581,6 +614,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![],
                 return_type: Box::new(Type::Array(Box::new(Type::String))),
+                required_params: 0,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -591,6 +625,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String], // name
                 return_type: Box::new(Type::Bool),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -601,6 +636,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![],
                 return_type: Box::new(Type::String),
+                required_params: 0,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -611,6 +647,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![],
                 return_type: Box::new(Type::String),
+                required_params: 0,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -621,6 +658,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![],
                 return_type: Box::new(Type::String),
+                required_params: 0,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -635,6 +673,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![],
                 return_type: Box::new(Type::Int),
+                required_params: 0,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -645,6 +684,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Int], // milliseconds
                 return_type: Box::new(Type::Void),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -655,6 +695,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![],
                 return_type: Box::new(Type::Int),
+                required_params: 0,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -665,6 +706,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![],
                 return_type: Box::new(Type::Int),
+                required_params: 0,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -675,6 +717,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![],
                 return_type: Box::new(Type::Int),
+                required_params: 0,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -685,6 +728,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Int], // timestamp_ms
                 return_type: Box::new(Type::String),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -695,6 +739,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Int, Type::String], // timestamp_ms, format
                 return_type: Box::new(Type::String),
+                required_params: 2,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -705,6 +750,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String], // ISO 8601 string
                 return_type: Box::new(Type::Int),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -715,6 +761,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![],
                 return_type: Box::new(Type::Int), // offset in minutes
+                required_params: 0,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -725,6 +772,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Int],                                 // timestamp_ms
                 return_type: Box::new(Type::Array(Box::new(Type::Int))), // [year, month, day, hour, min, sec]
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -742,6 +790,7 @@ impl TypeEnv {
                     Type::Int, // second
                 ],
                 return_type: Box::new(Type::Int), // timestamp_ms
+                required_params: 6,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -756,6 +805,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String, Type::Int], // str, index
                 return_type: Box::new(Type::Int),      // char code (-1 if out of bounds)
+                required_params: 2,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -766,6 +816,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Int], // char code
                 return_type: Box::new(Type::String),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -776,6 +827,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String],
                 return_type: Box::new(Type::String),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -786,6 +838,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String],
                 return_type: Box::new(Type::String),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -796,6 +849,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String, Type::Int, Type::Int], // str, start, end
                 return_type: Box::new(Type::String),
+                required_params: 3,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -806,6 +860,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String, Type::String], // str, substr
                 return_type: Box::new(Type::Int),         // -1 if not found
+                required_params: 2,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -816,6 +871,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String, Type::String], // str, delimiter
                 return_type: Box::new(Type::Array(Box::new(Type::String))),
+                required_params: 2,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -826,6 +882,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String],
                 return_type: Box::new(Type::String),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -836,6 +893,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String],
                 return_type: Box::new(Type::String),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -846,6 +904,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String],
                 return_type: Box::new(Type::String),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -860,6 +919,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![],
                 return_type: Box::new(Type::Float),
+                required_params: 0,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -870,6 +930,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Int, Type::Int], // min, max
                 return_type: Box::new(Type::Int),
+                required_params: 2,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -884,6 +945,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String],
                 return_type: Box::new(Type::String),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -894,6 +956,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String],
                 return_type: Box::new(Type::String),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -904,6 +967,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String],
                 return_type: Box::new(Type::String),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -914,6 +978,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String],
                 return_type: Box::new(Type::String),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -928,6 +993,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String],
                 return_type: Box::new(Type::String),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -938,6 +1004,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String],
                 return_type: Box::new(Type::String),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -952,6 +1019,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String],                              // url
                 return_type: Box::new(Type::Array(Box::new(Type::Any))), // [status, body]
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -962,6 +1030,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String, Type::String, Type::String], // url, body, content_type
                 return_type: Box::new(Type::Array(Box::new(Type::Any))), // [status, body]
+                required_params: 3,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -972,6 +1041,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String, Type::String, Type::String, Type::String], // method, url, headers, body
                 return_type: Box::new(Type::Array(Box::new(Type::Any))), // [status, body]
+                required_params: 4,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -986,6 +1056,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String],
                 return_type: Box::new(Type::String),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -996,6 +1067,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String],
                 return_type: Box::new(Type::String),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1006,6 +1078,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String],
                 return_type: Box::new(Type::String),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1016,6 +1089,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String],
                 return_type: Box::new(Type::String),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1030,6 +1104,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String],
                 return_type: Box::new(Type::Any), // Can return any JSON value type
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1040,6 +1115,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Any],
                 return_type: Box::new(Type::String),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1050,6 +1126,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Any],
                 return_type: Box::new(Type::String),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1064,6 +1141,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String, Type::Int], // host, port
                 return_type: Box::new(Type::Int),      // socket id or -1
+                required_params: 2,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1074,6 +1152,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Int, Type::String], // socket_id, data
                 return_type: Box::new(Type::Int),      // bytes written or -1
+                required_params: 2,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1084,6 +1163,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Int, Type::Int], // socket_id, max_bytes
                 return_type: Box::new(Type::String),
+                required_params: 2,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1094,6 +1174,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Int], // socket_id
                 return_type: Box::new(Type::Bool),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1104,6 +1185,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String],          // hostname
                 return_type: Box::new(Type::String), // IP address
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1118,6 +1200,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![],
                 return_type: Box::new(Type::String),
+                required_params: 0,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1128,6 +1211,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String], // path
                 return_type: Box::new(Type::Bool),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1138,6 +1222,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String], // path
                 return_type: Box::new(Type::Bool),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1148,6 +1233,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String], // path
                 return_type: Box::new(Type::Bool),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1158,6 +1244,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String], // path
                 return_type: Box::new(Type::Bool),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1168,6 +1255,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String], // path
                 return_type: Box::new(Type::Bool),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1178,6 +1266,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String], // path
                 return_type: Box::new(Type::Bool),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1188,6 +1277,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String], // path
                 return_type: Box::new(Type::Array(Box::new(Type::String))),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1198,6 +1288,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String], // path
                 return_type: Box::new(Type::Bool),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1208,6 +1299,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String], // path
                 return_type: Box::new(Type::Bool),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1218,6 +1310,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String, Type::String], // from, to
                 return_type: Box::new(Type::Bool),
+                required_params: 2,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1228,6 +1321,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String, Type::String], // from, to
                 return_type: Box::new(Type::Bool),
+                required_params: 2,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1242,6 +1336,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String, Type::String],
                 return_type: Box::new(Type::Bool),
+                required_params: 2,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1252,6 +1347,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String, Type::String],
                 return_type: Box::new(Type::String),
+                required_params: 2,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1262,6 +1358,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String, Type::String],
                 return_type: Box::new(Type::Array(Box::new(Type::String))),
+                required_params: 2,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1272,6 +1369,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String, Type::String, Type::String],
                 return_type: Box::new(Type::String),
+                required_params: 3,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1282,6 +1380,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String, Type::String, Type::String],
                 return_type: Box::new(Type::String),
+                required_params: 3,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1292,6 +1391,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String, Type::String],
                 return_type: Box::new(Type::Array(Box::new(Type::String))),
+                required_params: 2,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1302,6 +1402,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String, Type::String],
                 return_type: Box::new(Type::Array(Box::new(Type::String))),
+                required_params: 2,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1312,6 +1413,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String],
                 return_type: Box::new(Type::Bool),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1326,6 +1428,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![],
                 return_type: Box::new(Type::String),
+                required_params: 0,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1336,6 +1439,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![],
                 return_type: Box::new(Type::String),
+                required_params: 0,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1346,6 +1450,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::String],
                 return_type: Box::new(Type::Bool),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1356,6 +1461,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![],
                 return_type: Box::new(Type::String),
+                required_params: 0,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1370,6 +1476,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Float],
                 return_type: Box::new(Type::Float),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1380,6 +1487,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Float, Type::Float], // base, exponent
                 return_type: Box::new(Type::Float),
+                required_params: 2,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1390,6 +1498,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Float],
                 return_type: Box::new(Type::Float),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1400,6 +1509,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Float],
                 return_type: Box::new(Type::Float),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1410,6 +1520,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Float],
                 return_type: Box::new(Type::Float),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1420,6 +1531,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Float],
                 return_type: Box::new(Type::Float),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1430,6 +1542,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Float],
                 return_type: Box::new(Type::Float),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1440,6 +1553,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Float],
                 return_type: Box::new(Type::Float),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1450,6 +1564,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Float],
                 return_type: Box::new(Type::Float),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1460,6 +1575,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Float],
                 return_type: Box::new(Type::Float),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1470,6 +1586,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Float],
                 return_type: Box::new(Type::Float),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1480,6 +1597,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Float],
                 return_type: Box::new(Type::Float),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1490,6 +1608,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Float, Type::Float], // y, x
                 return_type: Box::new(Type::Float),
+                required_params: 2,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1500,6 +1619,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Float],
                 return_type: Box::new(Type::Float),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1510,6 +1630,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Float],
                 return_type: Box::new(Type::Float),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1520,6 +1641,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Float],
                 return_type: Box::new(Type::Float),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1530,6 +1652,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Float],
                 return_type: Box::new(Type::Float),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1540,6 +1663,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Float],
                 return_type: Box::new(Type::Float),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1550,6 +1674,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Float],
                 return_type: Box::new(Type::Float),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1560,6 +1685,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Float],
                 return_type: Box::new(Type::Float),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1570,6 +1696,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Float],
                 return_type: Box::new(Type::Float),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1580,6 +1707,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Float],
                 return_type: Box::new(Type::Bool),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1590,6 +1718,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Float],
                 return_type: Box::new(Type::Bool),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1600,6 +1729,7 @@ impl TypeEnv {
             ty: Type::Function {
                 params: vec![Type::Float],
                 return_type: Box::new(Type::Bool),
+                required_params: 1,
             },
             mutable: false,
             kind: SymbolKind::Function,
@@ -1853,6 +1983,7 @@ impl TypeChecker {
                                 Type::Function {
                                     params: param_types,
                                     return_type: Box::new(ret),
+                required_params: 1,
                                 },
                                 *is_public,
                             ))
@@ -1922,6 +2053,7 @@ impl TypeChecker {
                                 Type::Function {
                                     params: param_types,
                                     return_type: Box::new(ret),
+                required_params: 1,
                                 },
                                 *is_public,
                             ))
@@ -1979,6 +2111,7 @@ impl TypeChecker {
                             Type::Function {
                                 params: param_types,
                                 return_type: Box::new(ret),
+                required_params: 1,
                             },
                         )
                     })
@@ -2116,6 +2249,9 @@ impl TypeChecker {
                 .map(|p| self.resolve_type_expr(&p.type_ann))
                 .collect();
 
+            // Count required parameters (those without defaults)
+            let required_count = params.iter().filter(|p| p.default.is_none()).count();
+
             let ret_type = return_type
                 .as_ref()
                 .map(|t| self.resolve_type_expr(t))
@@ -2130,6 +2266,7 @@ impl TypeChecker {
                 ty: Type::Function {
                     params: param_types,
                     return_type: Box::new(ret_type),
+                    required_params: required_count,
                 },
                 mutable: false,
                 kind: SymbolKind::Function,
@@ -2140,7 +2277,7 @@ impl TypeChecker {
     fn check_statement(&mut self, stmt: &Statement) {
         match &stmt.kind {
             StatementKind::VarDecl {
-                name,
+                pattern,
                 mutable,
                 type_ann,
                 initializer,
@@ -2174,12 +2311,8 @@ impl TypeChecker {
                     }
                 };
 
-                self.env.define(Symbol {
-                    name: name.clone(),
-                    ty: final_type,
-                    mutable: *mutable,
-                    kind: SymbolKind::Variable,
-                });
+                // Bind pattern variables with the appropriate types
+                self.bind_destructuring_pattern(pattern, &final_type, *mutable, &stmt.span);
             }
 
             StatementKind::ConstDecl {
@@ -2231,6 +2364,22 @@ impl TypeChecker {
                     .iter()
                     .map(|p| self.resolve_type_expr(&p.type_ann))
                     .collect();
+
+                // Check default parameter values have correct types
+                for (param, param_type) in params.iter().zip(param_types.iter()) {
+                    if let Some(default_expr) = &param.default {
+                        let default_type = self.check_expression(default_expr);
+                        if !default_type.is_compatible_with(param_type) {
+                            self.env.error(
+                                &param.span,
+                                format!(
+                                    "Default value type mismatch: parameter '{}' expects '{}', got '{}'",
+                                    param.name, param_type.display_name(), default_type.display_name()
+                                ),
+                            );
+                        }
+                    }
+                }
 
                 let ret_type = return_type
                     .as_ref()
@@ -2611,20 +2760,28 @@ impl TypeChecker {
                     Type::Function {
                         params,
                         return_type,
+                        required_params,
                     } => {
                         // For method calls, the first param is 'self' which is implicit
-                        let expected_args = if is_method_call && !params.is_empty() {
-                            params.len() - 1 // Don't count self
+                        let (min_args, max_args) = if is_method_call && !params.is_empty() {
+                            (required_params.saturating_sub(1), params.len() - 1)
                         } else {
-                            params.len()
+                            (required_params, params.len())
                         };
 
                         // Skip arg count check for variadic built-ins
-                        if !is_variadic_builtin && args.len() != expected_args {
-                            self.env.error(
-                                &expr.span,
-                                format!("Expected {} arguments, got {}", expected_args, args.len()),
-                            );
+                        if !is_variadic_builtin {
+                            if args.len() < min_args {
+                                self.env.error(
+                                    &expr.span,
+                                    format!("Expected at least {} arguments, got {}", min_args, args.len()),
+                                );
+                            } else if args.len() > max_args {
+                                self.env.error(
+                                    &expr.span,
+                                    format!("Expected at most {} arguments, got {}", max_args, args.len()),
+                                );
+                            }
                         }
 
                         // For method calls, skip first param (self) when checking arg types
@@ -2634,8 +2791,10 @@ impl TypeChecker {
                             &params[..]
                         };
 
+                        // TODO: Handle named argument reordering here
+                        // For now, just check positional argument types
                         for (arg, param_type) in args.iter().zip(params_to_check.iter()) {
-                            let arg_type = self.check_expression(arg);
+                            let arg_type = self.check_expression(&arg.value);
                             if !arg_type.is_compatible_with(param_type) {
                                 self.env.error(
                                     &arg.span,
@@ -2704,8 +2863,9 @@ impl TypeChecker {
                                             .map(|(_, ty)| ty.clone())
                                             .collect();
                                         return Type::Function {
-                                            params: param_types,
+                                            params: param_types.clone(),
                                             return_type: Box::new(impl_method.return_type.clone()),
+                                            required_params: param_types.len(),
                                         };
                                     }
                                     self.env.error(
@@ -2733,8 +2893,9 @@ impl TypeChecker {
                                         .map(|(_, ty)| ty.clone())
                                         .collect();
                                     return Type::Function {
-                                        params: param_types,
+                                        params: param_types.clone(),
                                         return_type: Box::new(impl_method.return_type.clone()),
+                                        required_params: param_types.len(),
                                     };
                                 }
                             }
@@ -2749,8 +2910,9 @@ impl TypeChecker {
                                 .map(|(_, ty)| ty.clone())
                                 .collect();
                             return Type::Function {
-                                params: param_types,
+                                params: param_types.clone(),
                                 return_type: Box::new(impl_method.return_type.clone()),
+                                required_params: param_types.len(),
                             };
                         }
                         // Fallback to built-in string methods like len()
@@ -2758,6 +2920,7 @@ impl TypeChecker {
                             return Type::Function {
                                 params: vec![],
                                 return_type: Box::new(Type::Int),
+                required_params: 0,
                             };
                         }
                         self.env.error(
@@ -2773,8 +2936,9 @@ impl TypeChecker {
                                 .map(|(_, ty)| ty.clone())
                                 .collect();
                             return Type::Function {
-                                params: param_types,
+                                params: param_types.clone(),
                                 return_type: Box::new(impl_method.return_type.clone()),
+                                required_params: param_types.len(),
                             };
                         }
                         // Built-in array methods
@@ -2782,14 +2946,17 @@ impl TypeChecker {
                             "len" => Type::Function {
                                 params: vec![],
                                 return_type: Box::new(Type::Int),
+                required_params: 0,
                             },
                             "push" => Type::Function {
                                 params: vec![*inner.clone()],
                                 return_type: Box::new(Type::Void),
+                required_params: 1,
                             },
                             "pop" => Type::Function {
                                 params: vec![],
                                 return_type: Box::new(Type::Optional(inner.clone())),
+                                required_params: 0,
                             },
                             _ => {
                                 self.env.error(
@@ -2933,6 +3100,7 @@ impl TypeChecker {
                 Type::Function {
                     params: param_types,
                     return_type: Box::new(return_type),
+                required_params: 0,
                 }
             }
 
@@ -3195,6 +3363,7 @@ impl TypeChecker {
                                 Type::Function {
                                     params: field_types.clone(),
                                     return_type: Box::new(return_type),
+                required_params: 0,
                                 }
                             }
                         } else {
@@ -3295,7 +3464,7 @@ impl TypeChecker {
                 let receiver_type = self.check_expression(receiver);
                 // Check arguments
                 for arg in args {
-                    self.check_expression(arg);
+                    self.check_expression(&arg.value);
                 }
                 // For now, return Any - proper method resolution would go here
                 let _ = (receiver_type, method);
@@ -3362,6 +3531,99 @@ impl TypeChecker {
             }
             PatternKind::Range { .. } => {
                 // Range patterns don't bind variables
+            }
+        }
+    }
+
+    /// Bind destructuring pattern variables for let/var declarations
+    fn bind_destructuring_pattern(&mut self, pattern: &Pattern, subject_type: &Type, mutable: bool, span: &Span) {
+        match &pattern.kind {
+            PatternKind::Variable(name) => {
+                self.env.define(Symbol {
+                    name: name.clone(),
+                    ty: subject_type.clone(),
+                    mutable,
+                    kind: SymbolKind::Variable,
+                });
+            }
+            PatternKind::Wildcard => {
+                // Wildcard doesn't bind any variables
+            }
+            PatternKind::Tuple(patterns) => {
+                // For tuple patterns, each element binds to the corresponding tuple/array element type
+                match subject_type {
+                    Type::Tuple(types) => {
+                        if patterns.len() != types.len() {
+                            self.env.error(
+                                span,
+                                format!(
+                                    "Tuple pattern has {} elements but value has {}",
+                                    patterns.len(), types.len()
+                                ),
+                            );
+                            return;
+                        }
+                        for (pat, ty) in patterns.iter().zip(types.iter()) {
+                            self.bind_destructuring_pattern(pat, ty, mutable, span);
+                        }
+                    }
+                    Type::Array(elem_type) => {
+                        // Allow destructuring arrays as tuples
+                        for pat in patterns {
+                            self.bind_destructuring_pattern(pat, elem_type, mutable, span);
+                        }
+                    }
+                    _ => {
+                        self.env.error(
+                            span,
+                            format!(
+                                "Cannot destructure type '{}' with tuple pattern",
+                                subject_type.display_name()
+                            ),
+                        );
+                    }
+                }
+            }
+            PatternKind::Struct { fields: pattern_fields, .. } => {
+                // For struct patterns, look up field types from the struct definition
+                if let Type::Struct(struct_name) = subject_type {
+                    // Clone the struct fields to avoid borrow issues
+                    let struct_fields_opt = self.env.lookup_type(struct_name)
+                        .and_then(|td| {
+                            if let TypeDefKind::Struct { fields, .. } = &td.kind {
+                                Some(fields.clone())
+                            } else {
+                                None
+                            }
+                        });
+
+                    if let Some(struct_fields) = struct_fields_opt {
+                        for (field_name, field_pattern) in pattern_fields {
+                            if let Some((_, field_type, _)) = struct_fields.iter().find(|(n, _, _)| n == field_name) {
+                                self.bind_destructuring_pattern(field_pattern, field_type, mutable, span);
+                            } else {
+                                self.env.error(
+                                    span,
+                                    format!("Unknown field '{}' in struct '{}'", field_name, struct_name),
+                                );
+                            }
+                        }
+                    }
+                } else {
+                    self.env.error(
+                        span,
+                        format!(
+                            "Cannot destructure type '{}' with struct pattern",
+                            subject_type.display_name()
+                        ),
+                    );
+                }
+            }
+            _ => {
+                self.env.error(
+                    span,
+                    "Unsupported pattern in destructuring".to_string(),
+                );
             }
         }
     }
@@ -3480,6 +3742,7 @@ impl TypeChecker {
                 Type::Function {
                     params: param_types,
                     return_type: Box::new(ret),
+                required_params: 0,
                 }
             }
             TypeExprKind::Tuple(elements) => {
@@ -3693,7 +3956,7 @@ mod tests {
             "#,
         );
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Expected 2 arguments"));
+        assert!(result.unwrap_err().contains("Expected at least 2 arguments"));
     }
 
     #[test]
@@ -5182,5 +5445,116 @@ mod tests {
             let y: float = 2.0 ** 3.0
             "#
         ).is_ok(), "Power result types should match operands");
+    }
+
+    // ==========================================================================
+    // Destructuring Tests (TDD - T7.22)
+    // ==========================================================================
+
+    #[test]
+    fn test_tuple_destructuring_basic() {
+        // TDD: Basic tuple destructuring should work
+        assert!(check_source(
+            r#"
+            let (a, b) = (1, 2)
+            let sum = a + b
+            "#
+        ).is_ok(), "Basic tuple destructuring should type-check");
+    }
+
+    #[test]
+    fn test_tuple_destructuring_with_types() {
+        // TDD: Tuple destructuring with type annotations
+        assert!(check_source(
+            r#"
+            let (x, y): (int, int) = (10, 20)
+            "#
+        ).is_ok(), "Tuple destructuring with type annotation should work");
+    }
+
+    #[test]
+    fn test_tuple_destructuring_nested() {
+        // TDD: Nested tuple destructuring
+        assert!(check_source(
+            r#"
+            let (a, (b, c)) = (1, (2, 3))
+            let sum = a + b + c
+            "#
+        ).is_ok(), "Nested tuple destructuring should work");
+    }
+
+    #[test]
+    fn test_tuple_destructuring_wrong_count() {
+        // TDD: Destructuring with wrong element count should error
+        let result = check_source(
+            r#"
+            let (a, b, c) = (1, 2)
+            "#
+        );
+        assert!(result.is_err(), "Destructuring with wrong count should error");
+    }
+
+    #[test]
+    fn test_struct_destructuring_basic() {
+        // TDD: Basic struct destructuring
+        assert!(check_source(
+            r#"
+            struct Point { x: int, y: int }
+            let p = Point { x: 10, y: 20 }
+            let { x, y } = p
+            let sum = x + y
+            "#
+        ).is_ok(), "Basic struct destructuring should work");
+    }
+
+    #[test]
+    fn test_struct_destructuring_partial() {
+        // TDD: Partial struct destructuring (only some fields)
+        assert!(check_source(
+            r#"
+            struct Point3D { x: int, y: int, z: int }
+            let p = Point3D { x: 1, y: 2, z: 3 }
+            let { x, z } = p
+            "#
+        ).is_ok(), "Partial struct destructuring should work");
+    }
+
+    #[test]
+    fn test_struct_destructuring_unknown_field() {
+        // TDD: Destructuring unknown field should error
+        let result = check_source(
+            r#"
+            struct Point { x: int, y: int }
+            let p = Point { x: 1, y: 2 }
+            let { x, z } = p
+            "#
+        );
+        assert!(result.is_err(), "Destructuring unknown field should error");
+    }
+
+    #[test]
+    #[ignore] // Future enhancement: requires updating Parameter to support patterns
+    fn test_destructuring_in_function_param() {
+        // TDD: Destructuring in function parameters
+        assert!(check_source(
+            r#"
+            fn sum_tuple((a, b): (int, int)) -> int {
+                return a + b
+            }
+            let result = sum_tuple((1, 2))
+            "#
+        ).is_ok(), "Destructuring in function params should work");
+    }
+
+    #[test]
+    fn test_var_destructuring_mutable() {
+        // TDD: var destructuring creates mutable bindings
+        assert!(check_source(
+            r#"
+            var (x, y) = (1, 2)
+            x = 10
+            y = 20
+            "#
+        ).is_ok(), "var destructuring should create mutable bindings");
     }
 }
