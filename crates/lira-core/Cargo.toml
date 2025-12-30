@@ -1,0 +1,8 @@
+[package]
+name = "lira-core"
+version = "0.1.0"
+edition = "2021"
+description = "Core types and opcodes for the Lira programming language"
+license = "MIT"
+
+[dependencies]
