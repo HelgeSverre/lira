@@ -1,0 +1,18 @@
+[package]
+name = "lirac"
+version = "0.1.0"
+edition = "2021"
+description = "Lira compiler - compiles .li source files to .lic bytecode"
+license = "MIT"
+
+[[bin]]
+name = "lirac"
+path = "src/main.rs"
+
+[lib]
+name = "lirac"
+path = "src/lib.rs"
+
+[dependencies]
+lira-core = { path = "../lira-core" }
+liravm = { path = "../liravm" }
