@@ -303,10 +303,10 @@ Phase 4 (VM Core)
 Phase 5 (Fiber Runtime)
     │
     ▼
-Phase 6 (Standard Library)  ←── CURRENT
+Phase 6 (Standard Library)
     │
     ▼
-Phase 7 (Advanced Features)
+Phase 7 (Advanced Features)  ←── CURRENT
     │
     ▼
 Production-Ready Language
@@ -353,6 +353,7 @@ Working examples are available in `examples/`:
 | lambda.li | Closures and lambdas | [x] Working |
 | pattern_match.li | Match expressions | [x] Working |
 | pattern_guards.li | Match with guards | [x] Working |
+| named_arguments.li | Named function arguments | [x] Working |
 
 ### Concurrency
 
@@ -386,8 +387,8 @@ All examples compile with `lirac` and run with `liravm` on macOS/Linux.
 | **M4: Functions** | User-defined functions work | ✓ Complete |
 | **M5: Closures** | Lambda expressions with captures | ✓ Complete |
 | **M6: Fibers** | Concurrent programs run | ✓ Complete |
-| **M7: Stdlib** | Basic stdlib available | In Progress |
-| **M8: Production** | Full language feature set | Pending |
+| **M7: Stdlib** | Basic stdlib available | ✓ Complete |
+| **M8: Production** | Full language feature set | In Progress |
 
 ---
 
@@ -426,7 +427,7 @@ just fmt
 | Completed | ~74 |
 | In Progress | ~4 |
 | Pending | ~7 |
-| Compiler LOC | ~15,100 |
+| Compiler LOC | ~15,900 |
 | VM LOC | ~5,600 |
 | Core LOC | ~350 |
 | Stdlib modules | 21 |
