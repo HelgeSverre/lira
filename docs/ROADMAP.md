@@ -2,7 +2,7 @@
 
 **Version**: 3.0
 **Last Updated**: 2025-12-30
-**Status**: Phase 6 In Progress - Module System Implemented
+**Status**: Phase 7 In Progress - Advanced Features
 
 ---
 
@@ -24,7 +24,7 @@ This roadmap tracks the implementation of Lira, a modern systems programming lan
 4. [Phase 3: Bytecode Generation](#phase-3-bytecode-generation) - COMPLETE
 5. [Phase 4: VM Core](#phase-4-vm-core) - COMPLETE
 6. [Phase 5: Fiber Runtime](#phase-5-fiber-runtime) - COMPLETE
-7. [Phase 6: Standard Library](#phase-6-standard-library) - IN PROGRESS
+7. [Phase 6: Standard Library](#phase-6-standard-library) - COMPLETE
 8. [Phase 7: Advanced Features](#phase-7-advanced-features) - IN PROGRESS
 
 ---
@@ -165,7 +165,7 @@ This roadmap tracks the implementation of Lira, a modern systems programming lan
 | T4.20 | Object allocation | Heap management | [x] |
 | T4.21 | Reference counting | Using Rc<RefCell<>> | [x] |
 | T4.22 | Cycle detection | Mark-and-sweep for cycles | [x] |
-| T4.23 | String interning | Deduplicate strings | [ ] |
+| T4.23 | String interning | Deduplicate strings | [x] |
 | T4.24 | Test memory | Allocation/deallocation tests | [x] |
 
 ---
@@ -197,7 +197,7 @@ This roadmap tracks the implementation of Lira, a modern systems programming lan
 **Goal**: Implement platform-agnostic standard library with host primitives.
 **Depends On**: Phase 5
 **Spec Reference**: `30-standard-library.md`
-**Status**: IN PROGRESS
+**Status**: COMPLETE
 
 ### 6.1 Host Primitives (Rust Layer)
 
@@ -217,20 +217,33 @@ This roadmap tracks the implementation of Lira, a modern systems programming lan
 | T6.11 | std.core | abs, min, max, clamp, array utilities | [x] |
 | T6.12 | std.io | Debug, assert, timing utilities | [x] |
 | T6.13 | std.fs | read_file, write_file, append_file, exists, size | [x] |
-| T6.14 | std.string | String utilities | [ ] |
-| T6.15 | std.math | sqrt, sin, cos, etc. | [ ] |
-| T6.16 | std.time | Duration, Instant types | [ ] |
-| T6.17 | std.collections | List, Map, Set enhanced methods | [ ] |
+| T6.14 | std.strings | String utilities (split, join, trim, etc.) | [x] |
+| T6.15 | std.math | sqrt, sin, cos, tan, log, exp, pow, etc. | [x] |
+| T6.16 | std.time | timestamp, sleep, format, parse | [x] |
+| T6.17 | std.collections | List, Map, Set enhanced methods | [x] |
+| T6.18 | std.path | Path manipulation utilities | [x] |
+| T6.19 | std.hash | MD5, SHA1, SHA256, SHA512 | [x] |
+| T6.20 | std.json | JSON parse/stringify | [x] |
+| T6.21 | std.url | URL parsing and encoding | [x] |
+| T6.22 | std.http | HTTP client (get, post, request) | [x] |
+| T6.23 | std.regex | Regular expression matching | [x] |
+| T6.24 | std.uuid | UUID generation (v4, v7) | [x] |
+| T6.25 | std.env | Environment variables | [x] |
+| T6.26 | std.os | OS info and operations | [x] |
+| T6.27 | std.net | Network utilities | [x] |
+| T6.28 | std.random | Random number generation | [x] |
+| T6.29 | std.log | Logging utilities | [x] |
+| T6.30 | std.test | Testing framework | [x] |
 
 ### 6.3 Module System
 
 | ID | Task | Description | Status |
 |----|------|-------------|--------|
-| T6.20 | Module loader | ModuleLoader for resolving imports | [x] |
-| T6.21 | Import parsing | import std.fs, import std.io.{File} | [x] |
-| T6.22 | Stdlib resolution | Resolve std.* to stdlib/ directory | [x] |
-| T6.23 | Multi-file compilation | Merge imported modules into AST | [x] |
-| T6.24 | Circular import detection | Error on circular dependencies | [x] |
+| T6.40 | Module loader | ModuleLoader for resolving imports | [x] |
+| T6.41 | Import parsing | import std.fs, import std.io.{File} | [x] |
+| T6.42 | Stdlib resolution | Resolve std.* to stdlib/ directory | [x] |
+| T6.43 | Multi-file compilation | Merge imported modules into AST | [x] |
+| T6.44 | Circular import detection | Error on circular dependencies | [x] |
 
 ---
 
@@ -238,7 +251,7 @@ This roadmap tracks the implementation of Lira, a modern systems programming lan
 
 **Goal**: Complete remaining language features.
 **Depends On**: Phase 6
-**Status**: IN PROGRESS (16 tasks complete, 8 pending)
+**Status**: IN PROGRESS (19 tasks complete, 5 pending)
 
 | ID | Task | Description | Status |
 |----|------|-------------|--------|
@@ -261,9 +274,9 @@ This roadmap tracks the implementation of Lira, a modern systems programming lan
 | T7.17 | Trait method lookup | Resolve methods from trait impls | [x] |
 | T7.18 | Error propagation | ? operator, Result handling | [x] |
 | T7.19 | Generic trait bounds | where T: Eq + Hash | [ ] |
-| T7.20 | Default parameters | fn foo(x: int = 0) | [ ] |
-| T7.21 | Named arguments | foo(name: "bar", value: 42) | [ ] |
-| T7.22 | Destructuring | let (a, b) = tuple, let { x, y } = struct | [ ] |
+| T7.20 | Default parameters | fn foo(x: int = 0) | [x] |
+| T7.21 | Named arguments | foo(name: "bar", value: 42) | [x] |
+| T7.22 | Destructuring | let (a, b) = tuple, let { x, y } = struct | [x] |
 | T7.23 | Range expressions | 1..10, 1..=10 | [x] |
 | T7.24 | Type expressions | `x as int`, `x is int`, `x?.field` | [x] |
 
@@ -382,19 +395,25 @@ All examples compile with `lirac` and run with `liravm` on macOS/Linux.
 
 ```bash
 # Build compiler and VM
-just li-build
+just build
+
+# Build release
+just release
 
 # Run tests
-just li-test
+just test
 
 # Compile and run a .li file
-just li-run path/to/file.li
+just run path/to/file.li
 
-# Check code
-just li-check
+# Type check code
+just check
 
 # Lint code
-just li-clippy
+just clippy
+
+# Format code
+just fmt
 ```
 
 ---
@@ -403,13 +422,15 @@ just li-clippy
 
 | Metric | Count |
 |--------|-------|
-| Total tasks | ~70 |
-| Completed | ~55 |
-| In Progress | ~10 |
-| Pending | ~5 |
-| Compiler LOC | ~6,000 |
-| VM LOC | ~3,200 |
-| Example files | 40+ |
+| Total tasks | ~85 |
+| Completed | ~74 |
+| In Progress | ~4 |
+| Pending | ~7 |
+| Compiler LOC | ~15,100 |
+| VM LOC | ~5,600 |
+| Core LOC | ~350 |
+| Stdlib modules | 21 |
+| Example files | 86 |
 
 ---
 
