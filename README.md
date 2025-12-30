@@ -1,0 +1,190 @@
+# Lira
+
+[![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Build](https://img.shields.io/badge/build-passing-brightgreen.svg)]()
+
+A modern systems programming language with Go-like fiber concurrency, pattern matching, and a clean syntax. Compiles to bytecode and runs on a custom VM.
+
+## Features
+
+- **Fiber-based concurrency** — lightweight green threads with channels
+- **Pattern matching** — with guards and destructuring
+- **Strong typing** — with type inference and generics
+- **Clean syntax** — inspired by Rust, Go, and Swift
+- **Fast iteration** — bytecode compilation for quick development cycles
+
+## Quick Start
+
+### Prerequisites
+
+- **Rust** 1.70+ ([install](https://rustup.rs/))
+- **just** command runner ([install](https://github.com/casey/just#installation))
+
+### Setup
+
+```bash
+git clone https://github.com/user/lira.git
+cd lira
+
+# Build the compiler and VM
+just build
+
+# Run the hello world example
+just run examples/hello.li
+```
+
+### Hello World
+
+```lira
+// hello.li
+fn main() {
+    println("Hello, Lira!")
+}
+```
+
+## Development
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `just build` | Build compiler and VM (debug) |
+| `just release` | Build in release mode |
+| `just test` | Run all tests |
+| `just test-verbose` | Run tests with output |
+| `just run <file>` | Compile and run a `.li` file |
+| `just check` | Type check without building |
+| `just clippy` | Run Rust linter |
+| `just fmt` | Format Rust code |
+| `just clean` | Clean build artifacts |
+
+### Manual Build (without just)
+
+```bash
+# Build
+cargo build --package lirac --package liravm
+
+# Compile a file
+cargo run --package lirac -- compile examples/hello.li -o /tmp/hello.lic
+
+# Run bytecode
+cargo run --package liravm -- run /tmp/hello.lic
+
+# Run tests
+cargo test --workspace
+```
+
+### CLI Tools
+
+**lirac** — The Lira compiler
+```bash
+lirac compile <file.li> [-o output.lic]   # Compile to bytecode
+lirac check <file.li>                      # Type check only
+lirac --version                            # Show version
+```
+
+**liravm** — The Lira virtual machine
+```bash
+liravm run <file.lic>      # Execute bytecode
+liravm run-debug <file>    # Run with debug output
+liravm --version           # Show version
+```
+
+## Project Structure
+
+```
+lira/
+├── crates/
+│   ├── lirac/          # Compiler
+│   │   └── src/
+│   │       ├── lexer.rs      # Tokenization
+│   │       ├── parser.rs     # AST construction
+│   │       ├── checker.rs    # Type checking
+│   │       └── codegen.rs    # Bytecode generation
+│   ├── liravm/         # Virtual Machine
+│   │   └── src/
+│   │       ├── vm.rs         # Bytecode interpreter
+│   │       ├── fiber.rs      # Green thread scheduler
+│   │       └── runtime.rs    # Host primitives
+│   └── lira-core/      # Shared types & opcodes
+├── stdlib/             # Standard library (.li files)
+├── examples/           # 85+ example programs
+├── docs/               # Language specifications
+└── justfile            # Build commands
+```
+
+## Language Overview
+
+```lira
+// Variables and types
+let name: string = "Lira"
+var count = 0                    // type inferred
+
+// Functions
+fn greet(name: string) -> string {
+    return "Hello, " + name
+}
+
+// Structs with methods
+struct Point { x: int, y: int }
+
+impl Point {
+    fn distance(self) -> float {
+        return sqrt(self.x * self.x + self.y * self.y)
+    }
+}
+
+// Pattern matching
+match value {
+    0 => "zero",
+    n if n < 0 => "negative",
+    _ => "positive"
+}
+
+// Fiber concurrency
+let ch = chan(1)
+spawn { send(ch, compute()) }
+let result = recv(ch)
+
+// Imports
+import std.fs.{read_file, write_file}
+```
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Language Overview](docs/00-lira-overview.md) | Introduction to Lira |
+| [Type System](docs/02-type-system.md) | Types, generics, inference |
+| [Concurrency](docs/04-concurrency.md) | Fibers, channels, select |
+| [Standard Library](docs/30-standard-library.md) | Stdlib reference |
+| [Bytecode Format](docs/10-bytecode-format.md) | `.lic` file specification |
+| [Roadmap](docs/ROADMAP.md) | Development progress |
+
+## Status
+
+**Current Phase**: Standard Library & Advanced Features
+
+| Component | Status |
+|-----------|--------|
+| Lexer & Parser | Complete |
+| Type System | Complete |
+| Bytecode Compiler | Complete |
+| VM Core | Complete |
+| Fiber Runtime | Complete |
+| Standard Library | In Progress |
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing`)
+3. Run tests (`just test`)
+4. Run linter (`just clippy`)
+5. Commit changes (`git commit -m 'Add amazing feature'`)
+6. Push to branch (`git push origin feature/amazing`)
+7. Open a Pull Request
+
+## License
+
+MIT License — see [LICENSE](LICENSE) for details.
