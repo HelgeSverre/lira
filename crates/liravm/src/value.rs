@@ -6,6 +6,9 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+/// Interned string type - shared reference-counted string
+pub type IString = Rc<String>;
+
 /// Fiber ID type
 pub type FiberId = u64;
 
@@ -19,7 +22,7 @@ pub enum Value {
     Bool(bool),
     Int(i64),
     Float(f64),
-    String(String),
+    String(IString),  // Interned string for memory efficiency
     Array(Rc<RefCell<Vec<Value>>>),
     Object(Rc<RefCell<HashMap<String, Value>>>),
     Function(usize),          // Code offset
@@ -62,7 +65,7 @@ impl Value {
             Value::Bool(b) => b.to_string(),
             Value::Int(n) => n.to_string(),
             Value::Float(f) => f.to_string(),
-            Value::String(s) => s.clone(),
+            Value::String(s) => (**s).clone(),
             Value::Array(arr) => {
                 let elements: Vec<String> = arr.borrow().iter().map(|v| v.to_string()).collect();
                 format!("[{}]", elements.join(", "))

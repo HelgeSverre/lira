@@ -5,6 +5,7 @@
 use crate::value::Value;
 use lira_core::bytecode::DebugInfo;
 use lira_core::{BYTECODE_MAGIC, BYTECODE_VERSION};
+use std::rc::Rc;
 
 /// A loaded bytecode program
 pub struct Program {
@@ -138,7 +139,7 @@ pub fn load(bytes: &[u8]) -> Result<Program, String> {
                 let bytes = reader.read_bytes(len)?;
                 let s = String::from_utf8(bytes.to_vec())
                     .map_err(|_| "Invalid UTF-8 in string constant")?;
-                Value::String(s)
+                Value::String(Rc::new(s))
             }
             0x05 => {
                 let offset = reader.read_i64()? as usize;

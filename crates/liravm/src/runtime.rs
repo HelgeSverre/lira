@@ -708,7 +708,7 @@ impl Runtime {
                     Value::Float(n.as_f64().unwrap_or(0.0))
                 }
             }
-            JsonValue::String(s) => Value::String(s),
+            JsonValue::String(s) => Value::String(Rc::new(s)),
             JsonValue::Array(arr) => {
                 let values: Vec<Value> = arr.into_iter().map(|v| self.json_to_value(v)).collect();
                 Value::Array(Rc::new(RefCell::new(values)))
@@ -741,7 +741,7 @@ impl Runtime {
             Value::Float(f) => serde_json::Number::from_f64(*f)
                 .map(JsonValue::Number)
                 .unwrap_or(JsonValue::Null),
-            Value::String(s) => JsonValue::String(s.clone()),
+            Value::String(s) => JsonValue::String((**s).clone()),
             Value::Array(arr) => {
                 let values: Vec<JsonValue> =
                     arr.borrow().iter().map(|v| self.value_to_json(v)).collect();

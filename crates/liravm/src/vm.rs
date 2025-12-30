@@ -6,7 +6,7 @@
 use crate::bytecode::Program;
 use crate::fiber::Scheduler;
 use crate::runtime::Runtime;
-use crate::value::{ClosureData, Value};
+use crate::value::{ClosureData, IString, Value};
 use lira_core::opcode::Opcode;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -51,6 +51,8 @@ pub struct VM {
     output: Vec<String>,
     /// Whether to capture output instead of printing
     capture_output: bool,
+    /// String intern pool for memory efficiency
+    string_pool: HashMap<String, IString>,
 }
 
 impl VM {
@@ -68,7 +70,24 @@ impl VM {
             runtime: Runtime::new(),
             output: Vec::new(),
             capture_output: false,
+            string_pool: HashMap::new(),
         }
+    }
+
+    /// Intern a string - returns a shared reference to the canonical string
+    fn intern_string(&mut self, s: String) -> IString {
+        if let Some(existing) = self.string_pool.get(&s) {
+            existing.clone()
+        } else {
+            let rc = Rc::new(s.clone());
+            self.string_pool.insert(s, rc.clone());
+            rc
+        }
+    }
+
+    /// Create an interned string Value
+    fn make_string(&mut self, s: String) -> Value {
+        Value::String(self.intern_string(s))
     }
 
     /// Enable output capture mode (for testing)
@@ -191,10 +210,10 @@ impl VM {
                         (Value::Int(a), Value::Float(b)) => Value::Float(*a as f64 + b),
                         (Value::Float(a), Value::Int(b)) => Value::Float(a + *b as f64),
                         (Value::String(a), Value::String(b)) => {
-                            Value::String(format!("{}{}", a, b))
+                            Value::String(Rc::new(format!("{}{}", a, b)))
                         }
-                        (Value::String(a), b) => Value::String(format!("{}{}", a, b.to_string())),
-                        (a, Value::String(b)) => Value::String(format!("{}{}", a.to_string(), b)),
+                        (Value::String(a), b) => Value::String(Rc::new(format!("{}{}", a, b.to_string()))),
+                        (a, Value::String(b)) => Value::String(Rc::new(format!("{}{}", a.to_string(), b))),
                         _ => return Err(format!("Cannot add {:?} and {:?}", a, b)),
                     };
                     self.stack.push(result);
@@ -545,7 +564,7 @@ impl VM {
                         Value::Object(obj) => {
                             let value = obj
                                 .borrow()
-                                .get(&field_name)
+                                .get(&*field_name)
                                 .cloned()
                                 .unwrap_or(Value::Null);
                             self.stack.push(value);
@@ -557,7 +576,7 @@ impl VM {
                 Opcode::SetField => {
                     let field_idx = self.read_u16()? as usize;
                     let field_name = match self.program.constants.get(field_idx) {
-                        Some(Value::String(s)) => s.clone(),
+                        Some(Value::String(s)) => (**s).clone(),
                         _ => return Err("Invalid field name constant".to_string()),
                     };
                     let value = self.pop()?;
@@ -602,13 +621,13 @@ impl VM {
                             let value = s
                                 .chars()
                                 .nth(idx)
-                                .map(|c| Value::String(c.to_string()))
+                                .map(|c| Value::String(Rc::new(c.to_string())))
                                 .unwrap_or(Value::Null);
                             self.stack.push(value);
                         }
                         // Support object indexing with string keys (for JSON objects)
                         (Value::Object(obj), Value::String(key)) => {
-                            let value = obj.borrow().get(&key).cloned().unwrap_or(Value::Null);
+                            let value = obj.borrow().get(&*key).cloned().unwrap_or(Value::Null);
                             self.stack.push(value);
                         }
                         _ => return Err("Invalid array/index types".to_string()),
@@ -703,7 +722,7 @@ impl VM {
                             _ => Value::Float(0.0),
                         },
                         // Cast to string
-                        4 => Value::String(value.to_string()),
+                        4 => Value::String(Rc::new(value.to_string())),
                         // Cast to bool
                         1 => Value::Bool(value.is_truthy()),
                         _ => value,
@@ -1023,7 +1042,7 @@ impl VM {
             // sys_read_line
             3 => {
                 let line = self.runtime.read_line()?;
-                self.stack.push(Value::String(line));
+                self.stack.push(Value::String(Rc::new(line)));
                 Ok(())
             }
             // sys_time_ms
@@ -1096,11 +1115,11 @@ impl VM {
                     (Value::Int(fd), Value::Int(max_bytes)) => {
                         match self.runtime.file_read(fd, max_bytes) {
                             Ok(data) => {
-                                self.stack.push(Value::String(data));
+                                self.stack.push(Value::String(Rc::new(data)));
                                 Ok(())
                             }
                             Err(e) => {
-                                self.stack.push(Value::String(String::new()));
+                                self.stack.push(Value::String(Rc::new(String::new())));
                                 eprintln!("file_read error: {}", e);
                                 Ok(())
                             }
@@ -1178,7 +1197,7 @@ impl VM {
                     Value::String(name) => {
                         let value = self.runtime.env_get(&name);
                         self.stack.push(match value {
-                            Some(v) => Value::String(v),
+                            Some(v) => Value::String(Rc::new(v)),
                             None => Value::Null,
                         });
                         Ok(())
@@ -1189,7 +1208,7 @@ impl VM {
             // env_args() -> array of strings
             21 => {
                 let args = self.runtime.env_args();
-                let arr: Vec<Value> = args.into_iter().map(Value::String).collect();
+                let arr: Vec<Value> = args.into_iter().map(|s| Value::String(Rc::new(s))).collect();
                 self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
                 Ok(())
             }
@@ -1226,14 +1245,14 @@ impl VM {
             // env_all() -> [string] (key=value pairs)
             202 => {
                 let vars = self.runtime.env_all();
-                let arr: Vec<Value> = vars.into_iter().map(Value::String).collect();
+                let arr: Vec<Value> = vars.into_iter().map(|s| Value::String(Rc::new(s))).collect();
                 self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
                 Ok(())
             }
             // env_keys() -> [string]
             203 => {
                 let keys = self.runtime.env_keys();
-                let arr: Vec<Value> = keys.into_iter().map(Value::String).collect();
+                let arr: Vec<Value> = keys.into_iter().map(|s| Value::String(Rc::new(s))).collect();
                 self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
                 Ok(())
             }
@@ -1252,19 +1271,19 @@ impl VM {
             // env_exe() -> string
             205 => {
                 let path = self.runtime.env_exe();
-                self.stack.push(Value::String(path));
+                self.stack.push(Value::String(Rc::new(path)));
                 Ok(())
             }
             // env_temp_dir() -> string
             206 => {
                 let path = self.runtime.env_temp_dir();
-                self.stack.push(Value::String(path));
+                self.stack.push(Value::String(Rc::new(path)));
                 Ok(())
             }
             // env_home_dir() -> string
             207 => {
                 let path = self.runtime.env_home_dir();
-                self.stack.push(Value::String(path));
+                self.stack.push(Value::String(Rc::new(path)));
                 Ok(())
             }
 
@@ -1291,7 +1310,7 @@ impl VM {
                 match code {
                     Value::Int(code) => {
                         let s = self.runtime.str_from_char_code(code);
-                        self.stack.push(Value::String(s));
+                        self.stack.push(Value::String(Rc::new(s)));
                         Ok(())
                     }
                     _ => Err("str_from_char_code requires int argument".to_string()),
@@ -1303,7 +1322,7 @@ impl VM {
                 match s {
                     Value::String(s) => {
                         let result = self.runtime.str_to_upper(&s);
-                        self.stack.push(Value::String(result));
+                        self.stack.push(Value::String(Rc::new(result)));
                         Ok(())
                     }
                     _ => Err("str_to_upper requires string argument".to_string()),
@@ -1315,7 +1334,7 @@ impl VM {
                 match s {
                     Value::String(s) => {
                         let result = self.runtime.str_to_lower(&s);
-                        self.stack.push(Value::String(result));
+                        self.stack.push(Value::String(Rc::new(result)));
                         Ok(())
                     }
                     _ => Err("str_to_lower requires string argument".to_string()),
@@ -1329,7 +1348,7 @@ impl VM {
                 match (s, start, end) {
                     (Value::String(s), Value::Int(start), Value::Int(end)) => {
                         let result = self.runtime.str_substring(&s, start, end);
-                        self.stack.push(Value::String(result));
+                        self.stack.push(Value::String(Rc::new(result)));
                         Ok(())
                     }
                     _ => Err("str_substring requires (string, int, int) arguments".to_string()),
@@ -1355,7 +1374,7 @@ impl VM {
                 match (s, delimiter) {
                     (Value::String(s), Value::String(delimiter)) => {
                         let parts = self.runtime.str_split(&s, &delimiter);
-                        let arr: Vec<Value> = parts.into_iter().map(Value::String).collect();
+                        let arr: Vec<Value> = parts.into_iter().map(|s| Value::String(Rc::new(s))).collect();
                         self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
                         Ok(())
                     }
@@ -1368,7 +1387,7 @@ impl VM {
                 match s {
                     Value::String(s) => {
                         let result = self.runtime.str_trim(&s);
-                        self.stack.push(Value::String(result));
+                        self.stack.push(Value::String(Rc::new(result)));
                         Ok(())
                     }
                     _ => Err("str_trim requires string argument".to_string()),
@@ -1380,7 +1399,7 @@ impl VM {
                 match s {
                     Value::String(s) => {
                         let result = self.runtime.str_trim_start(&s);
-                        self.stack.push(Value::String(result));
+                        self.stack.push(Value::String(Rc::new(result)));
                         Ok(())
                     }
                     _ => Err("str_trim_start requires string argument".to_string()),
@@ -1392,7 +1411,7 @@ impl VM {
                 match s {
                     Value::String(s) => {
                         let result = self.runtime.str_trim_end(&s);
-                        self.stack.push(Value::String(result));
+                        self.stack.push(Value::String(Rc::new(result)));
                         Ok(())
                     }
                     _ => Err("str_trim_end requires string argument".to_string()),
@@ -1433,7 +1452,7 @@ impl VM {
                 match input {
                     Value::String(s) => {
                         let encoded = self.runtime.base64_encode(&s);
-                        self.stack.push(Value::String(encoded));
+                        self.stack.push(Value::String(Rc::new(encoded)));
                         Ok(())
                     }
                     _ => Err("base64_encode requires string argument".to_string()),
@@ -1446,12 +1465,12 @@ impl VM {
                     Value::String(s) => {
                         match self.runtime.base64_decode(&s) {
                             Ok(decoded) => {
-                                self.stack.push(Value::String(decoded));
+                                self.stack.push(Value::String(Rc::new(decoded)));
                                 Ok(())
                             }
                             Err(e) => {
                                 // Push empty string on decode error
-                                self.stack.push(Value::String(String::new()));
+                                self.stack.push(Value::String(Rc::new(String::new())));
                                 eprintln!("base64_decode error: {}", e);
                                 Ok(())
                             }
@@ -1466,7 +1485,7 @@ impl VM {
                 match input {
                     Value::String(s) => {
                         let encoded = self.runtime.base64_encode_url(&s);
-                        self.stack.push(Value::String(encoded));
+                        self.stack.push(Value::String(Rc::new(encoded)));
                         Ok(())
                     }
                     _ => Err("base64_encode_url requires string argument".to_string()),
@@ -1479,12 +1498,12 @@ impl VM {
                     Value::String(s) => {
                         match self.runtime.base64_decode_url(&s) {
                             Ok(decoded) => {
-                                self.stack.push(Value::String(decoded));
+                                self.stack.push(Value::String(Rc::new(decoded)));
                                 Ok(())
                             }
                             Err(e) => {
                                 // Push empty string on decode error
-                                self.stack.push(Value::String(String::new()));
+                                self.stack.push(Value::String(Rc::new(String::new())));
                                 eprintln!("base64_decode_url error: {}", e);
                                 Ok(())
                             }
@@ -1504,7 +1523,7 @@ impl VM {
                 match input {
                     Value::String(s) => {
                         let hash = self.runtime.hash_md5(&s);
-                        self.stack.push(Value::String(hash));
+                        self.stack.push(Value::String(Rc::new(hash)));
                         Ok(())
                     }
                     _ => Err("md5 requires string argument".to_string()),
@@ -1516,7 +1535,7 @@ impl VM {
                 match input {
                     Value::String(s) => {
                         let hash = self.runtime.hash_sha1(&s);
-                        self.stack.push(Value::String(hash));
+                        self.stack.push(Value::String(Rc::new(hash)));
                         Ok(())
                     }
                     _ => Err("sha1 requires string argument".to_string()),
@@ -1528,7 +1547,7 @@ impl VM {
                 match input {
                     Value::String(s) => {
                         let hash = self.runtime.hash_sha256(&s);
-                        self.stack.push(Value::String(hash));
+                        self.stack.push(Value::String(Rc::new(hash)));
                         Ok(())
                     }
                     _ => Err("sha256 requires string argument".to_string()),
@@ -1540,7 +1559,7 @@ impl VM {
                 match input {
                     Value::String(s) => {
                         let hash = self.runtime.hash_sha512(&s);
-                        self.stack.push(Value::String(hash));
+                        self.stack.push(Value::String(Rc::new(hash)));
                         Ok(())
                     }
                     _ => Err("sha512 requires string argument".to_string()),
@@ -1574,14 +1593,14 @@ impl VM {
             51 => {
                 let value = self.pop()?;
                 let json_str = self.runtime.json_stringify(&value);
-                self.stack.push(Value::String(json_str));
+                self.stack.push(Value::String(Rc::new(json_str)));
                 Ok(())
             }
             // json_stringify_pretty(value) -> string
             52 => {
                 let value = self.pop()?;
                 let json_str = self.runtime.json_stringify_pretty(&value);
-                self.stack.push(Value::String(json_str));
+                self.stack.push(Value::String(Rc::new(json_str)));
                 Ok(())
             }
 
@@ -1622,7 +1641,7 @@ impl VM {
                 match (socket_id, max_bytes) {
                     (Value::Int(socket_id), Value::Int(max_bytes)) => {
                         let data = self.runtime.tcp_read(socket_id, max_bytes);
-                        self.stack.push(Value::String(data));
+                        self.stack.push(Value::String(Rc::new(data)));
                         Ok(())
                     }
                     _ => Err("tcp_read requires (int, int) arguments".to_string()),
@@ -1646,7 +1665,7 @@ impl VM {
                 match hostname {
                     Value::String(hostname) => {
                         let ip = self.runtime.dns_lookup(&hostname);
-                        self.stack.push(Value::String(ip));
+                        self.stack.push(Value::String(Rc::new(ip)));
                         Ok(())
                     }
                     _ => Err("dns_lookup requires string argument".to_string()),
@@ -1660,7 +1679,7 @@ impl VM {
             // getcwd() -> string
             90 => {
                 let cwd = self.runtime.os_getcwd();
-                self.stack.push(Value::String(cwd));
+                self.stack.push(Value::String(Rc::new(cwd)));
                 Ok(())
             }
             // chdir(path: string) -> bool
@@ -1741,7 +1760,7 @@ impl VM {
                 match path {
                     Value::String(path) => {
                         let entries = self.runtime.os_listdir(&path);
-                        let arr: Vec<Value> = entries.into_iter().map(Value::String).collect();
+                        let arr: Vec<Value> = entries.into_iter().map(|s| Value::String(Rc::new(s))).collect();
                         self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
                         Ok(())
                     }
@@ -1809,7 +1828,7 @@ impl VM {
                 match input {
                     Value::String(s) => {
                         let encoded = self.runtime.url_encode(&s);
-                        self.stack.push(Value::String(encoded));
+                        self.stack.push(Value::String(Rc::new(encoded)));
                         Ok(())
                     }
                     _ => Err("url_encode requires string argument".to_string()),
@@ -1821,7 +1840,7 @@ impl VM {
                 match input {
                     Value::String(s) => {
                         let decoded = self.runtime.url_decode(&s);
-                        self.stack.push(Value::String(decoded));
+                        self.stack.push(Value::String(Rc::new(decoded)));
                         Ok(())
                     }
                     _ => Err("url_decode requires string argument".to_string()),
@@ -1840,13 +1859,13 @@ impl VM {
                         match self.runtime.http_get(&url) {
                             Ok((status, _headers, body)) => {
                                 // Return array [status, body]
-                                let arr = vec![Value::Int(status), Value::String(body)];
+                                let arr = vec![Value::Int(status), Value::String(Rc::new(body))];
                                 self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
                                 Ok(())
                             }
                             Err(e) => {
                                 // Return error as [-1, error_message]
-                                let arr = vec![Value::Int(-1), Value::String(e)];
+                                let arr = vec![Value::Int(-1), Value::String(Rc::new(e))];
                                 self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
                                 Ok(())
                             }
@@ -1864,12 +1883,12 @@ impl VM {
                     (Value::String(url), Value::String(body), Value::String(content_type)) => {
                         match self.runtime.http_post(&url, &body, &content_type) {
                             Ok((status, _headers, response_body)) => {
-                                let arr = vec![Value::Int(status), Value::String(response_body)];
+                                let arr = vec![Value::Int(status), Value::String(Rc::new(response_body))];
                                 self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
                                 Ok(())
                             }
                             Err(e) => {
-                                let arr = vec![Value::Int(-1), Value::String(e)];
+                                let arr = vec![Value::Int(-1), Value::String(Rc::new(e))];
                                 self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
                                 Ok(())
                             }
@@ -1892,12 +1911,12 @@ impl VM {
                         Value::String(body),
                     ) => match self.runtime.http_request(&method, &url, &headers, &body) {
                         Ok((status, response_body)) => {
-                            let arr = vec![Value::Int(status), Value::String(response_body)];
+                            let arr = vec![Value::Int(status), Value::String(Rc::new(response_body))];
                             self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
                             Ok(())
                         }
                         Err(e) => {
-                            let arr = vec![Value::Int(-1), Value::String(e)];
+                            let arr = vec![Value::Int(-1), Value::String(Rc::new(e))];
                             self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
                             Ok(())
                         }
@@ -2224,7 +2243,7 @@ impl VM {
                 match timestamp_ms {
                     Value::Int(ms) => {
                         let result = self.runtime.time_format_iso(ms);
-                        self.stack.push(Value::String(result));
+                        self.stack.push(Value::String(Rc::new(result)));
                         Ok(())
                     }
                     _ => Err("time_format_iso requires int argument".to_string()),
@@ -2237,7 +2256,7 @@ impl VM {
                 match (timestamp_ms, format) {
                     (Value::Int(ms), Value::String(fmt)) => {
                         let result = self.runtime.time_format(ms, &fmt);
-                        self.stack.push(Value::String(result));
+                        self.stack.push(Value::String(Rc::new(result)));
                         Ok(())
                     }
                     _ => Err("time_format requires (int, string) arguments".to_string()),
@@ -2323,7 +2342,7 @@ impl VM {
                 match (pattern, text) {
                     (Value::String(pattern), Value::String(text)) => {
                         let result = self.runtime.regex_find(&pattern, &text);
-                        self.stack.push(Value::String(result));
+                        self.stack.push(Value::String(Rc::new(result)));
                         Ok(())
                     }
                     _ => Err("regex_find requires (string, string) arguments".to_string()),
@@ -2336,7 +2355,7 @@ impl VM {
                 match (pattern, text) {
                     (Value::String(pattern), Value::String(text)) => {
                         let matches = self.runtime.regex_find_all(&pattern, &text);
-                        let arr: Vec<Value> = matches.into_iter().map(Value::String).collect();
+                        let arr: Vec<Value> = matches.into_iter().map(|s| Value::String(Rc::new(s))).collect();
                         self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
                         Ok(())
                     }
@@ -2351,7 +2370,7 @@ impl VM {
                 match (pattern, text, replacement) {
                     (Value::String(pattern), Value::String(text), Value::String(replacement)) => {
                         let result = self.runtime.regex_replace(&pattern, &text, &replacement);
-                        self.stack.push(Value::String(result));
+                        self.stack.push(Value::String(Rc::new(result)));
                         Ok(())
                     }
                     _ => {
@@ -2369,7 +2388,7 @@ impl VM {
                         let result = self
                             .runtime
                             .regex_replace_all(&pattern, &text, &replacement);
-                        self.stack.push(Value::String(result));
+                        self.stack.push(Value::String(Rc::new(result)));
                         Ok(())
                     }
                     _ => Err(
@@ -2384,7 +2403,7 @@ impl VM {
                 match (pattern, text) {
                     (Value::String(pattern), Value::String(text)) => {
                         let parts = self.runtime.regex_split(&pattern, &text);
-                        let arr: Vec<Value> = parts.into_iter().map(Value::String).collect();
+                        let arr: Vec<Value> = parts.into_iter().map(|s| Value::String(Rc::new(s))).collect();
                         self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
                         Ok(())
                     }
@@ -2398,7 +2417,7 @@ impl VM {
                 match (pattern, text) {
                     (Value::String(pattern), Value::String(text)) => {
                         let captures = self.runtime.regex_captures(&pattern, &text);
-                        let arr: Vec<Value> = captures.into_iter().map(Value::String).collect();
+                        let arr: Vec<Value> = captures.into_iter().map(|s| Value::String(Rc::new(s))).collect();
                         self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
                         Ok(())
                     }
@@ -2425,13 +2444,13 @@ impl VM {
             // uuid_v4() -> string
             190 => {
                 let uuid = self.runtime.uuid_v4();
-                self.stack.push(Value::String(uuid));
+                self.stack.push(Value::String(Rc::new(uuid)));
                 Ok(())
             }
             // uuid_v7() -> string
             191 => {
                 let uuid = self.runtime.uuid_v7();
-                self.stack.push(Value::String(uuid));
+                self.stack.push(Value::String(Rc::new(uuid)));
                 Ok(())
             }
             // uuid_is_valid(s: string) -> bool
@@ -2449,7 +2468,7 @@ impl VM {
             // uuid_nil() -> string
             193 => {
                 let uuid = self.runtime.uuid_nil();
-                self.stack.push(Value::String(uuid));
+                self.stack.push(Value::String(Rc::new(uuid)));
                 Ok(())
             }
 
@@ -2863,8 +2882,8 @@ mod tests {
     fn test_string_concatenation() {
         let program = make_program(
             vec![
-                Value::String("Hello, ".to_string()),
-                Value::String("World!".to_string()),
+                Value::String(Rc::new("Hello, ".to_string())),
+                Value::String(Rc::new("World!".to_string())),
             ],
             vec![
                 Opcode::LoadConst as u8,
@@ -3052,5 +3071,24 @@ mod tests {
             Value::Int(n) => assert_eq!(*n, 100),
             other => panic!("Expected Int(100), got {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_string_interning() {
+        // Create a VM and verify string interning works
+        let program = make_program(vec![], vec![Opcode::Halt as u8]);
+        let mut vm = VM::new(program);
+
+        // Intern the same string multiple times
+        let s1 = vm.intern_string("hello".to_string());
+        let s2 = vm.intern_string("hello".to_string());
+        let s3 = vm.intern_string("world".to_string());
+
+        // Same content should return same Rc pointer
+        assert!(Rc::ptr_eq(&s1, &s2), "Interned strings should share same Rc");
+        assert!(!Rc::ptr_eq(&s1, &s3), "Different strings should not share Rc");
+
+        // Pool should have exactly 2 unique strings
+        assert_eq!(vm.string_pool.len(), 2);
     }
 }
