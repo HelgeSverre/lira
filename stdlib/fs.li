@@ -1,0 +1,68 @@
+// Lira Standard Library - File System Module
+// High-level file operations built on host primitives
+
+// ============================================================================
+// File Modes (for reference)
+// ============================================================================
+// 0 = read only
+// 1 = write (create/truncate)
+// 2 = append
+// 3 = read + write
+
+// ============================================================================
+// Convenience Functions
+// ============================================================================
+
+// Read entire file as string
+fn read_file(path: string) -> string {
+    let fd = file_open(path, 0)
+    if fd < 0 {
+        return ""
+    }
+
+    let size = file_size(path)
+    let content = file_read(fd, size)
+    file_close(fd)
+    return content
+}
+
+// Write string to file (overwrites existing)
+fn write_file(path: string, content: string) -> bool {
+    let fd = file_open(path, 1)
+    if fd < 0 {
+        return false
+    }
+
+    let bytes = file_write(fd, content)
+    file_close(fd)
+    return bytes > 0
+}
+
+// Append string to file
+fn append_file(path: string, content: string) -> bool {
+    let fd = file_open(path, 2)
+    if fd < 0 {
+        return false
+    }
+
+    let bytes = file_write(fd, content)
+    file_close(fd)
+    return bytes > 0
+}
+
+// ============================================================================
+// Path Utilities
+// ============================================================================
+
+// Check if path exists (file or directory)
+fn exists(path: string) -> bool {
+    return file_exists(path)
+}
+
+// Get file size in bytes (-1 if doesn't exist)
+fn size(path: string) -> int {
+    if !file_exists(path) {
+        return -1
+    }
+    return file_size(path)
+}

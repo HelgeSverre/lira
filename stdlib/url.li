@@ -1,0 +1,329 @@
+// Lira Standard Library - URL Module
+// URL parsing and encoding utilities
+//
+// This module provides URL parsing, encoding, and manipulation functions.
+// It uses host primitives (syscalls 110-111) for URL encoding/decoding
+// and pure Lira for URL parsing.
+//
+// Built-in functions (from host):
+// - url_encode(str) -> str: Percent-encode string
+// - url_decode(str) -> str: Decode percent-encoded string
+
+// ============================================================================
+// URL Structure
+// ============================================================================
+
+// URL components
+struct URL {
+    scheme: string,
+    host: string,
+    port: int,
+    path: string,
+    query: string,
+    fragment: string
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+// Parse integer from string (simple implementation)
+fn parse_int(s: string) -> int {
+    if len(s) == 0 {
+        return 0
+    }
+
+    var result = 0
+    var negative = false
+    var i = 0
+
+    // Check for negative sign
+    if str_char_code(s, 0) == 45 {  // '-' = 45
+        negative = true
+        i = 1
+    }
+
+    while i < len(s) {
+        let code = str_char_code(s, i)
+        // '0' = 48, '9' = 57
+        if code >= 48 && code <= 57 {
+            result = result * 10 + (code - 48)
+        } else {
+            // Stop at non-digit character
+            if negative {
+                return -result
+            }
+            return result
+        }
+        i = i + 1
+    }
+
+    if negative {
+        return -result
+    }
+    return result
+}
+
+// Find first occurrence of substring (wrapper for str_index_of)
+fn url_index_of(s: string, substr: string) -> int {
+    return str_index_of(s, substr)
+}
+
+// Get substring from start to end (wrapper for str_substring)
+fn url_substring(s: string, start: int, end: int) -> string {
+    return str_substring(s, start, end)
+}
+
+// ============================================================================
+// URL Parsing
+// ============================================================================
+
+// Parse URL string into components
+fn url_parse(url_str: string) -> URL {
+    var scheme = ""
+    var host = ""
+    var port = 0
+    var path = "/"
+    var query = ""
+    var fragment = ""
+
+    var remaining = url_str
+
+    // Extract scheme (e.g., "http://")
+    let scheme_end = str_index_of(remaining, "://")
+    if scheme_end >= 0 {
+        scheme = str_substring(remaining, 0, scheme_end)
+        remaining = str_substring(remaining, scheme_end + 3, len(remaining))
+    }
+
+    // Extract fragment (#...)
+    let frag_start = str_index_of(remaining, "#")
+    if frag_start >= 0 {
+        fragment = str_substring(remaining, frag_start + 1, len(remaining))
+        remaining = str_substring(remaining, 0, frag_start)
+    }
+
+    // Extract query (?...)
+    let query_start = str_index_of(remaining, "?")
+    if query_start >= 0 {
+        query = str_substring(remaining, query_start + 1, len(remaining))
+        remaining = str_substring(remaining, 0, query_start)
+    }
+
+    // Extract path
+    let path_start = str_index_of(remaining, "/")
+    if path_start >= 0 {
+        path = str_substring(remaining, path_start, len(remaining))
+        remaining = str_substring(remaining, 0, path_start)
+    }
+
+    // Extract port
+    let port_start = str_index_of(remaining, ":")
+    if port_start >= 0 {
+        let port_str = str_substring(remaining, port_start + 1, len(remaining))
+        port = parse_int(port_str)
+        remaining = str_substring(remaining, 0, port_start)
+    }
+
+    // Remaining is host
+    host = remaining
+
+    // Set default port based on scheme
+    if port == 0 {
+        if scheme == "http" {
+            port = 80
+        } else if scheme == "https" {
+            port = 443
+        } else if scheme == "ftp" {
+            port = 21
+        }
+    }
+
+    return URL {
+        scheme: scheme,
+        host: host,
+        port: port,
+        path: path,
+        query: query,
+        fragment: fragment
+    }
+}
+
+// ============================================================================
+// URL Building
+// ============================================================================
+
+// Build URL string from components
+fn url_build(url: URL) -> string {
+    var result = ""
+
+    if len(url.scheme) > 0 {
+        result = url.scheme + "://"
+    }
+
+    result = result + url.host
+
+    // Only add port if it's not the default for the scheme
+    if url.port > 0 {
+        var is_default = false
+        if url.scheme == "http" && url.port == 80 {
+            is_default = true
+        } else if url.scheme == "https" && url.port == 443 {
+            is_default = true
+        } else if url.scheme == "ftp" && url.port == 21 {
+            is_default = true
+        }
+
+        if !is_default {
+            result = result + ":" + url.port
+        }
+    }
+
+    result = result + url.path
+
+    if len(url.query) > 0 {
+        result = result + "?" + url.query
+    }
+
+    if len(url.fragment) > 0 {
+        result = result + "#" + url.fragment
+    }
+
+    return result
+}
+
+// ============================================================================
+// Query String Utilities
+// ============================================================================
+
+// Parse query string into array of key=value pairs
+fn query_parse(query: string) -> [string] {
+    // str_split will return appropriate array; empty query gives [""]
+    return str_split(query, "&")
+}
+
+// Get query parameter value by key
+fn query_get(query: string, key: string) -> string {
+    let pairs = str_split(query, "&")
+    var i = 0
+    while i < len(pairs) {
+        let pair = pairs[i]
+        let eq_pos = str_index_of(pair, "=")
+        if eq_pos >= 0 {
+            let k = str_substring(pair, 0, eq_pos)
+            if k == key {
+                let encoded_value = str_substring(pair, eq_pos + 1, len(pair))
+                return url_decode(encoded_value)
+            }
+        }
+        i = i + 1
+    }
+    return ""
+}
+
+// Check if query has a parameter
+fn query_has(query: string, key: string) -> bool {
+    let pairs = str_split(query, "&")
+    var i = 0
+    while i < len(pairs) {
+        let pair = pairs[i]
+        let eq_pos = str_index_of(pair, "=")
+        if eq_pos >= 0 {
+            let k = str_substring(pair, 0, eq_pos)
+            if k == key {
+                return true
+            }
+        }
+        i = i + 1
+    }
+    return false
+}
+
+// Build query string from keys and values arrays
+// pairs should be [key1, value1, key2, value2, ...]
+fn query_build(pairs: [string]) -> string {
+    if len(pairs) == 0 {
+        return ""
+    }
+
+    var result = ""
+    var i = 0
+    while i < len(pairs) - 1 {
+        if i > 0 {
+            result = result + "&"
+        }
+        let key = pairs[i]
+        let value = pairs[i + 1]
+        result = result + url_encode(key) + "=" + url_encode(value)
+        i = i + 2
+    }
+    return result
+}
+
+// ============================================================================
+// URL Manipulation
+// ============================================================================
+
+// Get just the origin (scheme + host + port)
+fn url_origin(url: URL) -> string {
+    var result = ""
+    if len(url.scheme) > 0 {
+        result = url.scheme + "://"
+    }
+    result = result + url.host
+
+    if url.port > 0 {
+        var is_default = false
+        if url.scheme == "http" && url.port == 80 {
+            is_default = true
+        } else if url.scheme == "https" && url.port == 443 {
+            is_default = true
+        }
+        if !is_default {
+            result = result + ":" + url.port
+        }
+    }
+
+    return result
+}
+
+// Get path with query and fragment
+fn url_path_query(url: URL) -> string {
+    var result = url.path
+    if len(url.query) > 0 {
+        result = result + "?" + url.query
+    }
+    if len(url.fragment) > 0 {
+        result = result + "#" + url.fragment
+    }
+    return result
+}
+
+// Check if URL is absolute (has scheme)
+fn url_is_absolute(url_str: string) -> bool {
+    return str_index_of(url_str, "://") >= 0
+}
+
+// Check if URL is relative (no scheme)
+fn url_is_relative(url_str: string) -> bool {
+    return str_index_of(url_str, "://") < 0
+}
+
+// ============================================================================
+// Common URL Schemes
+// ============================================================================
+
+// Check if URL uses HTTP
+fn url_is_http(url: URL) -> bool {
+    return url.scheme == "http"
+}
+
+// Check if URL uses HTTPS
+fn url_is_https(url: URL) -> bool {
+    return url.scheme == "https"
+}
+
+// Check if URL is secure (HTTPS)
+fn url_is_secure(url: URL) -> bool {
+    return url.scheme == "https"
+}

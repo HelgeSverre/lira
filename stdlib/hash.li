@@ -1,0 +1,33 @@
+// Lira Standard Library - Hash Module
+// Cryptographic hash functions
+
+// md5(str) -> hex string (built-in syscall 70)
+// sha1(str) -> hex string (built-in syscall 71)
+// sha256(str) -> hex string (built-in syscall 72)
+// sha512(str) -> hex string (built-in syscall 73)
+
+// Helper: Verify hash matches expected
+fn verify_md5(input: string, expected_hash: string) -> bool {
+    return md5(input) == expected_hash
+}
+
+fn verify_sha1(input: string, expected_hash: string) -> bool {
+    return sha1(input) == expected_hash
+}
+
+fn verify_sha256(input: string, expected_hash: string) -> bool {
+    return sha256(input) == expected_hash
+}
+
+fn verify_sha512(input: string, expected_hash: string) -> bool {
+    return sha512(input) == expected_hash
+}
+
+// Hash with salt (simple concatenation)
+fn md5_salted(input: string, salt: string) -> string {
+    return md5(salt + input)
+}
+
+fn sha256_salted(input: string, salt: string) -> string {
+    return sha256(salt + input)
+}

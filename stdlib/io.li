@@ -1,0 +1,64 @@
+// Lira Standard Library - I/O Module
+// Input/output utilities
+
+// ============================================================================
+// Console I/O
+// ============================================================================
+
+// Print without newline
+fn print_str(s: string) {
+    print(s)
+}
+
+// Print with newline
+fn print_line(s: string) {
+    println(s)
+}
+
+// Print formatted message with values
+fn print_fmt(template: string, values: [string]) {
+    var result = template
+    var i = 0
+    while i < len(values) {
+        // Replace {} with value (simple replacement)
+        // Note: This is a basic implementation
+        result = result + values[i]
+        i = i + 1
+    }
+    println(result)
+}
+
+// ============================================================================
+// Debugging
+// ============================================================================
+
+// Debug print with label
+fn debug(label: string, value: int) {
+    println("[DEBUG] " + label + ": " + value)
+}
+
+// Assert condition
+fn assert(condition: bool, message: string) {
+    if !condition {
+        println("[ASSERT FAILED] " + message)
+    }
+}
+
+// ============================================================================
+// Time Utilities
+// ============================================================================
+
+// Get current timestamp in milliseconds
+fn now_ms() -> int {
+    return time_ms()
+}
+
+// Sleep for specified milliseconds
+fn delay(ms: int) {
+    sleep(ms)
+}
+
+// Measure execution time of a block
+fn measure_time() -> int {
+    return time_ms()
+}

@@ -1,0 +1,49 @@
+// Lira Standard Library - UUID Module
+// UUID generation and validation
+
+// Built-in functions (syscalls 190-193):
+// uuid_v4() -> string         Generate random UUID v4
+// uuid_v7() -> string         Generate time-ordered UUID v7
+// uuid_is_valid(s) -> bool    Check if string is valid UUID
+// uuid_nil() -> string        Get nil UUID
+
+// Aliases for convenience
+fn uuid() -> string {
+    return uuid_v4()
+}
+
+fn generate() -> string {
+    return uuid_v4()
+}
+
+fn random() -> string {
+    return uuid_v4()
+}
+
+fn time_ordered() -> string {
+    return uuid_v7()
+}
+
+// Check if UUID is nil
+fn is_nil(uuid: string) -> bool {
+    return uuid == "00000000-0000-0000-0000-000000000000"
+}
+
+// Get version from UUID string (simple extraction)
+fn version(uuid: string) -> int {
+    // UUID format: xxxxxxxx-xxxx-Vxxx-xxxx-xxxxxxxxxxxx
+    // V is the version digit at position 14
+    if len(uuid) < 15 {
+        return 0
+    }
+    // Use str_substring to get character at position 14
+    let v_char = str_substring(uuid, 14, 15)
+    if v_char == "4" {
+        return 4
+    } else if v_char == "7" {
+        return 7
+    } else if v_char == "1" {
+        return 1
+    }
+    return 0
+}

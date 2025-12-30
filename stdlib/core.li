@@ -1,0 +1,106 @@
+// Lira Standard Library - Core Module
+// Provides fundamental types and utilities
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+// File open modes
+let FILE_READ = 0
+let FILE_WRITE = 1
+let FILE_APPEND = 2
+let FILE_READWRITE = 3
+
+// ============================================================================
+// Utility Functions
+// ============================================================================
+
+// Absolute value
+fn abs(n: int) -> int {
+    if n < 0 {
+        return -n
+    }
+    return n
+}
+
+// Minimum of two values
+fn min(a: int, b: int) -> int {
+    if a < b {
+        return a
+    }
+    return b
+}
+
+// Maximum of two values
+fn max(a: int, b: int) -> int {
+    if a > b {
+        return a
+    }
+    return b
+}
+
+// Clamp value to range
+fn clamp(value: int, min_val: int, max_val: int) -> int {
+    if value < min_val {
+        return min_val
+    }
+    if value > max_val {
+        return max_val
+    }
+    return value
+}
+
+// ============================================================================
+// String Utilities
+// ============================================================================
+
+// Check if string is empty
+fn is_empty(s: string) -> bool {
+    return len(s) == 0
+}
+
+// Repeat string n times
+fn repeat_str(s: string, n: int) -> string {
+    var result = ""
+    var i = 0
+    while i < n {
+        result = result + s
+        i = i + 1
+    }
+    return result
+}
+
+// ============================================================================
+// Array Utilities
+// ============================================================================
+
+// Check if array contains a value
+fn contains_int(arr: [int], value: int) -> bool {
+    for item in arr {
+        if item == value {
+            return true
+        }
+    }
+    return false
+}
+
+// Sum all elements in array
+fn sum(arr: [int]) -> int {
+    var total = 0
+    for item in arr {
+        total = total + item
+    }
+    return total
+}
+
+// Find index of value in array (-1 if not found)
+fn index_of(arr: [int], value: int) -> int {
+    var i = 0
+    while i < len(arr) {
+        if arr[i] == value {
+            return i
+        }
+        i = i + 1
+    }
+    return -1
+}

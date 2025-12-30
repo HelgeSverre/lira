@@ -1,0 +1,407 @@
+// Lira Standard Library - Path Module
+// Path manipulation utilities for file system paths
+// Currently uses Unix-style paths (forward slashes)
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+// Path separator (Unix-style)
+let PATH_SEP = "/"
+
+// ============================================================================
+// Helper Functions (Internal)
+// ============================================================================
+
+// Find last occurrence of a character in a string
+// Returns -1 if not found
+fn find_last_char(s: string, c: string) -> int {
+    var i = len(s) - 1
+    while i >= 0 {
+        if s[i] == c {
+            return i
+        }
+        i = i - 1
+    }
+    return -1
+}
+
+// Find first occurrence of a character in a string starting from position
+// Returns -1 if not found
+fn find_char_from(s: string, c: string, start: int) -> int {
+    var i = start
+    while i < len(s) {
+        if s[i] == c {
+            return i
+        }
+        i = i + 1
+    }
+    return -1
+}
+
+// Get substring from start to end (exclusive)
+fn substring(s: string, start: int, end: int) -> string {
+    var result = ""
+    var i = start
+    while i < end {
+        if i >= 0 && i < len(s) {
+            result = result + s[i]
+        }
+        i = i + 1
+    }
+    return result
+}
+
+// Check if string starts with a prefix
+fn starts_with(s: string, prefix: string) -> bool {
+    if len(prefix) > len(s) {
+        return false
+    }
+    var i = 0
+    while i < len(prefix) {
+        if s[i] != prefix[i] {
+            return false
+        }
+        i = i + 1
+    }
+    return true
+}
+
+// Check if string ends with a suffix
+fn ends_with(s: string, suffix: string) -> bool {
+    if len(suffix) > len(s) {
+        return false
+    }
+    var i = 0
+    let offset = len(s) - len(suffix)
+    while i < len(suffix) {
+        if s[offset + i] != suffix[i] {
+            return false
+        }
+        i = i + 1
+    }
+    return true
+}
+
+// ============================================================================
+// Path Functions
+// ============================================================================
+
+// Get directory name (parent path)
+// "/foo/bar/baz.txt" -> "/foo/bar"
+// "foo/bar" -> "foo"
+// "/foo" -> "/"
+// "foo" -> "."
+// "/" -> "/"
+fn dirname(path: string) -> string {
+    if len(path) == 0 {
+        return "."
+    }
+
+    // Handle trailing slashes by finding last non-slash
+    var end = len(path) - 1
+    while end > 0 && path[end] == "/" {
+        end = end - 1
+    }
+
+    // Find the last separator before end
+    var last_sep = -1
+    var i = 0
+    while i <= end {
+        if path[i] == "/" {
+            last_sep = i
+        }
+        i = i + 1
+    }
+
+    if last_sep == -1 {
+        // No separator found - relative path
+        return "."
+    }
+
+    if last_sep == 0 {
+        // Root directory
+        return "/"
+    }
+
+    return substring(path, 0, last_sep)
+}
+
+// Get base name (file name)
+// "/foo/bar/baz.txt" -> "baz.txt"
+// "/foo/bar/" -> "bar"
+// "/" -> ""
+fn basename(path: string) -> string {
+    if len(path) == 0 {
+        return ""
+    }
+
+    // Handle trailing slashes
+    var end = len(path) - 1
+    while end > 0 && path[end] == "/" {
+        end = end - 1
+    }
+
+    // Handle root directory
+    if end == 0 && path[0] == "/" {
+        return ""
+    }
+
+    // Find the last separator before end
+    var last_sep = -1
+    var i = 0
+    while i <= end {
+        if path[i] == "/" {
+            last_sep = i
+        }
+        i = i + 1
+    }
+
+    if last_sep == -1 {
+        // No separator - entire path is the basename
+        return substring(path, 0, end + 1)
+    }
+
+    return substring(path, last_sep + 1, end + 1)
+}
+
+// Get file extension (including dot)
+// "/foo/bar.txt" -> ".txt"
+// "/foo/bar" -> ""
+// "/foo/.hidden" -> ""
+// "/foo/bar.tar.gz" -> ".gz"
+fn extension(path: string) -> string {
+    let name = basename(path)
+    if len(name) == 0 {
+        return ""
+    }
+
+    // Find last dot, but not at the beginning (hidden files)
+    var last_dot = -1
+    var i = 1
+    while i < len(name) {
+        if name[i] == "." {
+            last_dot = i
+        }
+        i = i + 1
+    }
+
+    if last_dot == -1 {
+        return ""
+    }
+
+    return substring(name, last_dot, len(name))
+}
+
+// Get file name without extension (stem)
+// "/foo/bar.txt" -> "bar"
+// "/foo/bar" -> "bar"
+// "/foo/.hidden" -> ".hidden"
+fn stem(path: string) -> string {
+    let name = basename(path)
+    if len(name) == 0 {
+        return ""
+    }
+
+    // Find last dot, but not at the beginning
+    var last_dot = -1
+    var i = 1
+    while i < len(name) {
+        if name[i] == "." {
+            last_dot = i
+        }
+        i = i + 1
+    }
+
+    if last_dot == -1 {
+        return name
+    }
+
+    return substring(name, 0, last_dot)
+}
+
+// Check if path is absolute (starts with /)
+fn is_absolute(path: string) -> bool {
+    if len(path) == 0 {
+        return false
+    }
+    return path[0] == "/"
+}
+
+// Check if path is relative (does not start with /)
+fn is_relative(path: string) -> bool {
+    return !is_absolute(path)
+}
+
+// Get parent directory (alias for dirname)
+fn parent(path: string) -> string {
+    return dirname(path)
+}
+
+// Check if path has an extension
+fn has_extension(path: string) -> bool {
+    return extension(path) != ""
+}
+
+// Join path components with separator
+// Handles leading/trailing slashes appropriately
+fn path_join(parts: [string]) -> string {
+    var result = ""
+    var i = 0
+
+    while i < len(parts) {
+        let part = parts[i]
+        if len(part) == 0 {
+            i = i + 1
+            continue
+        }
+
+        if len(result) == 0 {
+            result = part
+        } else {
+            // Check if result ends with / or part starts with /
+            let result_ends_slash = result[len(result) - 1] == "/"
+            let part_starts_slash = part[0] == "/"
+
+            if result_ends_slash && part_starts_slash {
+                // Both have slash - skip one
+                result = result + substring(part, 1, len(part))
+            } else if result_ends_slash || part_starts_slash {
+                // One has slash - just concatenate
+                result = result + part
+            } else {
+                // Neither has slash - add one
+                result = result + "/" + part
+            }
+        }
+        i = i + 1
+    }
+
+    return result
+}
+
+// Join two path components
+fn join(path1: string, path2: string) -> string {
+    return path_join([path1, path2])
+}
+
+// Normalize a path (remove . and .., collapse multiple slashes)
+// "/foo//bar/../baz" -> "/foo/baz"
+// "foo/./bar" -> "foo/bar"
+fn normalize(path: string) -> string {
+    if len(path) == 0 {
+        return "."
+    }
+
+    let is_abs = is_absolute(path)
+
+    // Split path into components
+    var components = []
+    var current = ""
+    var i = 0
+
+    while i < len(path) {
+        if path[i] == "/" {
+            if len(current) > 0 {
+                push(components, current)
+                current = ""
+            }
+        } else {
+            current = current + path[i]
+        }
+        i = i + 1
+    }
+
+    if len(current) > 0 {
+        push(components, current)
+    }
+
+    // Process components
+    var result = []
+    i = 0
+    while i < len(components) {
+        let comp = components[i]
+        if comp == "." {
+            // Skip current directory marker
+        } else if comp == ".." {
+            // Go up one directory if possible
+            if len(result) > 0 && result[len(result) - 1] != ".." {
+                pop(result)
+            } else if !is_abs {
+                // For relative paths, keep the ..
+                push(result, comp)
+            }
+            // For absolute paths at root, ignore ..
+        } else {
+            push(result, comp)
+        }
+        i = i + 1
+    }
+
+    // Reconstruct path
+    if len(result) == 0 {
+        if is_abs {
+            return "/"
+        }
+        return "."
+    }
+
+    var normalized = ""
+    if is_abs {
+        normalized = "/"
+    }
+
+    i = 0
+    while i < len(result) {
+        if i > 0 {
+            normalized = normalized + "/"
+        }
+        normalized = normalized + result[i]
+        i = i + 1
+    }
+
+    return normalized
+}
+
+// Replace or add extension to a path
+// with_extension("/foo/bar.txt", ".md") -> "/foo/bar.md"
+// with_extension("/foo/bar", ".txt") -> "/foo/bar.txt"
+fn with_extension(path: string, ext: string) -> string {
+    let dir = dirname(path)
+    let name = stem(path)
+
+    // Handle case where path is just a file name
+    if dir == "." && !starts_with(path, ".") {
+        return name + ext
+    }
+
+    return join(dir, name + ext)
+}
+
+// Split path into array of components
+// "/foo/bar/baz" -> ["", "foo", "bar", "baz"]
+// "foo/bar" -> ["foo", "bar"]
+fn components(path: string) -> [string] {
+    // Initialize with a dummy string to establish type, then pop it
+    var result = [""]
+    pop(result)
+    var current = ""
+    var i = 0
+
+    while i < len(path) {
+        if path[i] == "/" {
+            push(result, current)
+            current = ""
+        } else {
+            current = current + path[i]
+        }
+        i = i + 1
+    }
+
+    // Don't forget the last component
+    if len(current) > 0 || (len(path) > 0 && path[len(path) - 1] == "/") {
+        push(result, current)
+    }
+
+    return result
+}

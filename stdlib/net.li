@@ -1,0 +1,73 @@
+// Lira Standard Library - Network Module
+// TCP networking primitives
+
+// ============================================================================
+// Built-in primitives (implemented in runtime)
+// ============================================================================
+//
+// tcp_connect(host, port) - Connect to TCP server, returns socket id or -1
+// tcp_write(socket, data) - Write data, returns bytes written or -1
+// tcp_read(socket, max_bytes) - Read data, returns string
+// tcp_close(socket) - Close connection, returns true if successful
+// dns_lookup(hostname) - Resolve hostname to IP address
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+// Check if socket is valid (connected successfully)
+fn is_connected(socket_id: int) -> bool {
+    return socket_id >= 0
+}
+
+// Send line with CRLF (for text protocols like HTTP, SMTP, etc.)
+fn tcp_write_line(socket_id: int, line: string) -> int {
+    return tcp_write(socket_id, line + "\r\n")
+}
+
+// Send multiple lines at once
+fn tcp_write_lines(socket_id: int, lines: [string]) -> int {
+    var total = 0
+    var i = 0
+    while i < len(lines) {
+        let written = tcp_write_line(socket_id, lines[i])
+        if written < 0 {
+            return -1
+        }
+        total = total + written
+        i = i + 1
+    }
+    return total
+}
+
+// Read until we have at least n bytes
+fn tcp_read_exact(socket_id: int, n: int) -> string {
+    var result = ""
+    while len(result) < n {
+        let chunk = tcp_read(socket_id, n - len(result))
+        if len(chunk) == 0 {
+            // Connection closed or error
+            return result
+        }
+        result = result + chunk
+    }
+    return result
+}
+
+// ============================================================================
+// Connection Management
+// ============================================================================
+
+// Connect with timeout check (non-blocking attempt)
+fn tcp_try_connect(host: string, port: int) -> int {
+    let socket = tcp_connect(host, port)
+    return socket
+}
+
+// Close socket safely (no error if already closed)
+fn tcp_close_safe(socket_id: int) -> bool {
+    if socket_id < 0 {
+        return true
+    }
+    return tcp_close(socket_id)
+}

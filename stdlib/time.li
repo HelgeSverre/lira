@@ -1,0 +1,211 @@
+// Lira Standard Library - Time Module
+// Time manipulation and formatting
+//
+// Built-in functions (direct syscalls):
+//   time_ms() -> int              - Current time in milliseconds since epoch (syscall 4)
+//   sleep(ms: int)                - Sleep for milliseconds (syscall 5)
+//   time_secs() -> int            - Current time in seconds since epoch (syscall 6)
+//   time_micros() -> int          - Current time in microseconds since epoch (syscall 7)
+//   time_nanos() -> int           - Current time in nanoseconds since epoch (syscall 8)
+//   time_format_iso(ms) -> string - Format timestamp as ISO 8601 string (syscall 130)
+//   time_format(ms, fmt) -> string- Format timestamp with custom format (syscall 131)
+//   time_parse_iso(str) -> int    - Parse ISO 8601 string to timestamp (syscall 132)
+//   time_timezone_offset() -> int - Get local timezone offset in minutes (syscall 133)
+//   time_components(ms) -> [int]  - Get [year, month, day, hour, min, sec] (syscall 134)
+//   time_from_components(y, m, d, h, m, s) -> int - Create timestamp from components (syscall 135)
+
+// ============================================================================
+// Duration Helper Functions
+// ============================================================================
+
+// Convert seconds to milliseconds
+fn seconds(n: int) -> int {
+    return n * 1000
+}
+
+// Convert minutes to milliseconds
+fn minutes(n: int) -> int {
+    return n * 60000
+}
+
+// Convert hours to milliseconds
+fn hours(n: int) -> int {
+    return n * 3600000
+}
+
+// Convert days to milliseconds
+fn days(n: int) -> int {
+    return n * 86400000
+}
+
+// Convert weeks to milliseconds
+fn weeks(n: int) -> int {
+    return n * 604800000
+}
+
+// ============================================================================
+// Current Time Functions
+// ============================================================================
+
+// Get current date as string (YYYY-MM-DD)
+fn today() -> string {
+    return time_format(time_ms(), "%Y-%m-%d")
+}
+
+// Get current time as string (HH:MM:SS)
+fn now_time() -> string {
+    return time_format(time_ms(), "%H:%M:%S")
+}
+
+// Get current datetime as ISO 8601 string
+fn now_iso() -> string {
+    return time_format_iso(time_ms())
+}
+
+// Get current datetime with custom format
+fn now_format(fmt: string) -> string {
+    return time_format(time_ms(), fmt)
+}
+
+// ============================================================================
+// Elapsed Time Functions
+// ============================================================================
+
+// Measure elapsed time from a start timestamp
+fn elapsed_ms(start_ms: int) -> int {
+    return time_ms() - start_ms
+}
+
+// Measure elapsed time in seconds from a start timestamp
+fn elapsed_secs(start_ms: int) -> int {
+    return (time_ms() - start_ms) / 1000
+}
+
+// ============================================================================
+// Duration Arithmetic
+// ============================================================================
+
+// Add duration to timestamp
+fn add_ms(timestamp_ms: int, duration_ms: int) -> int {
+    return timestamp_ms + duration_ms
+}
+
+// Subtract timestamps to get duration in milliseconds
+fn diff_ms(end_ms: int, start_ms: int) -> int {
+    return end_ms - start_ms
+}
+
+// Add seconds to timestamp
+fn add_seconds(timestamp_ms: int, secs: int) -> int {
+    return timestamp_ms + seconds(secs)
+}
+
+// Add minutes to timestamp
+fn add_minutes(timestamp_ms: int, mins: int) -> int {
+    return timestamp_ms + minutes(mins)
+}
+
+// Add hours to timestamp
+fn add_hours(timestamp_ms: int, hrs: int) -> int {
+    return timestamp_ms + hours(hrs)
+}
+
+// Add days to timestamp
+fn add_days(timestamp_ms: int, d: int) -> int {
+    return timestamp_ms + days(d)
+}
+
+// ============================================================================
+// Date Comparison Functions
+// ============================================================================
+
+// Check if timestamp is today
+fn is_today(timestamp_ms: int) -> bool {
+    let now_comp = time_components(time_ms())
+    let ts_comp = time_components(timestamp_ms)
+    return now_comp[0] == ts_comp[0] && now_comp[1] == ts_comp[1] && now_comp[2] == ts_comp[2]
+}
+
+// Check if timestamp is before another
+fn is_before(timestamp_ms: int, other_ms: int) -> bool {
+    return timestamp_ms < other_ms
+}
+
+// Check if timestamp is after another
+fn is_after(timestamp_ms: int, other_ms: int) -> bool {
+    return timestamp_ms > other_ms
+}
+
+// Check if timestamp is in the past
+fn is_past(timestamp_ms: int) -> bool {
+    return timestamp_ms < time_ms()
+}
+
+// Check if timestamp is in the future
+fn is_future(timestamp_ms: int) -> bool {
+    return timestamp_ms > time_ms()
+}
+
+// ============================================================================
+// Date Component Extraction
+// ============================================================================
+
+// Get year from timestamp
+fn get_year(timestamp_ms: int) -> int {
+    let comp = time_components(timestamp_ms)
+    return comp[0]
+}
+
+// Get month from timestamp (1-12)
+fn get_month(timestamp_ms: int) -> int {
+    let comp = time_components(timestamp_ms)
+    return comp[1]
+}
+
+// Get day from timestamp (1-31)
+fn get_day(timestamp_ms: int) -> int {
+    let comp = time_components(timestamp_ms)
+    return comp[2]
+}
+
+// Get hour from timestamp (0-23)
+fn get_hour(timestamp_ms: int) -> int {
+    let comp = time_components(timestamp_ms)
+    return comp[3]
+}
+
+// Get minute from timestamp (0-59)
+fn get_minute(timestamp_ms: int) -> int {
+    let comp = time_components(timestamp_ms)
+    return comp[4]
+}
+
+// Get second from timestamp (0-59)
+fn get_second(timestamp_ms: int) -> int {
+    let comp = time_components(timestamp_ms)
+    return comp[5]
+}
+
+// ============================================================================
+// Formatting Helpers
+// ============================================================================
+
+// Format as date only (YYYY-MM-DD)
+fn format_date(timestamp_ms: int) -> string {
+    return time_format(timestamp_ms, "%Y-%m-%d")
+}
+
+// Format as time only (HH:MM:SS)
+fn format_time(timestamp_ms: int) -> string {
+    return time_format(timestamp_ms, "%H:%M:%S")
+}
+
+// Format as datetime (YYYY-MM-DD HH:MM:SS)
+fn format_datetime(timestamp_ms: int) -> string {
+    return time_format(timestamp_ms, "%Y-%m-%d %H:%M:%S")
+}
+
+// Format as human-readable date (e.g., "January 1, 2024")
+fn format_readable(timestamp_ms: int) -> string {
+    return time_format(timestamp_ms, "%B %d, %Y")
+}

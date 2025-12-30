@@ -1,0 +1,40 @@
+// Lira Standard Library - JSON Module
+// JSON parsing and stringification
+
+// Core functions are built-in syscalls:
+// - json_parse(string) -> value      (syscall 50)
+// - json_stringify(value) -> string  (syscall 51)
+// - json_pretty(value) -> string     (syscall 52, pretty-printed)
+
+// Check if value is valid JSON type
+fn is_json_value(val) -> bool {
+    // JSON supports: null, bool, number, string, array, object
+    // All Lira primitive values are valid JSON
+    return true
+}
+
+// Get value from parsed JSON object by key
+fn json_get(obj, key: string) {
+    return obj[key]
+}
+
+// Helper to create an empty JSON object
+fn json_object() {
+    return json_parse("{}")
+}
+
+// Helper to create an empty JSON array
+fn json_array() {
+    return json_parse("[]")
+}
+
+// Check if a key exists in an object (returns true if value is not null)
+fn json_has(obj, key: string) -> bool {
+    return obj[key] != null
+}
+
+// Parse JSON safely, returning null on error
+fn json_parse_safe(text: string) {
+    // json_parse returns null on error already
+    return json_parse(text)
+}

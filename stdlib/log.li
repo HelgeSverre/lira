@@ -1,0 +1,217 @@
+// Lira Standard Library - Logging Module
+// Structured logging with levels
+//
+// This is a stateless logging module. Each log function explicitly takes
+// the necessary configuration as parameters.
+//
+// Built-in functions used (from time module):
+//   time_ms() -> int - Current time in milliseconds since epoch (syscall 4)
+
+// ============================================================================
+// Core Logging Functions (with explicit level checking)
+// ============================================================================
+
+// Log a debug message (level 0)
+fn log_debug(current_level: int, message: string) {
+    if current_level <= 0 {
+        println("[" + time_ms() + "] [DEBUG] " + message)
+    }
+}
+
+// Log an info message (level 1)
+fn log_info(current_level: int, message: string) {
+    if current_level <= 1 {
+        println("[" + time_ms() + "] [INFO] " + message)
+    }
+}
+
+// Log a warning message (level 2)
+fn log_warn(current_level: int, message: string) {
+    if current_level <= 2 {
+        println("[" + time_ms() + "] [WARN] " + message)
+    }
+}
+
+// Log an error message (level 3)
+fn log_error(current_level: int, message: string) {
+    if current_level <= 3 {
+        println("[" + time_ms() + "] [ERROR] " + message)
+    }
+}
+
+// Log a fatal message (level 4)
+fn log_fatal(current_level: int, message: string) {
+    if current_level <= 4 {
+        println("[" + time_ms() + "] [FATAL] " + message)
+    }
+}
+
+// ============================================================================
+// Simple Logging Functions (always print)
+// ============================================================================
+
+// Log debug - always prints
+fn debug(message: string) {
+    println("[" + time_ms() + "] [DEBUG] " + message)
+}
+
+// Log info - always prints
+fn info(message: string) {
+    println("[" + time_ms() + "] [INFO] " + message)
+}
+
+// Log warning - always prints
+fn warn(message: string) {
+    println("[" + time_ms() + "] [WARN] " + message)
+}
+
+// Log error - always prints
+fn error(message: string) {
+    println("[" + time_ms() + "] [ERROR] " + message)
+}
+
+// Log fatal - always prints
+fn fatal(message: string) {
+    println("[" + time_ms() + "] [FATAL] " + message)
+}
+
+// ============================================================================
+// Generic Logging
+// ============================================================================
+
+// Log with explicit level (0=DEBUG, 1=INFO, 2=WARN, 3=ERROR, 4=FATAL)
+fn log(level: int, message: string) {
+    if level == 0 {
+        debug(message)
+    } else if level == 1 {
+        info(message)
+    } else if level == 2 {
+        warn(message)
+    } else if level == 3 {
+        error(message)
+    } else if level == 4 {
+        fatal(message)
+    } else {
+        info(message)
+    }
+}
+
+// ============================================================================
+// Structured Logging (Key-Value)
+// ============================================================================
+
+// Log with a single key-value pair
+fn log_kv(level: int, message: string, key: string, value: string) {
+    log(level, message + " " + key + "=" + value)
+}
+
+// Log with two key-value pairs
+fn log_kv2(level: int, message: string, k1: string, v1: string, k2: string, v2: string) {
+    log(level, message + " " + k1 + "=" + v1 + " " + k2 + "=" + v2)
+}
+
+// Log with three key-value pairs
+fn log_kv3(level: int, message: string, k1: string, v1: string, k2: string, v2: string, k3: string, v3: string) {
+    log(level, message + " " + k1 + "=" + v1 + " " + k2 + "=" + v2 + " " + k3 + "=" + v3)
+}
+
+// ============================================================================
+// Assertion Logging
+// ============================================================================
+
+// Assert that a condition is true, log error if not
+fn assert_true(condition: bool, message: string) {
+    if !condition {
+        error("Assertion failed: " + message)
+    }
+}
+
+// Assert that two integers are equal, log error with details if not
+fn assert_equal(a: int, b: int, message: string) {
+    if a != b {
+        error("Assertion failed: " + message + " (expected " + b + ", got " + a + ")")
+    }
+}
+
+// Assert that two strings are equal, log error if not
+fn assert_equal_str(a: string, b: string, message: string) {
+    if a != b {
+        error("Assertion failed: " + message + " (expected '" + b + "', got '" + a + "')")
+    }
+}
+
+// ============================================================================
+// Performance Logging
+// ============================================================================
+
+// Log timing information for an operation
+fn log_timing(operation: string, start_ms: int) {
+    let elapsed = time_ms() - start_ms
+    info(operation + " completed in " + elapsed + "ms")
+}
+
+// Log timing with custom log level
+fn log_timing_level(level: int, operation: string, start_ms: int) {
+    let elapsed = time_ms() - start_ms
+    log(level, operation + " completed in " + elapsed + "ms")
+}
+
+// ============================================================================
+// Convenience Functions
+// ============================================================================
+
+// Debug log with key-value
+fn debug_kv(message: string, key: string, value: string) {
+    log_kv(0, message, key, value)
+}
+
+// Info log with key-value
+fn info_kv(message: string, key: string, value: string) {
+    log_kv(1, message, key, value)
+}
+
+// Warn log with key-value
+fn warn_kv(message: string, key: string, value: string) {
+    log_kv(2, message, key, value)
+}
+
+// Error log with key-value
+fn error_kv(message: string, key: string, value: string) {
+    log_kv(3, message, key, value)
+}
+
+// ============================================================================
+// Level Name Utilities
+// ============================================================================
+
+// Get the name of a log level
+fn level_name(level: int) -> string {
+    if level == 0 {
+        return "DEBUG"
+    } else if level == 1 {
+        return "INFO"
+    } else if level == 2 {
+        return "WARN"
+    } else if level == 3 {
+        return "ERROR"
+    } else if level == 4 {
+        return "FATAL"
+    }
+    return "UNKNOWN"
+}
+
+// Parse a log level from name (returns 1/INFO if unknown)
+fn parse_level(name: string) -> int {
+    if name == "DEBUG" || name == "debug" {
+        return 0
+    } else if name == "INFO" || name == "info" {
+        return 1
+    } else if name == "WARN" || name == "warn" || name == "WARNING" || name == "warning" {
+        return 2
+    } else if name == "ERROR" || name == "error" {
+        return 3
+    } else if name == "FATAL" || name == "fatal" {
+        return 4
+    }
+    return 1
+}

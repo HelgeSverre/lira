@@ -1,0 +1,78 @@
+// Lira Standard Library - OS Module
+// Operating system operations
+
+// ============================================================================
+// Built-in OS Functions (provided by the runtime)
+// ============================================================================
+
+// getcwd() - Get current working directory
+// chdir(path) - Change directory
+// mkdir(path) - Create directory
+// mkdir_all(path) - Create directory with parents
+// rmdir(path) - Remove empty directory
+// remove(path) - Remove file
+// remove_all(path) - Remove directory tree
+// listdir(path) - List directory contents
+// is_dir(path) - Check if directory
+// is_file(path) - Check if file
+// rename(from, to) - Rename/move
+// copy(from, to) - Copy file
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+// Walk directory tree recursively (returns all files and directories)
+fn walk(path: string) -> [string] {
+    // Initialize with a dummy string to establish type, then pop it
+    var result = [""]
+    pop(result)
+
+    let entries = listdir(path)
+    var i = 0
+    while i < len(entries) {
+        let entry = entries[i]
+        let full_path = path + "/" + entry
+        push(result, full_path)
+        if is_dir(full_path) {
+            let sub = walk(full_path)
+            var j = 0
+            while j < len(sub) {
+                push(result, sub[j])
+                j = j + 1
+            }
+        }
+        i = i + 1
+    }
+    return result
+}
+
+// Check if a path exists (file or directory)
+fn exists(path: string) -> bool {
+    return is_file(path) || is_dir(path)
+}
+
+// Get the home directory (via HOME environment variable)
+// Returns empty string if HOME is not set
+fn home_dir() -> string {
+    let home = env_get("HOME")
+    if home == null {
+        return ""
+    }
+    // Convert optional to string by concatenating with empty string
+    return "" + home
+}
+
+// Get a temporary directory path
+fn temp_dir() -> string {
+    let tmp = env_get("TMPDIR")
+    if tmp != null {
+        // Check if non-empty
+        let tmp_str = "" + tmp
+        if len(tmp_str) > 0 {
+            return tmp_str
+        }
+    }
+    // Fallback for Linux
+    return "/tmp"
+}

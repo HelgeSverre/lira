@@ -1,0 +1,423 @@
+// Lira Standard Library - Test Module
+// Testing utilities and assertions
+//
+// This module provides stateless testing utilities. Since Lira has
+// limitations with module-level mutable state, the test counters are
+// passed explicitly or tracked at the call site.
+//
+// Usage:
+//   import std.test
+//   test("my test", assert_eq(2 + 2, 4))
+//   summary(1, 1, 0)  // total, passed, failed
+
+// ============================================================================
+// Test Runner Functions
+// ============================================================================
+
+// Print a test suite header
+fn describe(name: string) {
+    println("=== Test Suite: " + name + " ===")
+}
+
+// Run a single test case and print result
+// Returns true if passed, false if failed
+fn test(name: string, passed: bool) -> bool {
+    if passed {
+        println("  [PASS] " + name)
+        return true
+    } else {
+        println("  [FAIL] " + name)
+        return false
+    }
+}
+
+// Run a test and increment counters (returns 1 if passed, 0 if failed)
+fn run_test(name: string, passed: bool) -> int {
+    if passed {
+        println("  [PASS] " + name)
+        return 1
+    } else {
+        println("  [FAIL] " + name)
+        return 0
+    }
+}
+
+// Print test summary
+fn summary(total: int, passed: int, failed: int) {
+    println("")
+    println("=== Test Summary ===")
+    println("Total:  " + total)
+    println("Passed: " + passed)
+    println("Failed: " + failed)
+    if failed == 0 {
+        println("All tests passed!")
+    } else {
+        println("Some tests failed!")
+    }
+}
+
+// ============================================================================
+// Basic Assertions (return bool)
+// ============================================================================
+
+// Assert a condition is true
+fn assert(condition: bool) -> bool {
+    return condition
+}
+
+// Assert two integers are equal
+fn assert_eq(actual: int, expected: int) -> bool {
+    if actual != expected {
+        println("    Expected: " + expected + ", Got: " + actual)
+        return false
+    }
+    return true
+}
+
+// Assert two strings are equal
+fn assert_eq_str(actual: string, expected: string) -> bool {
+    if actual != expected {
+        println("    Expected: " + expected + ", Got: " + actual)
+        return false
+    }
+    return true
+}
+
+// Assert two floats are approximately equal (within epsilon)
+fn assert_eq_float(actual: float, expected: float, epsilon: float) -> bool {
+    var diff = actual - expected
+    if diff < 0.0 {
+        diff = -diff
+    }
+    if diff > epsilon {
+        println("    Expected: " + expected + ", Got: " + actual)
+        return false
+    }
+    return true
+}
+
+// Assert two integers are not equal
+fn assert_ne(actual: int, expected: int) -> bool {
+    if actual == expected {
+        println("    Expected NOT: " + expected + ", Got: " + actual)
+        return false
+    }
+    return true
+}
+
+// Assert two strings are not equal
+fn assert_ne_str(actual: string, expected: string) -> bool {
+    if actual == expected {
+        println("    Expected NOT: " + expected + ", Got: " + actual)
+        return false
+    }
+    return true
+}
+
+// Assert a value is true
+fn assert_true(value: bool) -> bool {
+    if !value {
+        println("    Expected: true, Got: false")
+        return false
+    }
+    return true
+}
+
+// Assert a value is false
+fn assert_false(value: bool) -> bool {
+    if value {
+        println("    Expected: false, Got: true")
+        return false
+    }
+    return true
+}
+
+// ============================================================================
+// Comparison Assertions
+// ============================================================================
+
+// Assert actual > expected
+fn assert_gt(actual: int, expected: int) -> bool {
+    if actual <= expected {
+        println("    Expected: > " + expected + ", Got: " + actual)
+        return false
+    }
+    return true
+}
+
+// Assert actual >= expected
+fn assert_gte(actual: int, expected: int) -> bool {
+    if actual < expected {
+        println("    Expected: >= " + expected + ", Got: " + actual)
+        return false
+    }
+    return true
+}
+
+// Assert actual < expected
+fn assert_lt(actual: int, expected: int) -> bool {
+    if actual >= expected {
+        println("    Expected: < " + expected + ", Got: " + actual)
+        return false
+    }
+    return true
+}
+
+// Assert actual <= expected
+fn assert_lte(actual: int, expected: int) -> bool {
+    if actual > expected {
+        println("    Expected: <= " + expected + ", Got: " + actual)
+        return false
+    }
+    return true
+}
+
+// Assert value is between min_val and max_val (inclusive)
+fn assert_between(value: int, min_val: int, max_val: int) -> bool {
+    if value < min_val || value > max_val {
+        println("    Expected: " + min_val + " <= value <= " + max_val + ", Got: " + value)
+        return false
+    }
+    return true
+}
+
+// ============================================================================
+// Float Comparison Assertions
+// ============================================================================
+
+// Assert actual > expected (float)
+fn assert_gt_float(actual: float, expected: float) -> bool {
+    if actual <= expected {
+        println("    Expected: > " + expected + ", Got: " + actual)
+        return false
+    }
+    return true
+}
+
+// Assert actual >= expected (float)
+fn assert_gte_float(actual: float, expected: float) -> bool {
+    if actual < expected {
+        println("    Expected: >= " + expected + ", Got: " + actual)
+        return false
+    }
+    return true
+}
+
+// Assert actual < expected (float)
+fn assert_lt_float(actual: float, expected: float) -> bool {
+    if actual >= expected {
+        println("    Expected: < " + expected + ", Got: " + actual)
+        return false
+    }
+    return true
+}
+
+// Assert actual <= expected (float)
+fn assert_lte_float(actual: float, expected: float) -> bool {
+    if actual > expected {
+        println("    Expected: <= " + expected + ", Got: " + actual)
+        return false
+    }
+    return true
+}
+
+// ============================================================================
+// String Assertions
+// ============================================================================
+
+// Assert string contains substring
+fn assert_contains(haystack: string, needle: string) -> bool {
+    if str_index_of(haystack, needle) < 0 {
+        println("    Expected to contain: " + needle)
+        return false
+    }
+    return true
+}
+
+// Assert string starts with prefix
+fn assert_starts_with(str: string, prefix: string) -> bool {
+    if len(prefix) > len(str) {
+        println("    Expected to start with: " + prefix)
+        return false
+    }
+    let actual_prefix = str_substring(str, 0, len(prefix))
+    if actual_prefix != prefix {
+        println("    Expected to start with: " + prefix)
+        return false
+    }
+    return true
+}
+
+// Assert string ends with suffix
+fn assert_ends_with(str: string, suffix: string) -> bool {
+    if len(suffix) > len(str) {
+        println("    Expected to end with: " + suffix)
+        return false
+    }
+    let start = len(str) - len(suffix)
+    let actual_suffix = str_substring(str, start, len(str))
+    if actual_suffix != suffix {
+        println("    Expected to end with: " + suffix)
+        return false
+    }
+    return true
+}
+
+// Assert string does not contain substring
+fn assert_not_contains(haystack: string, needle: string) -> bool {
+    if str_index_of(haystack, needle) >= 0 {
+        println("    Expected NOT to contain: " + needle)
+        return false
+    }
+    return true
+}
+
+// Assert string matches expected length
+fn assert_str_len(str: string, expected_len: int) -> bool {
+    if len(str) != expected_len {
+        println("    Expected length: " + expected_len + ", Got: " + len(str))
+        return false
+    }
+    return true
+}
+
+// Assert string is empty
+fn assert_str_empty(str: string) -> bool {
+    if len(str) != 0 {
+        println("    Expected empty string, Got length: " + len(str))
+        return false
+    }
+    return true
+}
+
+// Assert string is not empty
+fn assert_str_not_empty(str: string) -> bool {
+    if len(str) == 0 {
+        println("    Expected non-empty string")
+        return false
+    }
+    return true
+}
+
+// ============================================================================
+// Array Assertions (for int arrays - most common case)
+// ============================================================================
+
+// Assert array has expected length
+fn assert_len(arr: [int], expected: int) -> bool {
+    if len(arr) != expected {
+        println("    Expected length: " + expected + ", Got: " + len(arr))
+        return false
+    }
+    return true
+}
+
+// Assert array is empty
+fn assert_empty(arr: [int]) -> bool {
+    if len(arr) != 0 {
+        println("    Expected empty array, Got length: " + len(arr))
+        return false
+    }
+    return true
+}
+
+// Assert array is not empty
+fn assert_not_empty(arr: [int]) -> bool {
+    if len(arr) == 0 {
+        println("    Expected non-empty array")
+        return false
+    }
+    return true
+}
+
+// Assert array contains a value
+fn assert_array_contains(arr: [int], value: int) -> bool {
+    var i = 0
+    while i < len(arr) {
+        if arr[i] == value {
+            return true
+        }
+        i = i + 1
+    }
+    println("    Expected array to contain: " + value)
+    return false
+}
+
+// ============================================================================
+// Null/Optional Assertions
+// ============================================================================
+
+// Assert value is null
+fn assert_null(value: int?) -> bool {
+    if value != null {
+        println("    Expected null, Got: non-null value")
+        return false
+    }
+    return true
+}
+
+// Assert value is not null
+fn assert_not_null(value: int?) -> bool {
+    if value == null {
+        println("    Expected non-null value, Got: null")
+        return false
+    }
+    return true
+}
+
+// ============================================================================
+// Utility Functions
+// ============================================================================
+
+// Print a section header for organizing tests
+fn section(name: string) {
+    println("")
+    println("--- " + name + " ---")
+}
+
+// Skip a test with a reason
+fn skip(name: string, reason: string) {
+    println("  [SKIP] " + name + " - " + reason)
+}
+
+// Print a debug message during testing
+fn debug_msg(msg: string) {
+    println("    DEBUG: " + msg)
+}
+
+// Mark a test as expected to fail (for documenting known issues)
+fn expect_fail(name: string, passed: bool) -> bool {
+    if passed {
+        println("  [UNEXPECTED PASS] " + name)
+        return false  // Test unexpectedly passed
+    } else {
+        println("  [EXPECTED FAIL] " + name)
+        return true   // Expected failure
+    }
+}
+
+// ============================================================================
+// Counter Helpers
+// ============================================================================
+
+// Increment passed count if result is true, else increment failed
+// Returns: 1 if passed, 0 if failed (for summing)
+fn count_passed(result: bool) -> int {
+    if result {
+        return 1
+    }
+    return 0
+}
+
+// Returns: 0 if passed, 1 if failed (for summing)
+fn count_failed(result: bool) -> int {
+    if result {
+        return 0
+    }
+    return 1
+}
+
+// Check if all tests passed (no failures)
+fn all_passed(failed: int) -> bool {
+    return failed == 0
+}

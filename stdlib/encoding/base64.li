@@ -1,0 +1,66 @@
+// Lira Standard Library - Base64 Encoding
+// Standard and URL-safe Base64 encoding/decoding
+//
+// This module provides Base64 encoding and decoding functions using built-in syscalls.
+//
+// Functions:
+//   encode(str) -> string     - Encode string to standard Base64
+//   decode(str) -> string     - Decode standard Base64 to string
+//   encode_url(str) -> string - Encode string to URL-safe Base64
+//   decode_url(str) -> string - Decode URL-safe Base64 to string
+//
+// The built-in functions are:
+//   base64_encode(input: string) -> string     (syscall 60)
+//   base64_decode(input: string) -> string     (syscall 61)
+//   base64_encode_url(input: string) -> string (syscall 62)
+//   base64_decode_url(input: string) -> string (syscall 63)
+
+// Wrapper function for encoding to standard Base64
+fn encode(input: string) -> string {
+    return base64_encode(input)
+}
+
+// Wrapper function for decoding standard Base64
+fn decode(input: string) -> string {
+    return base64_decode(input)
+}
+
+// Wrapper function for encoding to URL-safe Base64
+fn encode_url(input: string) -> string {
+    return base64_encode_url(input)
+}
+
+// Wrapper function for decoding URL-safe Base64
+fn decode_url(input: string) -> string {
+    return base64_decode_url(input)
+}
+
+// Helper: Check if a string is valid standard Base64
+// Returns true if all characters are valid Base64 characters
+fn is_valid_base64(input: string) -> bool {
+    let valid_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="
+    var i = 0
+    while i < len(input) {
+        let c = input[i]
+        if str_index_of(valid_chars, c) < 0 {
+            return false
+        }
+        i = i + 1
+    }
+    return true
+}
+
+// Helper: Check if a string is valid URL-safe Base64
+// Returns true if all characters are valid URL-safe Base64 characters
+fn is_valid_base64_url(input: string) -> bool {
+    let valid_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_="
+    var i = 0
+    while i < len(input) {
+        let c = input[i]
+        if str_index_of(valid_chars, c) < 0 {
+            return false
+        }
+        i = i + 1
+    }
+    return true
+}
