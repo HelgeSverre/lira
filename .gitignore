@@ -1,0 +1,25 @@
+# Rust
+/target/
+Cargo.lock
+
+# macOS
+.DS_Store
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+*.code-workspace
+
+# Editor extensions build artifacts
+editors/vscode-lira/out/
+editors/vscode-lira/node_modules/
+editors/vscode-lira/*.vsix
+editors/tree-sitter-lira/build/
+editors/tree-sitter-lira/node_modules/
+editors/jetbrains-lira/build/
+
+# Misc
+*.log
+*.tmp
+*~
