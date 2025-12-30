@@ -169,6 +169,8 @@ fn get_example_files() -> Vec<std::path::PathBuf> {
     let examples_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
+        .parent()
+        .unwrap()
         .join("examples");
 
     let mut files: Vec<_> = fs::read_dir(&examples_dir)
@@ -191,6 +193,8 @@ macro_rules! example_test {
         #[test]
         fn $name() {
             let examples_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .unwrap()
                 .parent()
                 .unwrap()
                 .join("examples");
