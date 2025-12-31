@@ -52,6 +52,9 @@ module.exports = grammar({
     [$.generic_type, $.comparison_expression],
     [$.range_expression],
     [$.block, $.map_expression],
+    [$.return_statement, $.return_expression],
+    [$.break_statement, $.break_expression],
+    [$.continue_statement, $.continue_expression],
   ],
 
   rules: {
@@ -193,11 +196,10 @@ module.exports = grammar({
       field('parameters', $.parameters),
       optional(seq('->', field('return_type', $._type))),
       optional($.where_clause),
-      choice(
+      optional(choice(
         field('body', $.block),
         seq('=>', field('body', $._expression)),
-        // Abstract methods have no body
-      ),
+      )),
     ),
 
     // Enum declaration
@@ -303,20 +305,24 @@ module.exports = grammar({
       $.import_path,
     ),
 
-    import_path: $ => choice(
-      // import std.io
-      seq($.module_path, optional(seq('as', $.identifier))),
-      // import std.io.{print, println}
-      seq($.module_path, '.', $.import_group),
-      // import std.io.*
-      seq($.module_path, '.', '*'),
-    ),
-
-    module_path: $ => prec.left(seq(
+    // Import path - module followed by optional suffix
+    // We inline the module_path pattern here to avoid conflicts
+    import_path: $ => seq(
       optional(repeat1(choice('.', '..'))),
       $.identifier,
       repeat(seq('.', $.identifier)),
-    )),
+      optional(choice(
+        seq('as', $.identifier),
+        seq('.', $.import_group),
+        seq('.', '*'),
+      )),
+    ),
+
+    module_path: $ => seq(
+      optional(repeat1(choice('.', '..'))),
+      $.identifier,
+      repeat(seq('.', $.identifier)),
+    ),
 
     import_group: $ => seq(
       '{',
@@ -328,22 +334,27 @@ module.exports = grammar({
       '}',
     ),
 
-    // Use declaration (alternative syntax)
+    // Use declaration (alternative syntax using :: separator)
     use_declaration: $ => seq(
       'use',
       $.use_path,
     ),
 
-    use_path: $ => choice(
-      seq($.namespace_path, optional(seq('as', $.identifier))),
-      seq($.namespace_path, '::', $.import_group),
-      seq($.namespace_path, '::', '*'),
-    ),
-
-    namespace_path: $ => prec.left(seq(
+    // Use path - inline the pattern to avoid conflicts
+    use_path: $ => seq(
       $.identifier,
       repeat(seq('::', $.identifier)),
-    )),
+      optional(choice(
+        seq('as', $.identifier),
+        seq('::', $.import_group),
+        seq('::', '*'),
+      )),
+    ),
+
+    namespace_path: $ => seq(
+      $.identifier,
+      repeat(seq('::', $.identifier)),
+    ),
 
     // =========================================================================
     // STATEMENTS
@@ -376,6 +387,8 @@ module.exports = grammar({
       optional(seq('=', field('value', $._expression))),
     ),
 
+    // Statement versions have higher precedence than expression versions
+    // Use alias to mark these as statements in output
     return_statement: $ => prec.right(seq(
       'return',
       optional($._expression),
@@ -527,6 +540,10 @@ module.exports = grammar({
       $.new_expression,
       $.path_expression,
       $.generic_function,
+      // Control flow expressions (for use in match arms, etc.)
+      $.return_expression,
+      $.break_expression,
+      $.continue_expression,
     ),
 
     group_expression: $ => seq('(', $._expression, ')'),
@@ -724,9 +741,10 @@ module.exports = grammar({
     ),
 
     // Range expression
+    // Bounded ranges have higher precedence than unbounded
     range_expression: $ => choice(
-      prec.left(PREC.RANGE, seq(field('start', $._expression), '..', field('end', $._expression))),
-      prec.left(PREC.RANGE, seq(field('start', $._expression), '..=', field('end', $._expression))),
+      prec.left(PREC.RANGE + 1, seq(field('start', $._expression), '..', field('end', $._expression))),
+      prec.left(PREC.RANGE + 1, seq(field('start', $._expression), '..=', field('end', $._expression))),
       prec.left(PREC.RANGE, seq(field('start', $._expression), '..')),
       prec.right(PREC.RANGE, seq('..', field('end', $._expression))),
       prec.right(PREC.RANGE, seq('..=', field('end', $._expression))),
@@ -800,12 +818,18 @@ module.exports = grammar({
     super_expression: $ => 'super',
     this_expression: $ => 'this',
 
+    // Control flow expressions (for use in match arms, closures, etc.)
+    return_expression: $ => prec.right(seq('return', optional($._expression))),
+    break_expression: $ => prec.right(seq('break', optional($._expression))),
+    continue_expression: $ => 'continue',
+
     // =========================================================================
     // PATTERNS
     // =========================================================================
 
     _pattern: $ => choice(
-      $.identifier,
+      // identifier has precedence over enum_pattern for simple names
+      prec(2, $.identifier),
       $.wildcard_pattern,
       $._literal,
       $.tuple_pattern,
@@ -824,7 +848,7 @@ module.exports = grammar({
       ')',
     ),
 
-    struct_pattern: $ => seq(
+    struct_pattern: $ => prec(1, seq(
       optional($.type_identifier),
       '{',
       commaSep(choice(
@@ -834,16 +858,26 @@ module.exports = grammar({
       )),
       optional(','),
       '}',
-    ),
-
-    enum_pattern: $ => prec.left(seq(
-      $.type_identifier,
-      optional(seq(
-        choice('.', '::'),
-        $.identifier,
-      )),
-      optional(seq('(', commaSep($._pattern), ')')),
     )),
+
+    // enum_pattern matches Type, Type::variant, Type.variant, Type(args), Type::variant(args)
+    // Has lower base precedence so identifier is preferred for simple names,
+    // but the tuple/path variants have higher precedence to match first
+    enum_pattern: $ => choice(
+      // Type::variant or Type.variant (with optional tuple) - higher precedence
+      prec.left(1, seq(
+        $.type_identifier,
+        seq(choice('.', '::'), $.identifier),
+        optional(seq('(', commaSep($._pattern), ')')),
+      )),
+      // Type(pattern) - higher precedence, requires tuple args
+      prec.left(1, seq(
+        $.type_identifier,
+        seq('(', commaSep($._pattern), ')'),
+      )),
+      // Bare type identifier - lower precedence, for cases like None
+      prec(-1, $.type_identifier),
+    ),
 
     range_pattern: $ => prec.left(1, choice(
       seq($._literal, '..', $._literal),
@@ -931,8 +965,8 @@ module.exports = grammar({
     optional_type: $ => prec.left(seq($._type, '?')),
 
     path_type: $ => seq(
-      $.type_identifier,
-      repeat1(seq('::', $.type_identifier)),
+      choice($.identifier, $.type_identifier),
+      repeat1(seq('::', choice($.identifier, $.type_identifier))),
     ),
 
     self_type: $ => 'Self',

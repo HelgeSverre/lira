@@ -17,7 +17,7 @@
 (block) @local.scope
 
 ; Control flow scopes
-(if_statement) @local.scope
+(if_expression) @local.scope
 (while_statement) @local.scope
 (for_statement) @local.scope
 (loop_statement) @local.scope

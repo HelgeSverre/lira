@@ -74,7 +74,6 @@
   "try"
   "catch"
   "finally"
-  "throw"
 ] @keyword.control.exception
 
 ; Concurrency
@@ -82,7 +81,6 @@
   "spawn"
   "select"
   "async"
-  "await"
 ] @keyword.coroutine
 
 ; Module keywords
@@ -359,10 +357,10 @@
     "panic" "todo" "unreachable"))
 
 ; Import paths
-(module_path
+(import_path
   (identifier) @module)
 
-(namespace_path
+(use_path
   (identifier) @module)
 
 ; Error handling

@@ -32,14 +32,8 @@
 ; Blocks
 (block) @fold
 
-; If statements
-(if_statement
-  consequence: (block) @fold)
-
-(else_if_clause
-  consequence: (block) @fold)
-
-(else_clause
+; If expressions
+(if_expression
   consequence: (block) @fold)
 
 ; Loops
