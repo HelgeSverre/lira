@@ -9,6 +9,7 @@ mod completion;
 mod definition;
 mod diagnostics;
 mod hover;
+mod references;
 mod symbols;
 
 use dashmap::DashMap;
@@ -79,8 +80,9 @@ impl LanguageServer for LiraLanguageServer {
                 definition_provider: Some(OneOf::Left(true)),
                 // Document symbols (outline view)
                 document_symbol_provider: Some(OneOf::Left(true)),
+                // Find references
+                references_provider: Some(OneOf::Left(true)),
                 // Future capabilities will be added here:
-                // references_provider: Some(OneOf::Left(true)),
                 // semantic_tokens_provider: Some(...),
                 ..Default::default()
             },
@@ -201,5 +203,23 @@ impl LanguageServer for LiraLanguageServer {
 
         let symbols = symbols::get_document_symbols(&content);
         Ok(Some(DocumentSymbolResponse::Nested(symbols)))
+    }
+
+    async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+        let include_declaration = params.context.include_declaration;
+
+        let content = match self.documents.get(&uri) {
+            Some(doc) => doc.content.to_string(),
+            None => return Ok(None),
+        };
+
+        let refs = references::find_references(&uri, &content, position, include_declaration);
+        if refs.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(refs))
+        }
     }
 }
