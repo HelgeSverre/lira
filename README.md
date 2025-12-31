@@ -24,7 +24,7 @@ A modern systems programming language with Go-like fiber concurrency, pattern ma
 ### Setup
 
 ```bash
-git clone https://github.com/user/lira.git
+git clone https://github.com/HelgeSverre/lira.git
 cd lira
 
 # Build the compiler and VM
@@ -91,25 +91,42 @@ liravm run-debug <file>    # Run with debug output
 liravm --version           # Show version
 ```
 
+**lira-lsp** — The Lira language server
+```bash
+lira-lsp                   # Start LSP server (stdio)
+```
+
+## Editor Support
+
+| Editor | Extension | Features |
+|--------|-----------|----------|
+| VS Code | [vscode-lira](editors/vscode-lira) | Syntax, LSP, snippets |
+| Zed | [zed-lira](editors/zed-lira) | Syntax, tree-sitter |
+| Neovim | [vim-lira](editors/vim-lira) | Syntax, LSP config |
+| Vim | [vim-lira](editors/vim-lira) | Syntax highlighting |
+| Helix | [helix-lira](editors/helix-lira) | Syntax, LSP config |
+| IntelliJ | [intellij-lira](editors/intellij-lira) | Syntax (TextMate) |
+
+Install with `just <editor>-install` (e.g., `just nvim-install`).
+
 ## Project Structure
 
 ```
 lira/
 ├── crates/
-│   ├── lirac/          # Compiler
-│   │   └── src/
-│   │       ├── lexer.rs      # Tokenization
-│   │       ├── parser.rs     # AST construction
-│   │       ├── checker.rs    # Type checking
-│   │       └── codegen.rs    # Bytecode generation
-│   ├── liravm/         # Virtual Machine
-│   │   └── src/
-│   │       ├── vm.rs         # Bytecode interpreter
-│   │       ├── fiber.rs      # Green thread scheduler
-│   │       └── runtime.rs    # Host primitives
-│   └── lira-core/      # Shared types & opcodes
-├── stdlib/             # Standard library (.li files)
-├── examples/           # 85+ example programs
+│   ├── lirac/          # Compiler (lexer, parser, checker, codegen)
+│   ├── liravm/         # Virtual machine (interpreter, fibers, runtime)
+│   ├── lira-core/      # Shared types & opcodes
+│   └── lira-lsp/       # Language server (LSP)
+├── editors/            # Editor extensions
+│   ├── tree-sitter-lira/   # Tree-sitter grammar
+│   ├── vscode-lira/        # VS Code extension
+│   ├── vim-lira/           # Vim/Neovim plugin
+│   ├── zed-lira/           # Zed extension
+│   ├── helix-lira/         # Helix config
+│   └── intellij-lira/      # IntelliJ plugin
+├── stdlib/             # Standard library (21 modules)
+├── examples/           # 87 example programs
 ├── docs/               # Language specifications
 └── justfile            # Build commands
 ```
@@ -164,7 +181,7 @@ import std.fs.{read_file, write_file}
 
 ## Status
 
-**Current Phase**: Standard Library & Advanced Features
+**Current Phase**: Developer Tooling
 
 | Component | Status |
 |-----------|--------|
@@ -173,7 +190,9 @@ import std.fs.{read_file, write_file}
 | Bytecode Compiler | Complete |
 | VM Core | Complete |
 | Fiber Runtime | Complete |
-| Standard Library | In Progress |
+| Standard Library | Complete (21 modules) |
+| Language Server | Complete |
+| Editor Extensions | Complete |
 
 ## Contributing
 
