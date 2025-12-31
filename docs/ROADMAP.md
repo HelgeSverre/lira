@@ -469,7 +469,7 @@ just fmt
 | T8.2 | Highlight queries | Write highlights.scm for syntax highlighting | [x] |
 | T8.3 | Fold queries | Write folds.scm for code folding | [x] |
 | T8.4 | Locals queries | Write locals.scm for scope tracking | [x] |
-| T8.5 | Test corpus | Create test cases for parser validation | [ ] |
+| T8.5 | Test corpus | Create test cases for parser validation | [x] |
 
 ### 8.2 Language Server (LSP)
 
