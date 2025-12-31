@@ -4,7 +4,6 @@
 //! See docs/lira/13-memory-model.md for the full specification.
 
 use std::cell::RefCell;
-use std::collections::HashSet;
 use std::rc::Rc;
 
 /// A reference-counted object

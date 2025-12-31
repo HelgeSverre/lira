@@ -134,6 +134,7 @@ pub type FileHandle = i64;
 /// Runtime context for built-in function calls
 pub struct Runtime {
     /// Standard output buffer
+    #[allow(dead_code)]
     stdout: String,
     /// Open file handles (fd -> File)
     files: HashMap<FileHandle, File>,
@@ -158,7 +159,7 @@ impl Runtime {
 
     /// Print a value to stdout
     pub fn print(&mut self, value: &Value) {
-        print!("{}", value.to_string());
+        print!("{}", value);
     }
 
     /// Print a value with newline
@@ -512,7 +513,7 @@ impl Runtime {
 
     /// Create a string from a character code
     pub fn str_from_char_code(&self, code: i64) -> String {
-        if code < 0 || code > 0x10FFFF {
+        if !(0..=0x10FFFF).contains(&code) {
             return String::new();
         }
         char::from_u32(code as u32)

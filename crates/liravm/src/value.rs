@@ -4,6 +4,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::fmt;
 use std::rc::Rc;
 
 /// Interned string type - shared reference-counted string
@@ -57,31 +58,32 @@ impl Value {
             Value::Channel(_) => true,
         }
     }
+}
 
-    /// Format value for printing
-    pub fn to_string(&self) -> String {
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Value::Null => "null".to_string(),
-            Value::Bool(b) => b.to_string(),
-            Value::Int(n) => n.to_string(),
-            Value::Float(f) => f.to_string(),
-            Value::String(s) => (**s).clone(),
+            Value::Null => write!(f, "null"),
+            Value::Bool(b) => write!(f, "{}", b),
+            Value::Int(n) => write!(f, "{}", n),
+            Value::Float(fl) => write!(f, "{}", fl),
+            Value::String(s) => write!(f, "{}", &**s),
             Value::Array(arr) => {
                 let elements: Vec<String> = arr.borrow().iter().map(|v| v.to_string()).collect();
-                format!("[{}]", elements.join(", "))
+                write!(f, "[{}]", elements.join(", "))
             }
             Value::Object(obj) => {
                 let fields: Vec<String> = obj
                     .borrow()
                     .iter()
-                    .map(|(k, v)| format!("{}: {}", k, v.to_string()))
+                    .map(|(k, v)| format!("{}: {}", k, v))
                     .collect();
-                format!("{{{}}}", fields.join(", "))
+                write!(f, "{{{}}}", fields.join(", "))
             }
-            Value::Function(offset) => format!("<function@{}>", offset),
-            Value::Closure(c) => format!("<closure@{}>", c.code_offset),
-            Value::Fiber(id) => format!("<fiber#{}>", id),
-            Value::Channel(id) => format!("<channel#{}>", id),
+            Value::Function(offset) => write!(f, "<function@{}>", offset),
+            Value::Closure(c) => write!(f, "<closure@{}>", c.code_offset),
+            Value::Fiber(id) => write!(f, "<fiber#{}>", id),
+            Value::Channel(id) => write!(f, "<channel#{}>", id),
         }
     }
 }

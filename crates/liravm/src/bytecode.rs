@@ -52,6 +52,7 @@ impl<'a> BytecodeReader<'a> {
         Ok(value)
     }
 
+    #[allow(dead_code)]
     fn read_u16(&mut self) -> Result<u16, String> {
         let lo = self.read_u8()? as u16;
         let hi = self.read_u8()? as u16;
@@ -87,6 +88,7 @@ impl<'a> BytecodeReader<'a> {
         Ok(bytes)
     }
 
+    #[allow(dead_code)]
     fn remaining(&self) -> &'a [u8] {
         &self.data[self.pos..]
     }

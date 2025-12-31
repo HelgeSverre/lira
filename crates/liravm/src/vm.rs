@@ -20,6 +20,7 @@ struct CallFrame {
     /// Base pointer for local variables
     locals_base: usize,
     /// Number of local variables in this frame
+    #[allow(dead_code)]
     local_count: usize,
     /// Base pointer for operand stack (to isolate caller's values)
     stack_base: usize,
@@ -52,6 +53,7 @@ pub struct VM {
     /// Whether to capture output instead of printing
     capture_output: bool,
     /// String intern pool for memory efficiency
+    #[allow(dead_code)]
     string_pool: HashMap<String, IString>,
 }
 
@@ -75,6 +77,7 @@ impl VM {
     }
 
     /// Intern a string - returns a shared reference to the canonical string
+    #[allow(dead_code)]
     fn intern_string(&mut self, s: String) -> IString {
         if let Some(existing) = self.string_pool.get(&s) {
             existing.clone()
@@ -86,6 +89,7 @@ impl VM {
     }
 
     /// Create an interned string Value
+    #[allow(dead_code)]
     fn make_string(&mut self, s: String) -> Value {
         Value::String(self.intern_string(s))
     }
@@ -213,10 +217,10 @@ impl VM {
                             Value::String(Rc::new(format!("{}{}", a, b)))
                         }
                         (Value::String(a), b) => {
-                            Value::String(Rc::new(format!("{}{}", a, b.to_string())))
+                            Value::String(Rc::new(format!("{}{}", a, b)))
                         }
                         (a, Value::String(b)) => {
-                            Value::String(Rc::new(format!("{}{}", a.to_string(), b)))
+                            Value::String(Rc::new(format!("{}{}", a, b)))
                         }
                         _ => return Err(format!("Cannot add {:?} and {:?}", a, b)),
                     };
@@ -299,9 +303,9 @@ impl VM {
                     let result = match (&a, &b) {
                         (Value::Int(base), Value::Int(exp)) => {
                             if *exp < 0 {
-                                return Err(format!(
-                                    "Negative exponent not supported for integers"
-                                ));
+                                return Err(
+                                    "Negative exponent not supported for integers".to_string()
+                                );
                             }
                             Value::Int(base.pow(*exp as u32))
                         }
@@ -814,7 +818,7 @@ impl VM {
                                     Ok(true) => {} // Sent immediately
                                     Ok(false) => {
                                         // Blocked - need to switch fibers
-                                        if let Some(_) = self.scheduler.schedule() {
+                                        if self.scheduler.schedule().is_some() {
                                             self.load_fiber_state();
                                         }
                                     }
@@ -841,7 +845,7 @@ impl VM {
                                     }
                                     Ok(None) => {
                                         // Blocked - switch fibers
-                                        if let Some(_) = self.scheduler.schedule() {
+                                        if self.scheduler.schedule().is_some() {
                                             self.load_fiber_state();
                                         }
                                     }
