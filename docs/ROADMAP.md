@@ -260,20 +260,20 @@ This roadmap tracks the implementation of Lira, a modern systems programming lan
 | T7.3 | Module system | import/export, namespaces | [x] (moved to Phase 6.3) |
 | T7.4 | Generic syntax | `fn foo<T>(x: T) -> T` parsing | [x] |
 | T7.5 | Generic constraint checking | Reject ops on unconstrained type params | [x] |
-| T7.6 | Generic monomorphization | Generate specialized code per concrete type | [ ] |
+| T7.6 | Generic monomorphization | Generate specialized code per concrete type | [x] |
 | T7.7 | Enum variant access | `Color::Red` syntax | [x] |
-| T7.8 | Classes with inheritance | extends, super, method override | [ ] |
+| T7.8 | Classes with inheritance | extends, super, method override | [x] |
 | T7.9 | Enums with data | Enum variants with associated values | [x] |
 | T7.10 | Trait parsing | Parse `trait Name { fn method(self) }` | [x] |
 | T7.11 | Impl block parsing | Parse `impl Type { }` and `impl Trait for Type { }` | [x] |
 | T7.12 | Self type and receiver | `self`, `self mut`, `Self` in impl blocks | [x] |
 | T7.13 | Impl type checking | Register methods from impl blocks, resolve calls | [x] |
-| T7.14 | Trait impl checking | Verify trait implementations are complete | [ ] |
+| T7.14 | Trait impl checking | Verify trait implementations are complete | [x] |
 | T7.15 | Method dispatch codegen | Generate code for `receiver.method()` calls | [x] |
 | T7.16 | Inherent method lookup | Resolve methods defined directly on types | [x] |
 | T7.17 | Trait method lookup | Resolve methods from trait impls | [x] |
 | T7.18 | Error propagation | ? operator, Result handling | [x] |
-| T7.19 | Generic trait bounds | where T: Eq + Hash | [ ] |
+| T7.19 | Generic trait bounds | where T: Eq + Hash | [x] |
 | T7.20 | Default parameters | fn foo(x: int = 0) | [x] |
 | T7.21 | Named arguments | foo(name: "bar", value: 42) | [x] |
 | T7.22 | Destructuring | let (a, b) = tuple, let { x, y } = struct | [x] |
@@ -459,16 +459,16 @@ just fmt
 
 **Goal**: Provide first-class IDE support and developer tools.
 **Depends On**: Phase 7
-**Status**: PENDING
+**Status**: IN PROGRESS
 
 ### 8.1 Tree-sitter Grammar
 
 | ID | Task | Description | Status |
 |----|------|-------------|--------|
-| T8.1 | Tree-sitter grammar | Create grammar.js for Lira syntax | [ ] |
-| T8.2 | Highlight queries | Write highlights.scm for syntax highlighting | [ ] |
-| T8.3 | Fold queries | Write folds.scm for code folding | [ ] |
-| T8.4 | Locals queries | Write locals.scm for scope tracking | [ ] |
+| T8.1 | Tree-sitter grammar | Create grammar.js for Lira syntax | [x] |
+| T8.2 | Highlight queries | Write highlights.scm for syntax highlighting | [x] |
+| T8.3 | Fold queries | Write folds.scm for code folding | [x] |
+| T8.4 | Locals queries | Write locals.scm for scope tracking | [x] |
 | T8.5 | Test corpus | Create test cases for parser validation | [ ] |
 
 ### 8.2 Language Server (LSP)
