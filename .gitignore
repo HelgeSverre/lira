@@ -19,6 +19,14 @@ editors/tree-sitter-lira/build/
 editors/tree-sitter-lira/node_modules/
 editors/jetbrains-lira/build/
 
+# IntelliJ plugin (Gradle)
+editors/intellij-lira/.gradle/
+editors/intellij-lira/.intellijPlatform/
+editors/intellij-lira/build/
+editors/intellij-lira/gradle/
+editors/intellij-lira/gradlew
+editors/intellij-lira/gradlew.bat
+
 # Misc
 *.log
 *.tmp
