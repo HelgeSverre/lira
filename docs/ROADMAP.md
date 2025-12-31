@@ -475,13 +475,13 @@ just fmt
 
 | ID | Task | Description | Status |
 |----|------|-------------|--------|
-| T8.6 | LSP scaffold | Basic server with tower-lsp | [ ] |
-| T8.7 | Diagnostics | Report errors from type checker | [ ] |
-| T8.8 | Completion | Keyword and symbol completion | [ ] |
-| T8.9 | Hover | Type info and documentation on hover | [ ] |
-| T8.10 | Go to definition | Navigate to symbol definitions | [ ] |
+| T8.6 | LSP scaffold | Basic server with tower-lsp | [x] |
+| T8.7 | Diagnostics | Report errors from type checker | [x] |
+| T8.8 | Completion | Keyword and symbol completion | [x] |
+| T8.9 | Hover | Type info and documentation on hover | [x] |
+| T8.10 | Go to definition | Navigate to symbol definitions | [x] |
 | T8.11 | Find references | Find all references to a symbol | [ ] |
-| T8.12 | Document symbols | Outline view for files | [ ] |
+| T8.12 | Document symbols | Outline view for files | [x] |
 | T8.13 | Semantic tokens | Enhanced syntax highlighting | [ ] |
 
 ### 8.3 Editor Extensions
