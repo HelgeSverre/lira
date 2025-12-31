@@ -1,0 +1,682 @@
+================================================================================
+Simple function declaration
+================================================================================
+
+fn hello() {}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    parameters: (parameters)
+    body: (block)))
+
+================================================================================
+Function with parameters
+================================================================================
+
+fn add(a: int, b: int) -> int {
+  return a + b
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    parameters: (parameters
+      (parameter
+        name: (identifier)
+        type: (primitive_type))
+      (parameter
+        name: (identifier)
+        type: (primitive_type)))
+    return_type: (primitive_type)
+    body: (block
+      (return_statement
+        (binary_expression
+          (identifier)
+          (identifier))))))
+
+================================================================================
+Function with default parameter
+================================================================================
+
+fn greet(name: string = "World") {}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    parameters: (parameters
+      (parameter
+        name: (identifier)
+        type: (primitive_type)
+        default: (string_literal
+          (string_content))))
+    body: (block)))
+
+================================================================================
+Async function
+================================================================================
+
+pub async fn fetch() -> string {}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (visibility)
+    name: (identifier)
+    parameters: (parameters)
+    return_type: (primitive_type)
+    body: (block)))
+
+================================================================================
+Expression body function
+================================================================================
+
+fn double(x: int) -> int => x * 2
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    parameters: (parameters
+      (parameter
+        name: (identifier)
+        type: (primitive_type)))
+    return_type: (primitive_type)
+    body: (binary_expression
+      (identifier)
+      (integer_literal))))
+
+================================================================================
+Generic function
+================================================================================
+
+fn identity<T>(x: T) -> T {
+  return x
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    (type_parameters
+      (type_parameter
+        name: (type_identifier)))
+    parameters: (parameters
+      (parameter
+        name: (identifier)
+        type: (type_identifier)))
+    return_type: (type_identifier)
+    body: (block
+      (return_statement
+        (identifier)))))
+
+================================================================================
+Function with where clause
+================================================================================
+
+fn compare<T>(a: T, b: T) -> bool where T: Comparable {
+  return a == b
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    (type_parameters
+      (type_parameter
+        name: (type_identifier)))
+    parameters: (parameters
+      (parameter
+        name: (identifier)
+        type: (type_identifier))
+      (parameter
+        name: (identifier)
+        type: (type_identifier)))
+    return_type: (primitive_type)
+    (where_clause
+      (where_predicate
+        (type_identifier)
+        (trait_bound
+          (type_identifier))))
+    body: (block
+      (return_statement
+        (binary_expression
+          (identifier)
+          (identifier))))))
+
+================================================================================
+Simple struct
+================================================================================
+
+struct Point {
+  x: int,
+  y: int,
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (struct_declaration
+    name: (type_identifier)
+    (struct_body
+      (struct_field
+        name: (identifier)
+        type: (primitive_type))
+      (struct_field
+        name: (identifier)
+        type: (primitive_type)))))
+
+================================================================================
+Struct with visibility
+================================================================================
+
+pub struct Vec3 {
+  pub x: float,
+  pub y: float,
+  pub z: float,
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (struct_declaration
+    (visibility)
+    name: (type_identifier)
+    (struct_body
+      (struct_field
+        (visibility)
+        name: (identifier)
+        type: (primitive_type))
+      (struct_field
+        (visibility)
+        name: (identifier)
+        type: (primitive_type))
+      (struct_field
+        (visibility)
+        name: (identifier)
+        type: (primitive_type)))))
+
+================================================================================
+Tuple struct
+================================================================================
+
+struct Pair(int, int)
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (struct_declaration
+    name: (type_identifier)
+    (tuple_field
+      type: (primitive_type))
+    (tuple_field
+      type: (primitive_type))))
+
+================================================================================
+Generic struct
+================================================================================
+
+struct Container<T> {
+  value: T,
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (struct_declaration
+    name: (type_identifier)
+    (type_parameters
+      (type_parameter
+        name: (type_identifier)))
+    (struct_body
+      (struct_field
+        name: (identifier)
+        type: (type_identifier)))))
+
+================================================================================
+Struct with method
+================================================================================
+
+struct Counter {
+  value: int,
+
+  fn increment(mut self) {
+    self.value = self.value + 1
+  }
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (struct_declaration
+    name: (type_identifier)
+    (struct_body
+      (struct_field
+        name: (identifier)
+        type: (primitive_type))
+      (method_declaration
+        name: (identifier)
+        parameters: (parameters
+          (parameter))
+        body: (block
+          (assignment_expression
+            left: (member_expression
+              object: (self_expression)
+              member: (identifier))
+            right: (binary_expression
+              (member_expression
+                object: (self_expression)
+                member: (identifier))
+              (integer_literal))))))))
+
+================================================================================
+Simple class
+================================================================================
+
+class Animal {
+  let name: string
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (class_declaration
+    name: (type_identifier)
+    (class_body
+      (class_field
+        name: (identifier)
+        type: (primitive_type)))))
+
+================================================================================
+Class with inheritance
+================================================================================
+
+class Dog extends Animal {
+  let breed: string
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (class_declaration
+    name: (type_identifier)
+    superclass: (type_identifier)
+    (class_body
+      (class_field
+        name: (identifier)
+        type: (primitive_type)))))
+
+================================================================================
+Abstract class
+================================================================================
+
+abstract class Shape {
+  abstract fn area(self) -> float
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (class_declaration
+    name: (type_identifier)
+    (class_body
+      (method_declaration
+        name: (identifier)
+        parameters: (parameters
+          (parameter))
+        return_type: (primitive_type)))))
+
+================================================================================
+Simple enum
+================================================================================
+
+enum Color {
+  Red,
+  Green,
+  Blue,
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (enum_declaration
+    name: (type_identifier)
+    (enum_body
+      (enum_variant
+        name: (identifier))
+      (enum_variant
+        name: (identifier))
+      (enum_variant
+        name: (identifier)))))
+
+================================================================================
+Enum with tuple variants
+================================================================================
+
+enum Option<T> {
+  Some(T),
+  None,
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (enum_declaration
+    name: (type_identifier)
+    (type_parameters
+      (type_parameter
+        name: (type_identifier)))
+    (enum_body
+      (enum_variant
+        name: (identifier)
+        (type_identifier))
+      (enum_variant
+        name: (identifier)))))
+
+================================================================================
+Enum with struct variants
+================================================================================
+
+enum Message {
+  Quit,
+  Move { x: int, y: int },
+  Write(string),
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (enum_declaration
+    name: (type_identifier)
+    (enum_body
+      (enum_variant
+        name: (identifier))
+      (enum_variant
+        name: (identifier)
+        (struct_body
+          (struct_field
+            name: (identifier)
+            type: (primitive_type))
+          (struct_field
+            name: (identifier)
+            type: (primitive_type))))
+      (enum_variant
+        name: (identifier)
+        (primitive_type)))))
+
+================================================================================
+Simple trait
+================================================================================
+
+trait Display {
+  fn display(self) -> string
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (trait_declaration
+    name: (type_identifier)
+    (trait_body
+      (trait_method
+        name: (identifier)
+        parameters: (parameters
+          (parameter))
+        return_type: (primitive_type)))))
+
+================================================================================
+Trait with default implementation
+================================================================================
+
+trait Greeting {
+  fn greet(self) -> string {
+    return "Hello"
+  }
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (trait_declaration
+    name: (type_identifier)
+    (trait_body
+      (trait_method
+        name: (identifier)
+        parameters: (parameters
+          (parameter))
+        return_type: (primitive_type)
+        body: (block
+          (return_statement
+            (string_literal
+              (string_content))))))))
+
+================================================================================
+Trait with supertrait
+================================================================================
+
+trait Ordered: Comparable {
+  fn compare(self, other: Self) -> int
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (trait_declaration
+    name: (type_identifier)
+    (trait_bound
+      (type_identifier))
+    (trait_body
+      (trait_method
+        name: (identifier)
+        parameters: (parameters
+          (parameter)
+          (parameter
+            name: (identifier)
+            type: (self_type)))
+        return_type: (primitive_type)))))
+
+================================================================================
+Simple impl block
+================================================================================
+
+impl Point {
+  fn new(x: int, y: int) -> Point {
+    return Point { x, y }
+  }
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (impl_block
+    type: (type_identifier)
+    (impl_body
+      (method_declaration
+        name: (identifier)
+        parameters: (parameters
+          (parameter
+            name: (identifier)
+            type: (primitive_type))
+          (parameter
+            name: (identifier)
+            type: (primitive_type)))
+        return_type: (type_identifier)
+        body: (block
+          (return_statement
+            (struct_expression
+              type: (type_identifier)
+              (struct_field_initializer
+                (identifier))
+              (struct_field_initializer
+                (identifier)))))))))
+
+================================================================================
+Trait impl block
+================================================================================
+
+impl Display for Point {
+  fn display(self) -> string {
+    return "point"
+  }
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (impl_block
+    trait: (type_identifier)
+    type: (type_identifier)
+    (impl_body
+      (method_declaration
+        name: (identifier)
+        parameters: (parameters
+          (parameter))
+        return_type: (primitive_type)
+        body: (block
+          (return_statement
+            (string_literal
+              (string_content))))))))
+
+================================================================================
+Type alias
+================================================================================
+
+type StringList = [string]
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (type_alias
+    name: (type_identifier)
+    type: (array_type
+      (primitive_type))))
+
+================================================================================
+Generic type alias
+================================================================================
+
+pub type Result<T> = Option<T>
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (type_alias
+    (visibility)
+    name: (type_identifier)
+    (type_parameters
+      (type_parameter
+        name: (type_identifier)))
+    type: (generic_type
+      (type_identifier)
+      (type_arguments
+        (type_identifier)))))
+
+================================================================================
+Simple import
+================================================================================
+
+import std.io
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (import_declaration
+    (import_path
+      (module_path
+        (identifier)
+        (identifier)))))
+
+================================================================================
+Import with alias
+================================================================================
+
+import std.collections.HashMap as Map
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (import_declaration
+    (import_path
+      (module_path
+        (identifier)
+        (identifier)
+        (identifier))
+      (identifier))))
+
+================================================================================
+Import group
+================================================================================
+
+import std.io.{print, println}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (import_declaration
+    (import_path
+      (module_path
+        (identifier)
+        (identifier))
+      (import_group
+        (identifier)
+        (identifier)))))
+
+================================================================================
+Wildcard import
+================================================================================
+
+import std.io.*
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (import_declaration
+    (import_path
+      (module_path
+        (identifier)
+        (identifier)))))
+
+================================================================================
+Use declaration
+================================================================================
+
+use std::collections::Vec
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (use_declaration
+    (use_path
+      (namespace_path
+        (identifier)
+        (identifier)
+        (identifier)))))
+
+================================================================================
+Interface declaration
+================================================================================
+
+interface Drawable {
+  fn draw(self)
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (interface_declaration
+    name: (type_identifier)
+    (trait_body
+      (trait_method
+        name: (identifier)
+        parameters: (parameters
+          (parameter))))))

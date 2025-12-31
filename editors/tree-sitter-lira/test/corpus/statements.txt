@@ -1,0 +1,599 @@
+================================================================================
+Let declaration
+================================================================================
+
+let x = 42
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (identifier)
+    value: (integer_literal)))
+
+================================================================================
+Let with type annotation
+================================================================================
+
+let x: int = 42
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (identifier)
+    type: (primitive_type)
+    value: (integer_literal)))
+
+================================================================================
+Var declaration
+================================================================================
+
+var count = 0
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (identifier)
+    value: (integer_literal)))
+
+================================================================================
+Const declaration
+================================================================================
+
+const PI = 3.14159
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (identifier)
+    value: (float_literal)))
+
+================================================================================
+Return statement
+================================================================================
+
+fn foo() {
+  return
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    parameters: (parameters)
+    body: (block
+      (return_statement))))
+
+================================================================================
+Return with value
+================================================================================
+
+fn bar() -> int {
+  return 42
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    parameters: (parameters)
+    return_type: (primitive_type)
+    body: (block
+      (return_statement
+        (integer_literal)))))
+
+================================================================================
+Break statement
+================================================================================
+
+fn test() {
+  loop {
+    break
+  }
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    parameters: (parameters)
+    body: (block
+      (loop_statement
+        body: (block
+          (break_statement))))))
+
+================================================================================
+Break with value
+================================================================================
+
+fn test() {
+  loop {
+    break 10
+  }
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    parameters: (parameters)
+    body: (block
+      (loop_statement
+        body: (block
+          (break_statement
+            (integer_literal)))))))
+
+================================================================================
+Continue statement
+================================================================================
+
+fn test() {
+  loop {
+    continue
+  }
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    parameters: (parameters)
+    body: (block
+      (loop_statement
+        body: (block
+          (continue_statement))))))
+
+================================================================================
+If expression
+================================================================================
+
+if x > 0 {
+  print("positive")
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (if_expression
+    condition: (binary_expression
+      (identifier)
+      (integer_literal))
+    consequence: (block
+      (call_expression
+        function: (identifier)
+        arguments: (arguments
+          (argument
+            (string_literal
+              (string_content))))))))
+
+================================================================================
+If-else expression
+================================================================================
+
+if x > 0 {
+  1
+} else {
+  -1
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (if_expression
+    condition: (binary_expression
+      (identifier)
+      (integer_literal))
+    consequence: (block
+      (integer_literal))
+    (block
+      (unary_expression
+        (integer_literal)))))
+
+================================================================================
+If-else if chain
+================================================================================
+
+if x > 0 {
+  1
+} else if x < 0 {
+  -1
+} else {
+  0
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (if_expression
+    condition: (binary_expression
+      (identifier)
+      (integer_literal))
+    consequence: (block
+      (integer_literal))
+    (if_expression
+      condition: (binary_expression
+        (identifier)
+        (integer_literal))
+      consequence: (block
+        (unary_expression
+          (integer_literal)))
+      (block
+        (integer_literal)))))
+
+================================================================================
+While loop
+================================================================================
+
+while x > 0 {
+  x = x - 1
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (while_statement
+    condition: (binary_expression
+      (identifier)
+      (integer_literal))
+    body: (block
+      (assignment_expression
+        left: (identifier)
+        right: (binary_expression
+          (identifier)
+          (integer_literal))))))
+
+================================================================================
+While let
+================================================================================
+
+while let Some(x) = next() {
+  print(x)
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (while_statement
+    pattern: (enum_pattern
+      (type_identifier)
+      (identifier))
+    value: (call_expression
+      function: (identifier)
+      arguments: (arguments))
+    body: (block
+      (call_expression
+        function: (identifier)
+        arguments: (arguments
+          (argument
+            (identifier)))))))
+
+================================================================================
+For loop
+================================================================================
+
+for i in 0..10 {
+  print(i)
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (for_statement
+    pattern: (identifier)
+    iterable: (range_expression
+      start: (integer_literal)
+      end: (integer_literal))
+    body: (block
+      (call_expression
+        function: (identifier)
+        arguments: (arguments
+          (argument
+            (identifier)))))))
+
+================================================================================
+For loop with array
+================================================================================
+
+for item in items {
+  process(item)
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (for_statement
+    pattern: (identifier)
+    iterable: (identifier)
+    body: (block
+      (call_expression
+        function: (identifier)
+        arguments: (arguments
+          (argument
+            (identifier)))))))
+
+================================================================================
+Loop statement
+================================================================================
+
+loop {
+  do_something()
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (loop_statement
+    body: (block
+      (call_expression
+        function: (identifier)
+        arguments: (arguments)))))
+
+================================================================================
+Match expression
+================================================================================
+
+match x {
+  0 => "zero",
+  1 => "one",
+  _ => "other",
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (match_expression
+    value: (identifier)
+    (match_body
+      (match_arm
+        pattern: (match_pattern
+          (integer_literal))
+        body: (string_literal
+          (string_content)))
+      (match_arm
+        pattern: (match_pattern
+          (integer_literal))
+        body: (string_literal
+          (string_content)))
+      (match_arm
+        pattern: (match_pattern
+          (wildcard_pattern))
+        body: (string_literal
+          (string_content))))))
+
+================================================================================
+Match with guard
+================================================================================
+
+match x {
+  n if n > 0 => "positive",
+  _ => "non-positive",
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (match_expression
+    value: (identifier)
+    (match_body
+      (match_arm
+        pattern: (match_pattern
+          (identifier))
+        guard: (binary_expression
+          (identifier)
+          (integer_literal))
+        body: (string_literal
+          (string_content)))
+      (match_arm
+        pattern: (match_pattern
+          (wildcard_pattern))
+        body: (string_literal
+          (string_content))))))
+
+================================================================================
+Match with block body
+================================================================================
+
+match cmd {
+  "quit" => {
+    cleanup()
+    exit()
+  },
+  _ => continue,
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (match_expression
+    value: (identifier)
+    (match_body
+      (match_arm
+        pattern: (match_pattern
+          (string_literal
+            (string_content)))
+        body: (block
+          (call_expression
+            function: (identifier)
+            arguments: (arguments))
+          (call_expression
+            function: (identifier)
+            arguments: (arguments))))
+      (match_arm
+        pattern: (match_pattern
+          (wildcard_pattern))
+        body: (continue_statement)))))
+
+================================================================================
+Try statement
+================================================================================
+
+try {
+  risky_operation()
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (try_statement
+    body: (block
+      (call_expression
+        function: (identifier)
+        arguments: (arguments)))))
+
+================================================================================
+Try-catch statement
+================================================================================
+
+try {
+  risky_operation()
+} catch Error as e {
+  handle(e)
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (try_statement
+    body: (block
+      (call_expression
+        function: (identifier)
+        arguments: (arguments)))
+    (catch_clause
+      (type_identifier)
+      (identifier)
+      body: (block
+        (call_expression
+          function: (identifier)
+          arguments: (arguments
+            (argument
+              (identifier))))))))
+
+================================================================================
+Try-catch-finally statement
+================================================================================
+
+try {
+  open()
+} catch {
+  log("error")
+} finally {
+  close()
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (try_statement
+    body: (block
+      (call_expression
+        function: (identifier)
+        arguments: (arguments)))
+    (catch_clause
+      body: (block
+        (call_expression
+          function: (identifier)
+          arguments: (arguments
+            (argument
+              (string_literal
+                (string_content)))))))
+    (finally_clause
+      body: (block
+        (call_expression
+          function: (identifier)
+          arguments: (arguments))))))
+
+================================================================================
+Spawn statement
+================================================================================
+
+spawn {
+  process()
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (spawn_statement
+    body: (block
+      (call_expression
+        function: (identifier)
+        arguments: (arguments)))))
+
+================================================================================
+Named spawn
+================================================================================
+
+spawn "worker" {
+  work()
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (spawn_statement
+    (string_literal
+      (string_content))
+    body: (block
+      (call_expression
+        function: (identifier)
+        arguments: (arguments)))))
+
+================================================================================
+Select statement
+================================================================================
+
+select {
+  recv: msg = <-ch => handle(msg),
+  default => timeout(),
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (select_statement
+    (select_body
+      (select_arm
+        binding: (identifier)
+        (receive_expression
+          channel: (identifier))
+        body: (call_expression
+          function: (identifier)
+          arguments: (arguments
+            (argument
+              (identifier)))))
+      (select_arm
+        body: (call_expression
+          function: (identifier)
+          arguments: (arguments))))))
+
+================================================================================
+Block statement
+================================================================================
+
+{
+  let x = 1
+  let y = 2
+  x + y
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (block
+    (variable_declaration
+      pattern: (identifier)
+      value: (integer_literal))
+    (variable_declaration
+      pattern: (identifier)
+      value: (integer_literal))
+    (binary_expression
+      (identifier)
+      (identifier))))
