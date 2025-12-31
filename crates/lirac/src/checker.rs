@@ -4,7 +4,7 @@
 //! See docs/lira/02-type-system.md for the full specification.
 
 use crate::ast::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Internal type representation
 #[derive(Debug, Clone, PartialEq)]
@@ -249,6 +249,8 @@ pub struct TypeEnv {
     impl_methods: HashMap<String, Vec<ImplMethod>>, // type_name -> methods
     trait_defs: HashMap<String, Vec<ImplMethod>>,   // trait_name -> required methods
     trait_impls: HashMap<(String, String), Vec<ImplMethod>>, // (trait_name, type_name) -> impl
+    /// Maps generic function names to their type parameter names
+    generic_functions: HashMap<String, Vec<String>>, // fn_name -> [T, U, ...]
     next_type_var: u32,
     errors: Vec<String>,
 }
@@ -289,6 +291,7 @@ impl TypeEnv {
             impl_methods: HashMap::new(),
             trait_defs: HashMap::new(),
             trait_impls: HashMap::new(),
+            generic_functions: HashMap::new(),
             next_type_var: 0,
             errors: Vec::new(),
         };
@@ -1805,9 +1808,87 @@ impl TypeEnv {
         self.trait_defs.insert(trait_name.to_string(), methods);
     }
 
+    /// Get trait definition by name
+    pub fn get_trait(&self, trait_name: &str) -> Option<&Vec<ImplMethod>> {
+        self.trait_defs.get(trait_name)
+    }
+
     /// Add a trait implementation
     pub fn add_trait_impl(&mut self, trait_name: &str, type_name: &str, methods: Vec<ImplMethod>) {
         self.trait_impls.insert((trait_name.to_string(), type_name.to_string()), methods);
+    }
+
+    /// Get all fields for a class, including inherited fields from parent classes
+    pub fn get_class_fields(&self, class_name: &str) -> Vec<(String, Type, bool)> {
+        let mut all_fields = Vec::new();
+        let mut current_class = Some(class_name.to_string());
+
+        while let Some(class) = current_class {
+            if let Some(type_def) = self.lookup_type(&class) {
+                if let TypeDefKind::Class { parent, fields, .. } = &type_def.kind {
+                    // Add parent fields first (so child fields can override)
+                    current_class = parent.clone();
+                    // Prepend to maintain proper order (parent fields first)
+                    for field in fields.iter().rev() {
+                        all_fields.insert(0, field.clone());
+                    }
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+        all_fields
+    }
+
+    /// Get all methods for a class, including inherited methods from parent classes
+    pub fn get_class_methods(&self, class_name: &str) -> Vec<(String, Type, bool)> {
+        let mut all_methods = Vec::new();
+        let mut current_class = Some(class_name.to_string());
+
+        while let Some(class) = current_class {
+            if let Some(type_def) = self.lookup_type(&class) {
+                if let TypeDefKind::Class { parent, methods, .. } = &type_def.kind {
+                    current_class = parent.clone();
+                    // Add methods, later ones (from child) will be found first in lookups
+                    all_methods.extend(methods.iter().cloned());
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+        all_methods
+    }
+
+    /// Check if a class has a parent class
+    pub fn get_parent_class(&self, class_name: &str) -> Option<String> {
+        self.lookup_type(class_name).and_then(|type_def| {
+            if let TypeDefKind::Class { parent, .. } = &type_def.kind {
+                parent.clone()
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Register a generic function with its type parameter names
+    pub fn register_generic_function(&mut self, name: &str, type_params: Vec<String>) {
+        if !type_params.is_empty() {
+            self.generic_functions.insert(name.to_string(), type_params);
+        }
+    }
+
+    /// Get the type parameter names for a generic function
+    pub fn get_generic_function(&self, name: &str) -> Option<&Vec<String>> {
+        self.generic_functions.get(name)
+    }
+
+    /// Check if a function is generic
+    pub fn is_generic_function(&self, name: &str) -> bool {
+        self.generic_functions.contains_key(name)
     }
 
     pub fn has_errors(&self) -> bool {
@@ -1825,6 +1906,37 @@ impl Default for TypeEnv {
     }
 }
 
+/// Represents a specific instantiation of a generic function
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct GenericInstantiation {
+    /// The name of the generic function
+    pub function_name: String,
+    /// The concrete type names substituted for type parameters (in order)
+    pub type_args: Vec<String>,
+}
+
+impl GenericInstantiation {
+    /// Create a new instantiation from types
+    pub fn new(function_name: String, types: &[Type]) -> Self {
+        Self {
+            function_name,
+            type_args: types.iter().map(|t| t.display_name()).collect(),
+        }
+    }
+
+    /// Generate a mangled name for this instantiation
+    pub fn mangled_name(&self) -> String {
+        if self.type_args.is_empty() {
+            self.function_name.clone()
+        } else {
+            let type_suffix: Vec<String> = self.type_args.iter()
+                .map(|t| t.replace(" ", "_").replace("<", "_").replace(">", "_").replace(",", "_"))
+                .collect();
+            format!("{}${}", self.function_name, type_suffix.join("$"))
+        }
+    }
+}
+
 /// The type checker
 pub struct TypeChecker {
     env: TypeEnv,
@@ -1833,6 +1945,8 @@ pub struct TypeChecker {
     current_type_name: Option<String>, // For resolving Self type in struct/class methods
     /// Current generic type parameters with their bounds (e.g., T -> [Eq, Hash])
     current_type_params: HashMap<String, Vec<String>>,
+    /// All instantiations of generic functions discovered during type checking
+    pub generic_instantiations: HashSet<GenericInstantiation>,
 }
 
 impl TypeChecker {
@@ -1843,6 +1957,7 @@ impl TypeChecker {
             current_type_name: None,
             in_loop: false,
             current_type_params: HashMap::new(),
+            generic_instantiations: HashSet::new(),
         }
     }
 
@@ -1949,6 +2064,39 @@ impl TypeChecker {
                 fields,
                 methods,
             } => {
+                // Set current type name for Self resolution
+                let old_type_name = self.current_type_name.clone();
+                self.current_type_name = Some(name.clone());
+
+                // Validate parent class exists
+                if let Some(parent_name) = parent {
+                    if self.env.lookup_type(parent_name).is_none() {
+                        self.env.error(
+                            &stmt.span,
+                            format!("Parent class '{}' not found", parent_name),
+                        );
+                    } else if let Some(type_def) = self.env.lookup_type(parent_name) {
+                        if !matches!(type_def.kind, TypeDefKind::Class { .. }) {
+                            self.env.error(
+                                &stmt.span,
+                                format!("'{}' is not a class and cannot be extended", parent_name),
+                            );
+                        }
+                    }
+                }
+
+                // Get parent methods for override checking
+                let parent_methods: Vec<String> = parent
+                    .as_ref()
+                    .map(|p| {
+                        self.env
+                            .get_class_methods(p)
+                            .into_iter()
+                            .map(|(name, _, _)| name)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
                 let field_types: Vec<_> = fields
                     .iter()
                     .map(|f| {
@@ -1963,13 +2111,35 @@ impl TypeChecker {
                     .iter()
                     .filter_map(|m| {
                         if let StatementKind::FnDecl {
-                            name,
+                            name: method_name,
                             params,
                             return_type,
                             is_public,
+                            is_override,
                             ..
                         } = &m.kind
                         {
+                            // Check override keyword usage
+                            let method_exists_in_parent = parent_methods.contains(method_name);
+                            if *is_override && !method_exists_in_parent {
+                                self.env.error(
+                                    &m.span,
+                                    format!(
+                                        "Method '{}' is marked as override but does not override any parent method",
+                                        method_name
+                                    ),
+                                );
+                            }
+                            if method_exists_in_parent && !*is_override {
+                                self.env.error(
+                                    &m.span,
+                                    format!(
+                                        "Method '{}' overrides a parent method but is not marked with 'override'",
+                                        method_name
+                                    ),
+                                );
+                            }
+
                             let param_types: Vec<_> = params
                                 .iter()
                                 .map(|p| self.resolve_type_expr(&p.type_ann))
@@ -1979,11 +2149,11 @@ impl TypeChecker {
                                 .map(|t| self.resolve_type_expr(t))
                                 .unwrap_or(Type::Void);
                             Some((
-                                name.clone(),
+                                method_name.clone(),
                                 Type::Function {
                                     params: param_types,
                                     return_type: Box::new(ret),
-                required_params: 1,
+                                    required_params: 1,
                                 },
                                 *is_public,
                             ))
@@ -2002,6 +2172,8 @@ impl TypeChecker {
                         methods: method_types,
                     },
                 });
+
+                self.current_type_name = old_type_name;
             }
             StatementKind::StructDecl {
                 name,
@@ -2184,6 +2356,8 @@ impl TypeChecker {
                 let old_type_name = self.current_type_name.clone();
                 self.current_type_name = Some(type_name.clone());
 
+                // Collect all implemented methods
+                let mut impl_methods: Vec<ImplMethod> = Vec::new();
                 for method in methods {
                     if let StatementKind::FnDecl {
                         name,
@@ -2202,27 +2376,167 @@ impl TypeChecker {
                             .map(|t| self.resolve_type_expr(t))
                             .unwrap_or(Type::Void);
 
-                        let impl_method = ImplMethod {
+                        impl_methods.push(ImplMethod {
                             name: name.clone(),
                             params: param_types,
                             return_type: ret,
                             has_self,
-                        };
-
-                        if let Some(trait_nm) = trait_name {
-                            // This is a trait impl
-                            // For now, also add to impl_methods for method resolution
-                            self.env.add_impl_method(type_name, impl_method);
-                        } else {
-                            // This is an inherent impl
-                            self.env.add_impl_method(type_name, impl_method);
-                        }
+                        });
                     }
+                }
+
+                // If this is a trait impl, verify completeness
+                if let Some(trait_nm) = trait_name {
+                    if let Some(trait_methods) = self.env.get_trait(trait_nm).cloned() {
+                        // Check for missing methods
+                        for trait_method in &trait_methods {
+                            let impl_method = impl_methods.iter().find(|m| m.name == trait_method.name);
+
+                            match impl_method {
+                                None => {
+                                    // Method missing from implementation
+                                    self.env.error(
+                                        &stmt.span,
+                                        format!(
+                                            "trait `{}` requires method `{}` but it is not implemented for `{}`",
+                                            trait_nm, trait_method.name, type_name
+                                        ),
+                                    );
+                                }
+                                Some(impl_m) => {
+                                    // Verify signature matches
+                                    self.verify_method_signature(
+                                        &stmt.span,
+                                        trait_nm,
+                                        type_name,
+                                        trait_method,
+                                        impl_m,
+                                    );
+                                }
+                            }
+                        }
+
+                        // Store the trait implementation
+                        self.env.add_trait_impl(trait_nm, type_name, impl_methods.clone());
+                    } else {
+                        // Trait doesn't exist
+                        self.env.error(
+                            &stmt.span,
+                            format!("trait `{}` is not defined", trait_nm),
+                        );
+                    }
+                }
+
+                // Add all methods to impl_methods for method resolution
+                for impl_method in impl_methods {
+                    self.env.add_impl_method(type_name, impl_method);
                 }
 
                 self.current_type_name = old_type_name;
             }
             _ => {}
+        }
+    }
+
+    /// Verify that a method implementation matches the trait method signature
+    fn verify_method_signature(
+        &mut self,
+        span: &Span,
+        trait_name: &str,
+        type_name: &str,
+        trait_method: &ImplMethod,
+        impl_method: &ImplMethod,
+    ) {
+        // Check has_self matches
+        if trait_method.has_self != impl_method.has_self {
+            let expected = if trait_method.has_self { "a `self` receiver" } else { "no `self` receiver" };
+            let got = if impl_method.has_self { "has `self`" } else { "has no `self`" };
+            self.env.error(
+                span,
+                format!(
+                    "method `{}` in impl `{}` for `{}` has wrong receiver: expected {}, but {}",
+                    impl_method.name, trait_name, type_name, expected, got
+                ),
+            );
+            return;
+        }
+
+        // Get params to compare (skip 'self' if present)
+        let trait_params: Vec<_> = trait_method.params.iter()
+            .filter(|(name, _)| name != "self")
+            .collect();
+        let impl_params: Vec<_> = impl_method.params.iter()
+            .filter(|(name, _)| name != "self")
+            .collect();
+
+        // Check parameter count
+        if trait_params.len() != impl_params.len() {
+            self.env.error(
+                span,
+                format!(
+                    "method `{}` in impl `{}` for `{}` has wrong number of parameters: expected {}, got {}",
+                    impl_method.name, trait_name, type_name, trait_params.len(), impl_params.len()
+                ),
+            );
+            return;
+        }
+
+        // Check each parameter type (resolve Self to actual type)
+        for (i, ((_, trait_ty), (_, impl_ty))) in trait_params.iter().zip(impl_params.iter()).enumerate() {
+            let resolved_trait_ty = self.resolve_self_type(trait_ty, type_name);
+            if !resolved_trait_ty.is_compatible_with(impl_ty) {
+                self.env.error(
+                    span,
+                    format!(
+                        "method `{}` in impl `{}` for `{}` has wrong type for parameter {}: expected `{}`, got `{}`",
+                        impl_method.name, trait_name, type_name, i + 1,
+                        resolved_trait_ty.display_name(), impl_ty.display_name()
+                    ),
+                );
+            }
+        }
+
+        // Check return type
+        let resolved_trait_ret = self.resolve_self_type(&trait_method.return_type, type_name);
+        if !resolved_trait_ret.is_compatible_with(&impl_method.return_type) {
+            self.env.error(
+                span,
+                format!(
+                    "method `{}` in impl `{}` for `{}` has wrong return type: expected `{}`, got `{}`",
+                    impl_method.name, trait_name, type_name,
+                    resolved_trait_ret.display_name(), impl_method.return_type.display_name()
+                ),
+            );
+        }
+    }
+
+    /// Resolve Self type in a type to the actual implementing type
+    fn resolve_self_type(&self, ty: &Type, type_name: &str) -> Type {
+        match ty {
+            // Self can be stored as TypeParam("Self") or Struct("Self")
+            Type::TypeParam(name) if name == "Self" => {
+                Type::Struct(type_name.to_string())
+            }
+            Type::Struct(name) if name == "Self" => {
+                Type::Struct(type_name.to_string())
+            }
+            Type::Class(name) if name == "Self" => {
+                Type::Class(type_name.to_string())
+            }
+            Type::Optional(inner) => {
+                Type::Optional(Box::new(self.resolve_self_type(inner, type_name)))
+            }
+            Type::Array(inner) => {
+                Type::Array(Box::new(self.resolve_self_type(inner, type_name)))
+            }
+            Type::Function { params, return_type, required_params } => {
+                Type::Function {
+                    params: params.iter().map(|p| self.resolve_self_type(p, type_name)).collect(),
+                    return_type: Box::new(self.resolve_self_type(return_type, type_name)),
+                    required_params: *required_params,
+                }
+            }
+            _ => ty.clone(),
         }
     }
 
@@ -2271,6 +2585,14 @@ impl TypeChecker {
                 mutable: false,
                 kind: SymbolKind::Function,
             });
+
+            // Register generic function type parameters for monomorphization
+            if !type_params.is_empty() {
+                let type_param_names: Vec<String> = type_params.iter()
+                    .map(|tp| tp.name.clone())
+                    .collect();
+                self.env.register_generic_function(name, type_param_names);
+            }
         }
     }
 
@@ -2569,6 +2891,27 @@ impl TypeChecker {
             ExpressionKind::Null => Type::Null,
 
             ExpressionKind::Identifier(name) => {
+                // Handle 'super' keyword for parent class access
+                if name == "super" {
+                    if let Some(ref current_class) = self.current_type_name {
+                        if let Some(parent) = self.env.get_parent_class(current_class) {
+                            return Type::Class(parent);
+                        } else {
+                            self.env.error(
+                                &expr.span,
+                                format!("'super' used in class '{}' which has no parent class", current_class),
+                            );
+                            return Type::Unknown;
+                        }
+                    } else {
+                        self.env.error(
+                            &expr.span,
+                            "'super' can only be used inside a class".to_string(),
+                        );
+                        return Type::Unknown;
+                    }
+                }
+
                 if let Some(symbol) = self.env.lookup(name) {
                     symbol.ty.clone()
                 } else if let Some(type_def) = self.env.lookup_type(name) {
@@ -2743,8 +3086,15 @@ impl TypeChecker {
                 }
             }
 
-            ExpressionKind::Call { callee, args } => {
+            ExpressionKind::Call { callee, args, type_args: _ } => {
                 let callee_type = self.check_expression(callee);
+
+                // Get function name for generic tracking
+                let function_name = if let ExpressionKind::Identifier(name) = &callee.kind {
+                    Some(name.clone())
+                } else {
+                    None
+                };
 
                 // Check if this is a variadic built-in function
                 let is_variadic_builtin = if let ExpressionKind::Identifier(name) = &callee.kind {
@@ -2758,8 +3108,8 @@ impl TypeChecker {
 
                 match callee_type {
                     Type::Function {
-                        params,
-                        return_type,
+                        ref params,
+                        ref return_type,
                         required_params,
                     } => {
                         // For method calls, the first param is 'self' which is implicit
@@ -2793,6 +3143,7 @@ impl TypeChecker {
 
                         // TODO: Handle named argument reordering here
                         // For now, just check positional argument types
+                        let mut inferred_types = Vec::new();
                         for (arg, param_type) in args.iter().zip(params_to_check.iter()) {
                             let arg_type = self.check_expression(&arg.value);
                             if !arg_type.is_compatible_with(param_type) {
@@ -2804,9 +3155,24 @@ impl TypeChecker {
                                     ),
                                 );
                             }
+                            // Collect concrete types for type parameter inference
+                            if param_type.is_type_param() {
+                                inferred_types.push(arg_type);
+                            }
                         }
 
-                        *return_type
+                        // Record generic instantiation if this is a generic function
+                        if let Some(ref fn_name) = function_name {
+                            if self.env.is_generic_function(fn_name) && !inferred_types.is_empty() {
+                                let instantiation = GenericInstantiation::new(
+                                    fn_name.clone(),
+                                    &inferred_types,
+                                );
+                                self.generic_instantiations.insert(instantiation);
+                            }
+                        }
+
+                        return_type.as_ref().clone()
                     }
                     Type::Unknown => Type::Unknown,
                     _ => {
@@ -2838,45 +3204,73 @@ impl TypeChecker {
                             Type::Unknown
                         }
                     }
-                    Type::Class(name) | Type::Struct(name) => {
+                    Type::Class(name) => {
+                        // For classes, check inherited fields and methods
+                        let all_fields = self.env.get_class_fields(name);
+                        for (field_name, field_type, _) in &all_fields {
+                            if field_name == field {
+                                return field_type.clone();
+                            }
+                        }
+                        let all_methods = self.env.get_class_methods(name);
+                        for (method_name, method_type, _) in &all_methods {
+                            if method_name == field {
+                                return method_type.clone();
+                            }
+                        }
+                        // Check methods from impl blocks
+                        if let Some(impl_method) = self.env.lookup_method(name, field) {
+                            let param_types: Vec<Type> = impl_method.params.iter()
+                                .map(|(_, ty)| ty.clone())
+                                .collect();
+                            return Type::Function {
+                                params: param_types.clone(),
+                                return_type: Box::new(impl_method.return_type.clone()),
+                                required_params: param_types.len(),
+                            };
+                        }
+                        self.env.error(
+                            &expr.span,
+                            format!(
+                                "Unknown field or method: {} on type {}",
+                                field, name
+                            ),
+                        );
+                        Type::Unknown
+                    }
+                    Type::Struct(name) => {
                         if let Some(type_def) = self.env.lookup_type(name) {
-                            match &type_def.kind {
-                                TypeDefKind::Class {
-                                    fields, methods, ..
+                            if let TypeDefKind::Struct { fields, methods } = &type_def.kind {
+                                // Check fields first
+                                for (field_name, field_type, _) in fields {
+                                    if field_name == field {
+                                        return field_type.clone();
+                                    }
                                 }
-                                | TypeDefKind::Struct { fields, methods } => {
-                                    // Check fields first
-                                    for (field_name, field_type, _) in fields {
-                                        if field_name == field {
-                                            return field_type.clone();
-                                        }
+                                // Check methods in type definition
+                                for (method_name, method_type, _) in methods {
+                                    if method_name == field {
+                                        return method_type.clone();
                                     }
-                                    // Check methods in type definition
-                                    for (method_name, method_type, _) in methods {
-                                        if method_name == field {
-                                            return method_type.clone();
-                                        }
-                                    }
-                                    // Check methods from impl blocks
-                                    if let Some(impl_method) = self.env.lookup_method(name, field) {
-                                        let param_types: Vec<Type> = impl_method.params.iter()
-                                            .map(|(_, ty)| ty.clone())
-                                            .collect();
-                                        return Type::Function {
-                                            params: param_types.clone(),
-                                            return_type: Box::new(impl_method.return_type.clone()),
-                                            required_params: param_types.len(),
-                                        };
-                                    }
-                                    self.env.error(
-                                        &expr.span,
-                                        format!(
-                                            "Unknown field or method: {} on type {}",
-                                            field, name
-                                        ),
-                                    );
                                 }
-                                _ => {}
+                                // Check methods from impl blocks
+                                if let Some(impl_method) = self.env.lookup_method(name, field) {
+                                    let param_types: Vec<Type> = impl_method.params.iter()
+                                        .map(|(_, ty)| ty.clone())
+                                        .collect();
+                                    return Type::Function {
+                                        params: param_types.clone(),
+                                        return_type: Box::new(impl_method.return_type.clone()),
+                                        required_params: param_types.len(),
+                                    };
+                                }
+                                self.env.error(
+                                    &expr.span,
+                                    format!(
+                                        "Unknown field or method: {} on type {}",
+                                        field, name
+                                    ),
+                                );
                             }
                         }
                         Type::Unknown
@@ -3460,6 +3854,7 @@ impl TypeChecker {
                 receiver,
                 method,
                 args,
+                type_args: _, // TODO: Handle explicit type args for generic methods
             } => {
                 let receiver_type = self.check_expression(receiver);
                 // Check arguments
@@ -4885,6 +5280,94 @@ mod tests {
     }
 
     #[test]
+    fn test_trait_impl_missing_method() {
+        // Should error: missing required 'clone' method
+        let result = check_source(
+            r#"
+            trait Clone {
+                fn clone(self) -> Self
+            }
+
+            struct Point {
+                x: int
+            }
+
+            impl Clone for Point {
+                // Missing clone method!
+            }
+            "#
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("requires method `clone`"));
+    }
+
+    #[test]
+    fn test_trait_impl_wrong_return_type() {
+        // Should error: wrong return type
+        let result = check_source(
+            r#"
+            trait Clone {
+                fn clone(self) -> Self
+            }
+
+            struct Point {
+                x: int
+            }
+
+            impl Clone for Point {
+                fn clone(self) -> int {
+                    return 42
+                }
+            }
+            "#
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("wrong return type"));
+    }
+
+    #[test]
+    fn test_trait_impl_wrong_param_count() {
+        // Should error: wrong number of parameters
+        let result = check_source(
+            r#"
+            trait Compute {
+                fn compute(self, x: int) -> int
+            }
+
+            struct Calculator {}
+
+            impl Compute for Calculator {
+                fn compute(self) -> int {
+                    return 0
+                }
+            }
+            "#
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("wrong number of parameters"));
+    }
+
+    #[test]
+    fn test_trait_impl_unknown_trait() {
+        // Should error: trait not defined
+        let result = check_source(
+            r#"
+            struct Point {
+                x: int
+            }
+
+            impl UnknownTrait for Point {
+                fn foo(self) -> int {
+                    return 0
+                }
+            }
+            "#
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("is not defined"));
+    }
+
+    #[test]
     fn test_trait_method_call() {
         assert!(check_source(
             r#"
@@ -5556,5 +6039,653 @@ mod tests {
             y = 20
             "#
         ).is_ok(), "var destructuring should create mutable bindings");
+    }
+
+    // ========================================================================
+    // Class Inheritance Tests
+    // ========================================================================
+
+    #[test]
+    fn test_class_extends_basic() {
+        assert!(check_source(
+            r#"
+            class Animal {
+                name: string
+            }
+
+            class Dog extends Animal {
+                breed: string
+            }
+            "#
+        ).is_ok());
+    }
+
+    #[test]
+    fn test_class_extends_with_methods() {
+        assert!(check_source(
+            r#"
+            class Animal {
+                name: string
+
+                fn speak(self) -> string {
+                    return "..."
+                }
+            }
+
+            class Dog extends Animal {
+                breed: string
+
+                override fn speak(self) -> string {
+                    return "Woof!"
+                }
+            }
+            "#
+        ).is_ok());
+    }
+
+    #[test]
+    fn test_class_override_required() {
+        // Should error: method overrides parent but not marked override
+        let result = check_source(
+            r#"
+            class Animal {
+                fn speak(self) -> string {
+                    return "..."
+                }
+            }
+
+            class Dog extends Animal {
+                fn speak(self) -> string {
+                    return "Woof!"
+                }
+            }
+            "#
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not marked with 'override'"));
+    }
+
+    #[test]
+    fn test_class_override_no_parent_method() {
+        // Should error: override on method that doesn't exist in parent
+        let result = check_source(
+            r#"
+            class Animal {
+                name: string
+            }
+
+            class Dog extends Animal {
+                override fn bark(self) -> string {
+                    return "Woof!"
+                }
+            }
+            "#
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("does not override any parent method"));
+    }
+
+    #[test]
+    fn test_class_extends_unknown_parent() {
+        // Should error: parent class doesn't exist
+        let result = check_source(
+            r#"
+            class Dog extends UnknownAnimal {
+                name: string
+            }
+            "#
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not found"));
+    }
+
+    #[test]
+    fn test_class_cannot_extend_struct() {
+        // Should error: cannot extend a struct
+        let result = check_source(
+            r#"
+            struct Point {
+                x: int
+            }
+
+            class ColoredPoint extends Point {
+                color: string
+            }
+            "#
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("cannot be extended"));
+    }
+
+    #[test]
+    fn test_class_multi_level_inheritance() {
+        // Test 3-level inheritance chain: Animal -> Dog -> Labrador
+        assert!(check_source(
+            r#"
+            class Animal {
+                name: string
+            }
+
+            class Dog extends Animal {
+                breed: string
+            }
+
+            class Labrador extends Dog {
+                is_guide_dog: bool
+            }
+
+            let lab = Labrador { name: "Max", breed: "Labrador", is_guide_dog: true }
+            println(lab.name)
+            println(lab.breed)
+            "#
+        ).is_ok());
+    }
+
+    #[test]
+    fn test_class_override_multiple_methods() {
+        assert!(check_source(
+            r#"
+            class Base {
+                fn foo(self) -> int { return 1 }
+                fn bar(self) -> int { return 2 }
+            }
+
+            class Derived extends Base {
+                override fn foo(self) -> int { return 10 }
+                override fn bar(self) -> int { return 20 }
+            }
+            "#
+        ).is_ok());
+    }
+
+    #[test]
+    fn test_class_partial_override() {
+        // Only override one method, keep the other
+        assert!(check_source(
+            r#"
+            class Base {
+                fn foo(self) -> int { return 1 }
+                fn bar(self) -> int { return 2 }
+            }
+
+            class Derived extends Base {
+                override fn foo(self) -> int { return 10 }
+                // bar is inherited, not overridden
+            }
+            "#
+        ).is_ok());
+    }
+
+    #[test]
+    fn test_class_new_method_in_child() {
+        // Child can add new methods without override
+        assert!(check_source(
+            r#"
+            class Animal {
+                name: string
+            }
+
+            class Dog extends Animal {
+                fn bark(self) -> string {
+                    return "Woof!"
+                }
+            }
+            "#
+        ).is_ok());
+    }
+
+    #[test]
+    fn test_class_diamond_inheritance_not_supported() {
+        // Lira doesn't support multiple inheritance, verify single parent
+        assert!(check_source(
+            r#"
+            class A {}
+            class B extends A {}
+            class C extends A {}
+            // D cannot extend both B and C - only single inheritance
+            class D extends B {}
+            "#
+        ).is_ok());
+    }
+
+    // ========================================================================
+    // Generic Trait Bounds Tests (where clause)
+    // ========================================================================
+
+    #[test]
+    fn test_where_clause_basic() {
+        assert!(check_source(
+            r#"
+            trait Eq {}
+            trait Hash {}
+
+            fn hash_map_insert<K, V>(key: K, value: V) where K: Eq + Hash {
+                // Function body
+            }
+            "#
+        ).is_ok());
+    }
+
+    #[test]
+    fn test_where_clause_multiple_params() {
+        assert!(check_source(
+            r#"
+            trait Display {}
+            trait Clone {}
+
+            fn transform<T, U>(input: T) -> U where T: Clone, U: Display {
+                // Implementation would go here
+            }
+            "#
+        ).is_ok());
+    }
+
+    #[test]
+    fn test_inline_bounds_equivalent() {
+        // Inline bounds and where clause should work the same
+        assert!(check_source(
+            r#"
+            trait Eq {}
+
+            // Inline bound syntax
+            fn compare1<T: Eq>(a: T, b: T) -> bool {
+                return true
+            }
+
+            // Where clause syntax (equivalent)
+            fn compare2<T>(a: T, b: T) -> bool where T: Eq {
+                return true
+            }
+            "#
+        ).is_ok());
+    }
+
+    #[test]
+    fn test_where_clause_unknown_type_param() {
+        // Should error: where clause references undeclared type parameter
+        let result = check_source(
+            r#"
+            trait Eq {}
+
+            fn compare<T>(a: T) where U: Eq {
+                // U is not declared
+            }
+            "#
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not declared"));
+    }
+
+    #[test]
+    fn test_combined_inline_and_where_bounds() {
+        // Both inline and where clause bounds should work together
+        assert!(check_source(
+            r#"
+            trait Eq {}
+            trait Hash {}
+            trait Debug {}
+
+            fn complex<T: Eq, U>(a: T, b: U) where U: Hash + Debug {
+                // T has Eq from inline, U has Hash + Debug from where
+            }
+            "#
+        ).is_ok());
+    }
+
+    #[test]
+    fn test_where_extends_inline_bounds() {
+        // Where clause can add more bounds to existing type param
+        assert!(check_source(
+            r#"
+            trait Eq {}
+            trait Hash {}
+
+            fn extend_bounds<T: Eq>(a: T) where T: Hash {
+                // T now has both Eq (inline) and Hash (where)
+            }
+            "#
+        ).is_ok());
+    }
+
+    #[test]
+    fn test_generic_with_no_bounds() {
+        // Generic without any bounds should work
+        assert!(check_source(
+            r#"
+            fn identity<T>(x: T) -> T {
+                return x
+            }
+
+            fn swap<A, B>(a: A, b: B) -> B {
+                return b
+            }
+            "#
+        ).is_ok());
+    }
+
+    #[test]
+    fn test_where_clause_with_expression_body() {
+        // Where clause with expression body syntax
+        assert!(check_source(
+            r#"
+            trait Default {}
+
+            fn make_default<T>() -> T where T: Default => null
+            "#
+        ).is_ok());
+    }
+
+    // ========================================================================
+    // Monomorphization Tests
+    // ========================================================================
+
+    fn check_source_and_get_checker(source: &str) -> Result<TypeChecker, String> {
+        use crate::lexer::tokenize;
+        use crate::parser::parse;
+
+        let tokens = tokenize(source)?;
+        let program = parse(&tokens)?;
+        let mut checker = TypeChecker::new();
+        checker.check_program(&program)?;
+        Ok(checker)
+    }
+
+    #[test]
+    fn test_generic_instantiation_tracking() {
+        let checker = check_source_and_get_checker(
+            r#"
+            fn identity<T>(x: T) -> T {
+                return x
+            }
+
+            let a = identity(42)
+            let b = identity("hello")
+            let c = identity(true)
+            "#
+        ).unwrap();
+
+        // Should have 3 different instantiations
+        assert_eq!(checker.generic_instantiations.len(), 3);
+
+        // Check that the instantiations are recorded
+        let has_int = checker.generic_instantiations.iter()
+            .any(|i| i.function_name == "identity" && i.type_args.contains(&"int".to_string()));
+        let has_string = checker.generic_instantiations.iter()
+            .any(|i| i.function_name == "identity" && i.type_args.contains(&"string".to_string()));
+        let has_bool = checker.generic_instantiations.iter()
+            .any(|i| i.function_name == "identity" && i.type_args.contains(&"bool".to_string()));
+
+        assert!(has_int, "Should have int instantiation");
+        assert!(has_string, "Should have string instantiation");
+        assert!(has_bool, "Should have bool instantiation");
+    }
+
+    #[test]
+    fn test_generic_instantiation_mangled_name() {
+        let inst = GenericInstantiation::new("identity".to_string(), &[Type::Int]);
+        assert_eq!(inst.mangled_name(), "identity$int");
+
+        let inst2 = GenericInstantiation::new("map".to_string(), &[Type::String, Type::Int]);
+        assert_eq!(inst2.mangled_name(), "map$string$int");
+    }
+
+    #[test]
+    fn test_non_generic_function_no_instantiation() {
+        let checker = check_source_and_get_checker(
+            r#"
+            fn add(a: int, b: int) -> int {
+                return a + b
+            }
+
+            let result = add(1, 2)
+            "#
+        ).unwrap();
+
+        // Non-generic function should not record any instantiations
+        assert!(checker.generic_instantiations.is_empty());
+    }
+
+    #[test]
+    fn test_same_type_single_instantiation() {
+        let checker = check_source_and_get_checker(
+            r#"
+            fn identity<T>(x: T) -> T {
+                return x
+            }
+
+            let a = identity(1)
+            let b = identity(2)
+            let c = identity(3)
+            "#
+        ).unwrap();
+
+        // All calls are with int, so should only have 1 instantiation
+        assert_eq!(checker.generic_instantiations.len(), 1);
+    }
+
+    #[test]
+    fn test_generic_multi_param_instantiation() {
+        let checker = check_source_and_get_checker(
+            r#"
+            fn pair<A, B>(a: A, b: B) -> A {
+                return a
+            }
+
+            let x = pair(1, "hello")
+            let y = pair("world", 42)
+            "#
+        ).unwrap();
+
+        // Two different instantiations: (int, string) and (string, int)
+        assert_eq!(checker.generic_instantiations.len(), 2);
+    }
+
+    #[test]
+    fn test_generic_with_two_same_type_params() {
+        // Test generic function with two parameters of same generic type
+        let checker = check_source_and_get_checker(
+            r#"
+            fn choose<T>(a: T, b: T, first: bool) -> T {
+                if first {
+                    return a
+                }
+                return b
+            }
+
+            let x = choose(1, 2, true)
+            let y = choose("a", "b", false)
+            "#
+        ).unwrap();
+
+        // Should have 2 instantiations: int and string
+        assert_eq!(checker.generic_instantiations.len(), 2);
+    }
+
+    #[test]
+    fn test_generic_function_calling_generic() {
+        // Generic function that internally uses generic - instantiation recorded
+        assert!(check_source(
+            r#"
+            fn identity<T>(x: T) -> T {
+                return x
+            }
+
+            fn wrap<T>(x: T) -> T {
+                return identity(x)
+            }
+
+            let a = wrap(42)
+            let b = wrap("hello")
+            "#
+        ).is_ok());
+    }
+
+    #[test]
+    fn test_generic_instantiation_dedup() {
+        let checker = check_source_and_get_checker(
+            r#"
+            fn process<T>(x: T) -> T {
+                return x
+            }
+
+            // Multiple calls with same type in different contexts
+            fn foo() {
+                let a = process(1)
+                let b = process(2)
+            }
+
+            fn bar() {
+                let c = process(3)
+            }
+
+            let d = process(4)
+            "#
+        ).unwrap();
+
+        // All int instantiations should be deduped to 1
+        assert_eq!(checker.generic_instantiations.len(), 1);
+    }
+
+    #[test]
+    fn test_generic_instantiation_mangled_names_unique() {
+        let inst1 = GenericInstantiation::new("foo".to_string(), &[Type::Int, Type::String]);
+        let inst2 = GenericInstantiation::new("foo".to_string(), &[Type::String, Type::Int]);
+
+        // Different order = different mangled names
+        assert_ne!(inst1.mangled_name(), inst2.mangled_name());
+        assert_eq!(inst1.mangled_name(), "foo$int$string");
+        assert_eq!(inst2.mangled_name(), "foo$string$int");
+    }
+
+    #[test]
+    fn test_generic_empty_type_args_no_mangle() {
+        let inst = GenericInstantiation {
+            function_name: "regular_fn".to_string(),
+            type_args: vec![],
+        };
+
+        // No type args = no mangling
+        assert_eq!(inst.mangled_name(), "regular_fn");
+    }
+
+    // ========================================================================
+    // Noise / Stress Tests
+    // ========================================================================
+
+    #[test]
+    fn test_mixed_features_complex() {
+        // Test combining multiple features together
+        assert!(check_source(
+            r#"
+            trait Printable {}
+
+            class Animal {
+                name: string
+                fn describe(self) -> string {
+                    return self.name
+                }
+            }
+
+            class Dog extends Animal {
+                breed: string
+                override fn describe(self) -> string {
+                    return self.name + " (" + self.breed + ")"
+                }
+            }
+
+            fn identity<T>(x: T) -> T {
+                return x
+            }
+
+            fn process<T, U>(a: T, b: U) -> T where T: Printable {
+                return a
+            }
+
+            let dog = Dog { name: "Max", breed: "Labrador" }
+            let num = identity(42)
+            let text = identity("hello")
+            let result = dog.describe()
+            "#
+        ).is_ok());
+    }
+
+    #[test]
+    fn test_deeply_nested_generics() {
+        assert!(check_source(
+            r#"
+            fn outer<T>(x: T) -> T {
+                return x
+            }
+
+            fn middle<T>(x: T) -> T {
+                return outer(x)
+            }
+
+            fn inner<T>(x: T) -> T {
+                return middle(x)
+            }
+
+            let a = inner(1)
+            let b = inner("test")
+            let c = inner(true)
+            "#
+        ).is_ok());
+    }
+
+    #[test]
+    fn test_struct_with_impl_instance_methods() {
+        // Structs work with impl blocks - verify instance methods
+        let result = check_source(
+            r#"
+            struct Container {
+                value: int
+            }
+
+            impl Container {
+                fn get(self) -> int {
+                    return self.value
+                }
+
+                fn double(self) -> int {
+                    return self.value * 2
+                }
+            }
+
+            let c = Container { value: 42 }
+            let v = c.get()
+            let d = c.double()
+            "#
+        );
+        if let Err(e) = &result {
+            eprintln!("test_struct_with_impl_instance_methods error: {}", e);
+        }
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_trait_with_generic_functions() {
+        assert!(check_source(
+            r#"
+            trait Mapper {
+                fn map(self, x: int) -> int
+            }
+
+            struct Doubler {}
+
+            impl Mapper for Doubler {
+                fn map(self, x: int) -> int {
+                    return x * 2
+                }
+            }
+
+            fn apply_generic<T>(val: T) -> T {
+                return val
+            }
+
+            let d = Doubler {}
+            let result = d.map(21)
+            let generic_result = apply_generic(result)
+            "#
+        ).is_ok());
     }
 }
