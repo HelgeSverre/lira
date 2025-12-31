@@ -297,7 +297,8 @@ impl Parser {
             let mut fields = Vec::new();
             if !self.check(&TokenKind::RBrace) {
                 loop {
-                    let field_name = self.expect_identifier("Expected field name in struct pattern")?;
+                    let field_name =
+                        self.expect_identifier("Expected field name in struct pattern")?;
                     let field_pattern = if self.match_token(&TokenKind::Colon) {
                         self.binding_pattern()?
                     } else {
@@ -325,8 +326,9 @@ impl Parser {
         }
 
         // Wildcard pattern: _
-        if self.check(&TokenKind::Underscore) ||
-           (matches!(self.peek().kind, TokenKind::Identifier(_)) && self.peek().lexeme == "_") {
+        if self.check(&TokenKind::Underscore)
+            || (matches!(self.peek().kind, TokenKind::Identifier(_)) && self.peek().lexeme == "_")
+        {
             self.advance();
             return Ok(Pattern {
                 kind: PatternKind::Wildcard,
@@ -364,7 +366,12 @@ impl Parser {
         })
     }
 
-    fn fn_declaration(&mut self, is_public: bool, is_override: bool, span: Span) -> Result<Statement, String> {
+    fn fn_declaration(
+        &mut self,
+        is_public: bool,
+        is_override: bool,
+        span: Span,
+    ) -> Result<Statement, String> {
         let name = self.expect_identifier("Expected function name")?;
 
         // Parse optional generic type parameters <T> or <T, U>
@@ -536,8 +543,12 @@ impl Parser {
     /// Parse where clause bounds: where T: Eq + Hash, U: Display
     fn parse_where_clause(&mut self, type_params: &mut Vec<TypeParam>) -> Result<(), String> {
         loop {
-            let param_name = self.expect_identifier("Expected type parameter name in where clause")?;
-            self.consume(&TokenKind::Colon, "Expected ':' after type parameter in where clause")?;
+            let param_name =
+                self.expect_identifier("Expected type parameter name in where clause")?;
+            self.consume(
+                &TokenKind::Colon,
+                "Expected ':' after type parameter in where clause",
+            )?;
 
             // Parse trait bounds: Trait or Trait + Other
             let mut bounds = Vec::new();
@@ -632,7 +643,8 @@ impl Parser {
         let name = self.expect_identifier("Expected class name")?;
 
         // Parse inheritance: class Child extends Parent { } or class Child : Parent { }
-        let parent = if self.match_token(&TokenKind::Extends) || self.match_token(&TokenKind::Colon) {
+        let parent = if self.match_token(&TokenKind::Extends) || self.match_token(&TokenKind::Colon)
+        {
             Some(self.expect_identifier("Expected parent class name")?)
         } else {
             None
@@ -918,7 +930,10 @@ impl Parser {
                 methods.push(fn_decl);
             } else {
                 let span = self.span();
-                return Err(format!("{}:{}: Expected 'fn' in impl block", span.line, span.column));
+                return Err(format!(
+                    "{}:{}: Expected 'fn' in impl block",
+                    span.line, span.column
+                ));
             }
         }
 
@@ -2352,7 +2367,9 @@ mod tests {
         // Positional arguments after named should error
         let result = parse_expr("foo(x: 1, 2)");
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Positional arguments must come before named arguments"));
+        assert!(result
+            .unwrap_err()
+            .contains("Positional arguments must come before named arguments"));
     }
 
     #[test]
@@ -2363,7 +2380,10 @@ mod tests {
         let program = parse(&tokens).unwrap();
         assert_eq!(program.statements.len(), 1);
 
-        if let StatementKind::VarDecl { pattern, type_ann, .. } = &program.statements[0].kind {
+        if let StatementKind::VarDecl {
+            pattern, type_ann, ..
+        } = &program.statements[0].kind
+        {
             if let PatternKind::Variable(name) = &pattern.kind {
                 assert_eq!(name, "arr");
             } else {
@@ -2621,7 +2641,13 @@ mod tests {
         let tokens = tokenize(source).unwrap();
         let program = parse(&tokens).unwrap();
 
-        if let StatementKind::TraitDecl { name, type_params, methods, .. } = &program.statements[0].kind {
+        if let StatementKind::TraitDecl {
+            name,
+            type_params,
+            methods,
+            ..
+        } = &program.statements[0].kind
+        {
             assert_eq!(name, "Into");
             assert_eq!(type_params.len(), 1);
             assert_eq!(type_params[0].name, "T");
@@ -2637,7 +2663,10 @@ mod tests {
         let tokens = tokenize(source).unwrap();
         let program = parse(&tokens).unwrap();
 
-        if let StatementKind::TraitDecl { name, is_public, .. } = &program.statements[0].kind {
+        if let StatementKind::TraitDecl {
+            name, is_public, ..
+        } = &program.statements[0].kind
+        {
             assert_eq!(name, "Serializable");
             assert!(is_public);
         } else {
@@ -2656,7 +2685,13 @@ mod tests {
         let program = parse(&tokens).unwrap();
         assert_eq!(program.statements.len(), 1);
 
-        if let StatementKind::ImplDecl { type_name, trait_name, methods, .. } = &program.statements[0].kind {
+        if let StatementKind::ImplDecl {
+            type_name,
+            trait_name,
+            methods,
+            ..
+        } = &program.statements[0].kind
+        {
             assert_eq!(type_name, "Point");
             assert!(trait_name.is_none());
             assert!(methods.is_empty());
@@ -2677,7 +2712,10 @@ mod tests {
         let tokens = tokenize(source).unwrap();
         let program = parse(&tokens).unwrap();
 
-        if let StatementKind::ImplDecl { type_name, methods, .. } = &program.statements[0].kind {
+        if let StatementKind::ImplDecl {
+            type_name, methods, ..
+        } = &program.statements[0].kind
+        {
             assert_eq!(type_name, "Point");
             assert_eq!(methods.len(), 1);
             if let StatementKind::FnDecl { name, .. } = &methods[0].kind {
@@ -2702,7 +2740,10 @@ mod tests {
         let tokens = tokenize(source).unwrap();
         let program = parse(&tokens).unwrap();
 
-        if let StatementKind::ImplDecl { type_name, methods, .. } = &program.statements[0].kind {
+        if let StatementKind::ImplDecl {
+            type_name, methods, ..
+        } = &program.statements[0].kind
+        {
             assert_eq!(type_name, "Point");
             assert_eq!(methods.len(), 1);
         } else {
@@ -2722,7 +2763,12 @@ mod tests {
         let tokens = tokenize(source).unwrap();
         let program = parse(&tokens).unwrap();
 
-        if let StatementKind::ImplDecl { type_name, type_params, .. } = &program.statements[0].kind {
+        if let StatementKind::ImplDecl {
+            type_name,
+            type_params,
+            ..
+        } = &program.statements[0].kind
+        {
             assert_eq!(type_name, "List");
             assert_eq!(type_params.len(), 1);
             assert_eq!(type_params[0].name, "T");
@@ -2743,7 +2789,13 @@ mod tests {
         let tokens = tokenize(source).unwrap();
         let program = parse(&tokens).unwrap();
 
-        if let StatementKind::ImplDecl { type_name, trait_name, methods, .. } = &program.statements[0].kind {
+        if let StatementKind::ImplDecl {
+            type_name,
+            trait_name,
+            methods,
+            ..
+        } = &program.statements[0].kind
+        {
             assert_eq!(type_name, "Point");
             assert_eq!(trait_name.as_deref(), Some("Clone"));
             assert_eq!(methods.len(), 1);
@@ -2764,7 +2816,13 @@ mod tests {
         let tokens = tokenize(source).unwrap();
         let program = parse(&tokens).unwrap();
 
-        if let StatementKind::ImplDecl { type_name, trait_name, type_params, .. } = &program.statements[0].kind {
+        if let StatementKind::ImplDecl {
+            type_name,
+            trait_name,
+            type_params,
+            ..
+        } = &program.statements[0].kind
+        {
             assert_eq!(type_name, "List");
             assert_eq!(trait_name.as_deref(), Some("Clone"));
             assert_eq!(type_params.len(), 1);
@@ -2860,7 +2918,11 @@ mod tests {
 
         if let StatementKind::FnDecl { body, .. } = &program.statements[0].kind {
             // First statement: let x = some_function()?
-            if let StatementKind::VarDecl { initializer: Some(init), .. } = &body.statements[0].kind {
+            if let StatementKind::VarDecl {
+                initializer: Some(init),
+                ..
+            } = &body.statements[0].kind
+            {
                 if let ExpressionKind::Try(inner) = &init.kind {
                     assert!(matches!(&inner.kind, ExpressionKind::Call { .. }));
                 } else {
@@ -2871,7 +2933,11 @@ mod tests {
             }
 
             // Second statement: let y = obj.method()?
-            if let StatementKind::VarDecl { initializer: Some(init), .. } = &body.statements[1].kind {
+            if let StatementKind::VarDecl {
+                initializer: Some(init),
+                ..
+            } = &body.statements[1].kind
+            {
                 if let ExpressionKind::Try(inner) = &init.kind {
                     // obj.method() is parsed as Call with FieldAccess callee
                     assert!(matches!(&inner.kind, ExpressionKind::Call { .. }));
