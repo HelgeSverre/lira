@@ -1,0 +1,89 @@
+{
+  "name": "lira-lang",
+  "displayName": "Lira",
+  "description": "Syntax highlighting and LSP support for the Lira programming language",
+  "version": "0.1.0",
+  "publisher": "lira-lang",
+  "license": "MIT",
+  "author": {
+    "name": "Lira Contributors"
+  },
+  "homepage": "https://github.com/lira-lang/lira",
+  "bugs": {
+    "url": "https://github.com/lira-lang/lira/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lira-lang/lira"
+  },
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "lira",
+    "programming language",
+    "systems programming",
+    "concurrency",
+    "fibers"
+  ],
+  "activationEvents": [
+    "onLanguage:lira"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "lira",
+        "aliases": [
+          "Lira",
+          "lira"
+        ],
+        "extensions": [
+          ".li",
+          ".lira"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "lira",
+        "scopeName": "source.lira",
+        "path": "./syntaxes/lira.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Lira",
+      "properties": {
+        "lira.languageServer.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable the Lira language server"
+        },
+        "lira.languageServer.path": {
+          "type": "string",
+          "default": "lira-lsp",
+          "description": "Path to the lira-lsp binary"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.75.0",
+    "@vscode/vsce": "^2.22.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}
