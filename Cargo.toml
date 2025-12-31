@@ -1,3 +1,3 @@
 [workspace]
-members = ["crates/lira-core", "crates/lirac", "crates/liravm"]
+members = ["crates/lira-core", "crates/lirac", "crates/liravm", "crates/lira-lsp"]
 resolver = "2"
