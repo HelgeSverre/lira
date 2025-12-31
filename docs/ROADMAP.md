@@ -480,7 +480,7 @@ just fmt
 | T8.8 | Completion | Keyword and symbol completion | [x] |
 | T8.9 | Hover | Type info and documentation on hover | [x] |
 | T8.10 | Go to definition | Navigate to symbol definitions | [x] |
-| T8.11 | Find references | Find all references to a symbol | [ ] |
+| T8.11 | Find references | Find all references to a symbol | [x] |
 | T8.12 | Document symbols | Outline view for files | [x] |
 | T8.13 | Semantic tokens | Enhanced syntax highlighting | [ ] |
 
@@ -488,14 +488,16 @@ just fmt
 
 | ID | Task | Description | Status |
 |----|------|-------------|--------|
-| T8.14 | VS Code extension | Syntax + LSP client for VS Code | [ ] |
-| T8.15 | JetBrains plugin | Syntax + LSP for IntelliJ/CLion | [ ] |
-| T8.16 | Neovim config | Tree-sitter + LSP configuration | [ ] |
+| T8.14 | VS Code extension | Syntax + LSP client for VS Code | [x] |
+| T8.15 | JetBrains plugin | Syntax via TextMate grammar | [x] |
+| T8.16 | Vim/Neovim plugin | Syntax highlighting + LSP config | [x] |
+| T8.17 | Zed extension | Tree-sitter grammar + LSP | [x] |
+| T8.18 | Helix config | Tree-sitter + LSP configuration | [x] |
 
 ### 8.4 Developer Tools
 
 | ID | Task | Description | Status |
 |----|------|-------------|--------|
-| T8.17 | lira-fmt | Code formatter | [ ] |
-| T8.18 | lira-doc | Documentation generator | [ ] |
+| T8.19 | lira-fmt | Code formatter | [ ] |
+| T8.20 | lira-doc | Documentation generator | [ ] |
 
