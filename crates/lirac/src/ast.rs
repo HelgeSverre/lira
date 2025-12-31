@@ -65,6 +65,7 @@ pub enum StatementKind {
         return_type: Option<TypeExpr>,
         body: Block,
         is_public: bool,
+        is_override: bool,
     },
     /// Class declaration
     ClassDecl {
@@ -267,9 +268,11 @@ pub enum ExpressionKind {
         op: UnaryOp,
         operand: Box<Expression>,
     },
-    /// Function call (supports named arguments)
+    /// Function call (supports named arguments and explicit type arguments)
     Call {
         callee: Box<Expression>,
+        /// Explicit type arguments for generic functions (e.g., foo::<int, string>())
+        type_args: Vec<TypeExpr>,
         args: Vec<Argument>,
     },
     /// Field access
@@ -360,6 +363,8 @@ pub enum ExpressionKind {
     MethodCall {
         receiver: Box<Expression>,
         method: String,
+        /// Explicit type arguments for generic methods (e.g., obj.method::<int>())
+        type_args: Vec<TypeExpr>,
         args: Vec<Argument>,
     },
 }

@@ -105,6 +105,7 @@ pub enum TokenKind {
     Extends,
     Mut,
     Override,
+    Where,
 
     // Operators
     Plus,       // +
@@ -370,6 +371,7 @@ impl<'a> Lexer<'a> {
             "extends" => TokenKind::Extends,
             "mut" => TokenKind::Mut,
             "override" => TokenKind::Override,
+            "where" => TokenKind::Where,
             // Literals
             "true" => TokenKind::BoolLiteral(true),
             "false" => TokenKind::BoolLiteral(false),
