@@ -7,6 +7,7 @@ repository = "https://github.com/lira-lang/lira"
 authors = ["Lira contributors"]
 
 [grammars.lira]
-# For local development: use file:// URL
+# For local development: use file:// URL with current git rev
 repository = "file:///Users/helge/code/lira"
 path = "editors/tree-sitter-lira"
+rev = "8b063eb59ac9403af044b8679373ee2b28bfd027"
