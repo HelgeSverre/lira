@@ -1,0 +1,20 @@
+# Helix language configuration for Lira
+# Copy this to ~/.config/helix/languages.toml or merge with existing config
+
+[[language]]
+name = "lira"
+scope = "source.lira"
+injection-regex = "lira"
+file-types = ["li", "lira"]
+comment-token = "//"
+block-comment-tokens = { start = "/*", end = "*/" }
+indent = { tab-width = 4, unit = "    " }
+language-servers = ["lira-lsp"]
+auto-format = false
+
+[language-server.lira-lsp]
+command = "lira-lsp"
+
+[[grammar]]
+name = "lira"
+source = { path = "/Users/helge/code/lira/editors/tree-sitter-lira" }
