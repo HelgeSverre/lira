@@ -70,7 +70,12 @@ fn get_word_at_position(line: &str, col: usize) -> Option<&str> {
     Some(&line[byte_start..byte_end])
 }
 
-fn get_word_documentation(word: &str, line: &str, col: usize, line_num: u32) -> Option<(String, Range)> {
+fn get_word_documentation(
+    word: &str,
+    line: &str,
+    col: usize,
+    line_num: u32,
+) -> Option<(String, Range)> {
     // Calculate the range for the word
     let chars: Vec<char> = line.chars().collect();
     let mut start = col;
@@ -189,8 +194,12 @@ fn builtin_docs(func_name: &str) -> Option<String> {
         "push" => "**push**(array: [T], value: T) -> void\n\nAppend a value to an array.",
         "pop" => "**pop**(array: [T]) -> T?\n\nRemove and return the last element.",
         "append" => "**append**(a: [T], b: [T]) -> [T]\n\nConcatenate two arrays.",
-        "panic" => "**panic**(message: string) -> never\n\nTerminate execution with an error message.",
-        "todo" => "**todo**(message: string) -> never\n\nMark unimplemented code. Panics at runtime.",
+        "panic" => {
+            "**panic**(message: string) -> never\n\nTerminate execution with an error message."
+        }
+        "todo" => {
+            "**todo**(message: string) -> never\n\nMark unimplemented code. Panics at runtime."
+        }
         "unreachable" => "**unreachable**() -> never\n\nMark code that should never execute.",
         _ => return None,
     };

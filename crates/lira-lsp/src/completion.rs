@@ -80,22 +80,42 @@ fn matches_prefix(label: &str, prefix: &str) -> bool {
 fn keyword_completions() -> Vec<CompletionItem> {
     let keywords = [
         // Declaration keywords
-        ("fn", "Function declaration", "fn ${1:name}(${2:params}) ${3:-> Type }{\n\t$0\n}"),
+        (
+            "fn",
+            "Function declaration",
+            "fn ${1:name}(${2:params}) ${3:-> Type }{\n\t$0\n}",
+        ),
         ("let", "Immutable variable", "let ${1:name} = $0"),
         ("var", "Mutable variable", "var ${1:name} = $0"),
         ("const", "Constant", "const ${1:NAME} = $0"),
-        ("struct", "Struct declaration", "struct ${1:Name} {\n\t${2:field}: ${3:Type},\n}"),
+        (
+            "struct",
+            "Struct declaration",
+            "struct ${1:Name} {\n\t${2:field}: ${3:Type},\n}",
+        ),
         ("class", "Class declaration", "class ${1:Name} {\n\t$0\n}"),
-        ("enum", "Enum declaration", "enum ${1:Name} {\n\t${2:Variant},\n}"),
+        (
+            "enum",
+            "Enum declaration",
+            "enum ${1:Name} {\n\t${2:Variant},\n}",
+        ),
         ("trait", "Trait declaration", "trait ${1:Name} {\n\t$0\n}"),
         ("impl", "Implementation block", "impl ${1:Type} {\n\t$0\n}"),
         ("type", "Type alias", "type ${1:Name} = $0"),
         // Control flow
         ("if", "If expression", "if ${1:condition} {\n\t$0\n}"),
         ("else", "Else branch", "else {\n\t$0\n}"),
-        ("match", "Match expression", "match ${1:value} {\n\t${2:pattern} => $0,\n}"),
+        (
+            "match",
+            "Match expression",
+            "match ${1:value} {\n\t${2:pattern} => $0,\n}",
+        ),
         ("while", "While loop", "while ${1:condition} {\n\t$0\n}"),
-        ("for", "For loop", "for ${1:item} in ${2:iterable} {\n\t$0\n}"),
+        (
+            "for",
+            "For loop",
+            "for ${1:item} in ${2:iterable} {\n\t$0\n}",
+        ),
         ("loop", "Infinite loop", "loop {\n\t$0\n}"),
         ("break", "Break from loop", "break"),
         ("continue", "Continue loop", "continue"),
@@ -106,7 +126,11 @@ fn keyword_completions() -> Vec<CompletionItem> {
         ("async", "Async function", "async"),
         // Error handling
         ("try", "Try block", "try {\n\t$0\n}"),
-        ("catch", "Catch block", "catch ${1:Error} as ${2:e} {\n\t$0\n}"),
+        (
+            "catch",
+            "Catch block",
+            "catch ${1:Error} as ${2:e} {\n\t$0\n}",
+        ),
         // Visibility
         ("pub", "Public visibility", "pub"),
         ("priv", "Private visibility", "priv"),
@@ -133,17 +157,72 @@ fn keyword_completions() -> Vec<CompletionItem> {
 
 fn builtin_completions() -> Vec<CompletionItem> {
     let builtins = [
-        ("print", "Print to stdout", "print(${1:value})", "(value: any) -> void"),
-        ("println", "Print line to stdout", "println(${1:value})", "(value: any) -> void"),
-        ("debug", "Debug print", "debug(${1:value})", "(value: any) -> void"),
-        ("assert", "Assert condition", "assert(${1:condition})", "(condition: bool) -> void"),
-        ("len", "Get length", "len(${1:collection})", "(collection: [T]) -> int"),
-        ("push", "Push to array", "push(${1:array}, ${2:value})", "(array: [T], value: T) -> void"),
-        ("pop", "Pop from array", "pop(${1:array})", "(array: [T]) -> T?"),
-        ("append", "Append arrays", "append(${1:array}, ${2:other})", "(a: [T], b: [T]) -> [T]"),
-        ("panic", "Panic with message", "panic(${1:message})", "(message: string) -> never"),
-        ("todo", "Mark as todo", "todo(${1:message})", "(message: string) -> never"),
-        ("unreachable", "Mark as unreachable", "unreachable()", "() -> never"),
+        (
+            "print",
+            "Print to stdout",
+            "print(${1:value})",
+            "(value: any) -> void",
+        ),
+        (
+            "println",
+            "Print line to stdout",
+            "println(${1:value})",
+            "(value: any) -> void",
+        ),
+        (
+            "debug",
+            "Debug print",
+            "debug(${1:value})",
+            "(value: any) -> void",
+        ),
+        (
+            "assert",
+            "Assert condition",
+            "assert(${1:condition})",
+            "(condition: bool) -> void",
+        ),
+        (
+            "len",
+            "Get length",
+            "len(${1:collection})",
+            "(collection: [T]) -> int",
+        ),
+        (
+            "push",
+            "Push to array",
+            "push(${1:array}, ${2:value})",
+            "(array: [T], value: T) -> void",
+        ),
+        (
+            "pop",
+            "Pop from array",
+            "pop(${1:array})",
+            "(array: [T]) -> T?",
+        ),
+        (
+            "append",
+            "Append arrays",
+            "append(${1:array}, ${2:other})",
+            "(a: [T], b: [T]) -> [T]",
+        ),
+        (
+            "panic",
+            "Panic with message",
+            "panic(${1:message})",
+            "(message: string) -> never",
+        ),
+        (
+            "todo",
+            "Mark as todo",
+            "todo(${1:message})",
+            "(message: string) -> never",
+        ),
+        (
+            "unreachable",
+            "Mark as unreachable",
+            "unreachable()",
+            "() -> never",
+        ),
     ];
 
     builtins
@@ -267,11 +346,11 @@ mod tests {
 
     #[test]
     fn test_get_word_prefix() {
-        assert_eq!(get_word_prefix("let foo = ", 7), "foo");  // cursor at end of "foo"
-        assert_eq!(get_word_prefix("fn test", 5), "te");      // cursor after "te"
+        assert_eq!(get_word_prefix("let foo = ", 7), "foo"); // cursor at end of "foo"
+        assert_eq!(get_word_prefix("fn test", 5), "te"); // cursor after "te"
         assert_eq!(get_word_prefix("", 0), "");
-        assert_eq!(get_word_prefix("let x", 3), "let");       // cursor after "let"
-        assert_eq!(get_word_prefix("  fn", 4), "fn");         // cursor after "fn"
+        assert_eq!(get_word_prefix("let x", 3), "let"); // cursor after "let"
+        assert_eq!(get_word_prefix("  fn", 4), "fn"); // cursor after "fn"
     }
 
     #[test]
@@ -284,7 +363,10 @@ mod tests {
     #[test]
     fn test_completions_include_keywords() {
         let content = "f";
-        let pos = Position { line: 0, character: 1 };
+        let pos = Position {
+            line: 0,
+            character: 1,
+        };
         let completions = get_completions(content, pos);
 
         let fn_completion = completions.iter().find(|c| c.label == "fn");

@@ -75,7 +75,7 @@ fn parse_function(trimmed: &str, line_num: u32, line: &str) -> Option<DocumentSy
     let caps = re.captures(trimmed)?;
     let name = caps.get(1)?.as_str();
 
-    let start_col = line.find(&format!("fn ")).unwrap_or(0) as u32;
+    let start_col = line.find("fn ").unwrap_or(0) as u32;
     let name_start = line.find(name).unwrap_or(0) as u32;
 
     #[allow(deprecated)]
@@ -84,12 +84,24 @@ fn parse_function(trimmed: &str, line_num: u32, line: &str) -> Option<DocumentSy
         kind: SymbolKind::FUNCTION,
         detail: Some(extract_function_signature(trimmed)),
         range: Range {
-            start: Position { line: line_num, character: start_col },
-            end: Position { line: line_num, character: line.len() as u32 },
+            start: Position {
+                line: line_num,
+                character: start_col,
+            },
+            end: Position {
+                line: line_num,
+                character: line.len() as u32,
+            },
         },
         selection_range: Range {
-            start: Position { line: line_num, character: name_start },
-            end: Position { line: line_num, character: name_start + name.len() as u32 },
+            start: Position {
+                line: line_num,
+                character: name_start,
+            },
+            end: Position {
+                line: line_num,
+                character: name_start + name.len() as u32,
+            },
         },
         children: None,
         deprecated: None,
@@ -111,12 +123,24 @@ fn parse_struct(trimmed: &str, line_num: u32, line: &str) -> Option<DocumentSymb
         kind: SymbolKind::STRUCT,
         detail: None,
         range: Range {
-            start: Position { line: line_num, character: start_col },
-            end: Position { line: line_num, character: line.len() as u32 },
+            start: Position {
+                line: line_num,
+                character: start_col,
+            },
+            end: Position {
+                line: line_num,
+                character: line.len() as u32,
+            },
         },
         selection_range: Range {
-            start: Position { line: line_num, character: name_start },
-            end: Position { line: line_num, character: name_start + name.len() as u32 },
+            start: Position {
+                line: line_num,
+                character: name_start,
+            },
+            end: Position {
+                line: line_num,
+                character: name_start + name.len() as u32,
+            },
         },
         children: None,
         deprecated: None,
@@ -138,12 +162,24 @@ fn parse_class(trimmed: &str, line_num: u32, line: &str) -> Option<DocumentSymbo
         kind: SymbolKind::CLASS,
         detail: None,
         range: Range {
-            start: Position { line: line_num, character: start_col },
-            end: Position { line: line_num, character: line.len() as u32 },
+            start: Position {
+                line: line_num,
+                character: start_col,
+            },
+            end: Position {
+                line: line_num,
+                character: line.len() as u32,
+            },
         },
         selection_range: Range {
-            start: Position { line: line_num, character: name_start },
-            end: Position { line: line_num, character: name_start + name.len() as u32 },
+            start: Position {
+                line: line_num,
+                character: name_start,
+            },
+            end: Position {
+                line: line_num,
+                character: name_start + name.len() as u32,
+            },
         },
         children: None,
         deprecated: None,
@@ -165,12 +201,24 @@ fn parse_enum(trimmed: &str, line_num: u32, line: &str) -> Option<DocumentSymbol
         kind: SymbolKind::ENUM,
         detail: None,
         range: Range {
-            start: Position { line: line_num, character: start_col },
-            end: Position { line: line_num, character: line.len() as u32 },
+            start: Position {
+                line: line_num,
+                character: start_col,
+            },
+            end: Position {
+                line: line_num,
+                character: line.len() as u32,
+            },
         },
         selection_range: Range {
-            start: Position { line: line_num, character: name_start },
-            end: Position { line: line_num, character: name_start + name.len() as u32 },
+            start: Position {
+                line: line_num,
+                character: name_start,
+            },
+            end: Position {
+                line: line_num,
+                character: name_start + name.len() as u32,
+            },
         },
         children: None,
         deprecated: None,
@@ -192,12 +240,24 @@ fn parse_trait(trimmed: &str, line_num: u32, line: &str) -> Option<DocumentSymbo
         kind: SymbolKind::INTERFACE,
         detail: None,
         range: Range {
-            start: Position { line: line_num, character: start_col },
-            end: Position { line: line_num, character: line.len() as u32 },
+            start: Position {
+                line: line_num,
+                character: start_col,
+            },
+            end: Position {
+                line: line_num,
+                character: line.len() as u32,
+            },
         },
         selection_range: Range {
-            start: Position { line: line_num, character: name_start },
-            end: Position { line: line_num, character: name_start + name.len() as u32 },
+            start: Position {
+                line: line_num,
+                character: name_start,
+            },
+            end: Position {
+                line: line_num,
+                character: name_start + name.len() as u32,
+            },
         },
         children: None,
         deprecated: None,
@@ -219,12 +279,24 @@ fn parse_type_alias(trimmed: &str, line_num: u32, line: &str) -> Option<Document
         kind: SymbolKind::TYPE_PARAMETER,
         detail: None,
         range: Range {
-            start: Position { line: line_num, character: start_col },
-            end: Position { line: line_num, character: line.len() as u32 },
+            start: Position {
+                line: line_num,
+                character: start_col,
+            },
+            end: Position {
+                line: line_num,
+                character: line.len() as u32,
+            },
         },
         selection_range: Range {
-            start: Position { line: line_num, character: name_start },
-            end: Position { line: line_num, character: name_start + name.len() as u32 },
+            start: Position {
+                line: line_num,
+                character: name_start,
+            },
+            end: Position {
+                line: line_num,
+                character: name_start + name.len() as u32,
+            },
         },
         children: None,
         deprecated: None,
@@ -234,7 +306,8 @@ fn parse_type_alias(trimmed: &str, line_num: u32, line: &str) -> Option<Document
 
 fn parse_impl(trimmed: &str, line_num: u32, line: &str) -> Option<DocumentSymbol> {
     // impl Trait for Type or impl Type
-    let re = Regex::new(r"^impl\s+(?:([A-Z][a-zA-Z0-9_]*)\s+for\s+)?([A-Z][a-zA-Z0-9_]*)\s*[<{]?").ok()?;
+    let re = Regex::new(r"^impl\s+(?:([A-Z][a-zA-Z0-9_]*)\s+for\s+)?([A-Z][a-zA-Z0-9_]*)\s*[<{]?")
+        .ok()?;
     let caps = re.captures(trimmed)?;
 
     let (name, detail) = if let Some(trait_name) = caps.get(1) {
@@ -256,12 +329,24 @@ fn parse_impl(trimmed: &str, line_num: u32, line: &str) -> Option<DocumentSymbol
         kind: SymbolKind::NAMESPACE,
         detail,
         range: Range {
-            start: Position { line: line_num, character: start_col },
-            end: Position { line: line_num, character: line.len() as u32 },
+            start: Position {
+                line: line_num,
+                character: start_col,
+            },
+            end: Position {
+                line: line_num,
+                character: line.len() as u32,
+            },
         },
         selection_range: Range {
-            start: Position { line: line_num, character: start_col },
-            end: Position { line: line_num, character: line.len() as u32 },
+            start: Position {
+                line: line_num,
+                character: start_col,
+            },
+            end: Position {
+                line: line_num,
+                character: line.len() as u32,
+            },
         },
         children: None,
         deprecated: None,
@@ -283,12 +368,24 @@ fn parse_const(trimmed: &str, line_num: u32, line: &str) -> Option<DocumentSymbo
         kind: SymbolKind::CONSTANT,
         detail: None,
         range: Range {
-            start: Position { line: line_num, character: start_col },
-            end: Position { line: line_num, character: line.len() as u32 },
+            start: Position {
+                line: line_num,
+                character: start_col,
+            },
+            end: Position {
+                line: line_num,
+                character: line.len() as u32,
+            },
         },
         selection_range: Range {
-            start: Position { line: line_num, character: name_start },
-            end: Position { line: line_num, character: name_start + name.len() as u32 },
+            start: Position {
+                line: line_num,
+                character: name_start,
+            },
+            end: Position {
+                line: line_num,
+                character: name_start + name.len() as u32,
+            },
         },
         children: None,
         deprecated: None,
@@ -374,7 +471,9 @@ impl Display for Point {
 "#;
         let symbols = get_document_symbols(content);
         // Should find impl Point, fn new, impl Display for Point, fn display
-        assert!(symbols.iter().any(|s| s.name == "Point" && s.kind == SymbolKind::NAMESPACE));
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "Point" && s.kind == SymbolKind::NAMESPACE));
         assert!(symbols.iter().any(|s| s.name == "Display for Point"));
     }
 }

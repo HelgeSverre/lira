@@ -42,13 +42,25 @@ fn parse_error_message(error: &str, content: &str) -> Vec<Diagnostic> {
 
     for line in error.lines() {
         let (line_num, col_num, message) = if let Some(caps) = line_col_regex.captures(line) {
-            let line_num = caps.get(1).map(|m| m.as_str().parse::<u32>().unwrap_or(1)).unwrap_or(1);
-            let col_num = caps.get(2).map(|m| m.as_str().parse::<u32>().unwrap_or(0)).unwrap_or(0);
+            let line_num = caps
+                .get(1)
+                .map(|m| m.as_str().parse::<u32>().unwrap_or(1))
+                .unwrap_or(1);
+            let col_num = caps
+                .get(2)
+                .map(|m| m.as_str().parse::<u32>().unwrap_or(0))
+                .unwrap_or(0);
             let message = caps.get(3).map(|m| m.as_str()).unwrap_or(line);
             (line_num, col_num, message.to_string())
         } else if let Some(caps) = bracket_regex.captures(line) {
-            let line_num = caps.get(1).map(|m| m.as_str().parse::<u32>().unwrap_or(1)).unwrap_or(1);
-            let col_num = caps.get(2).map(|m| m.as_str().parse::<u32>().unwrap_or(0)).unwrap_or(0);
+            let line_num = caps
+                .get(1)
+                .map(|m| m.as_str().parse::<u32>().unwrap_or(1))
+                .unwrap_or(1);
+            let col_num = caps
+                .get(2)
+                .map(|m| m.as_str().parse::<u32>().unwrap_or(0))
+                .unwrap_or(0);
             let message = caps.get(3).map(|m| m.as_str()).unwrap_or(line);
             (line_num, col_num, message.to_string())
         } else if !line.trim().is_empty() {
@@ -92,8 +104,14 @@ fn parse_error_message(error: &str, content: &str) -> Vec<Diagnostic> {
     if diagnostics.is_empty() && !error.trim().is_empty() {
         diagnostics.push(Diagnostic {
             range: Range {
-                start: Position { line: 0, character: 0 },
-                end: Position { line: 0, character: 0 },
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 0,
+                    character: 0,
+                },
             },
             severity: Some(DiagnosticSeverity::ERROR),
             source: Some("lira".to_string()),

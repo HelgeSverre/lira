@@ -10,6 +10,7 @@ mod definition;
 mod diagnostics;
 mod hover;
 mod references;
+mod semantic_tokens;
 mod symbols;
 
 use dashmap::DashMap;
@@ -82,8 +83,17 @@ impl LanguageServer for LiraLanguageServer {
                 document_symbol_provider: Some(OneOf::Left(true)),
                 // Find references
                 references_provider: Some(OneOf::Left(true)),
-                // Future capabilities will be added here:
-                // semantic_tokens_provider: Some(...),
+                // Semantic tokens for enhanced highlighting
+                semantic_tokens_provider: Some(
+                    SemanticTokensServerCapabilities::SemanticTokensOptions(
+                        SemanticTokensOptions {
+                            legend: semantic_tokens::get_legend(),
+                            full: Some(SemanticTokensFullOptions::Bool(true)),
+                            range: Some(false),
+                            ..Default::default()
+                        },
+                    ),
+                ),
                 ..Default::default()
             },
             server_info: Some(ServerInfo {
@@ -139,9 +149,7 @@ impl LanguageServer for LiraLanguageServer {
         self.documents.remove(&uri);
 
         // Clear diagnostics for closed document
-        self.client
-            .publish_diagnostics(uri, vec![], None)
-            .await;
+        self.client.publish_diagnostics(uri, vec![], None).await;
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
@@ -221,5 +229,20 @@ impl LanguageServer for LiraLanguageServer {
         } else {
             Ok(Some(refs))
         }
+    }
+
+    async fn semantic_tokens_full(
+        &self,
+        params: SemanticTokensParams,
+    ) -> Result<Option<SemanticTokensResult>> {
+        let uri = params.text_document.uri;
+
+        let content = match self.documents.get(&uri) {
+            Some(doc) => doc.content.to_string(),
+            None => return Ok(None),
+        };
+
+        let tokens = semantic_tokens::get_semantic_tokens(&content);
+        Ok(Some(SemanticTokensResult::Tokens(tokens)))
     }
 }

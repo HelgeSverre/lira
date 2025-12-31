@@ -89,7 +89,12 @@ fn find_symbol_definition(uri: &Url, content: &str, symbol: &str) -> Option<Loca
     None
 }
 
-fn find_pattern_in_content(uri: &Url, content: &str, pattern: &str, symbol: &str) -> Option<Location> {
+fn find_pattern_in_content(
+    uri: &Url,
+    content: &str,
+    pattern: &str,
+    symbol: &str,
+) -> Option<Location> {
     let re = match Regex::new(pattern) {
         Ok(r) => r,
         Err(_) => return None,
