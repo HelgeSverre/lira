@@ -133,8 +133,14 @@ impl Type {
             (a, Type::Optional(b)) => a.is_compatible_with(b),
             // Result type compatibility
             (
-                Type::Result { ok_type: a_ok, err_type: a_err },
-                Type::Result { ok_type: b_ok, err_type: b_err },
+                Type::Result {
+                    ok_type: a_ok,
+                    err_type: a_err,
+                },
+                Type::Result {
+                    ok_type: b_ok,
+                    err_type: b_err,
+                },
             ) => a_ok.is_compatible_with(b_ok) && a_err.is_compatible_with(b_err),
             // Float coercion
             (Type::Int, Type::Float) | (Type::Float, Type::Int) => true,
@@ -145,11 +151,22 @@ impl Type {
             (Type::Float, b) if b.is_integer() => true,
             // Function type compatibility (ignores required_params, compares signatures)
             (
-                Type::Function { params: a_params, return_type: a_ret, .. },
-                Type::Function { params: b_params, return_type: b_ret, .. },
+                Type::Function {
+                    params: a_params,
+                    return_type: a_ret,
+                    ..
+                },
+                Type::Function {
+                    params: b_params,
+                    return_type: b_ret,
+                    ..
+                },
             ) => {
                 a_params.len() == b_params.len()
-                    && a_params.iter().zip(b_params.iter()).all(|(a, b)| a.is_compatible_with(b))
+                    && a_params
+                        .iter()
+                        .zip(b_params.iter())
+                        .all(|(a, b)| a.is_compatible_with(b))
                     && a_ret.is_compatible_with(b_ret)
             }
             (a, b) => a == b,
@@ -193,11 +210,23 @@ impl Type {
             Type::Map(k, v) => format!("Map<{}, {}>", k.display_name(), v.display_name()),
             Type::Optional(inner) => format!("{}?", inner.display_name()),
             Type::Result { ok_type, err_type } => {
-                format!("Result<{}, {}>", ok_type.display_name(), err_type.display_name())
+                format!(
+                    "Result<{}, {}>",
+                    ok_type.display_name(),
+                    err_type.display_name()
+                )
             }
-            Type::Function { params, return_type, .. } => {
+            Type::Function {
+                params,
+                return_type,
+                ..
+            } => {
                 let param_str: Vec<_> = params.iter().map(|t| t.display_name()).collect();
-                format!("fn({}) -> {}", param_str.join(", "), return_type.display_name())
+                format!(
+                    "fn({}) -> {}",
+                    param_str.join(", "),
+                    return_type.display_name()
+                )
             }
             Type::Class(name) => name.clone(),
             Type::Struct(name) => name.clone(),
@@ -1798,9 +1827,9 @@ impl TypeEnv {
 
     /// Look up a specific method for a type
     pub fn lookup_method(&self, type_name: &str, method_name: &str) -> Option<&ImplMethod> {
-        self.impl_methods.get(type_name).and_then(|methods| {
-            methods.iter().find(|m| m.name == method_name)
-        })
+        self.impl_methods
+            .get(type_name)
+            .and_then(|methods| methods.iter().find(|m| m.name == method_name))
     }
 
     /// Add a trait definition
@@ -1815,7 +1844,8 @@ impl TypeEnv {
 
     /// Add a trait implementation
     pub fn add_trait_impl(&mut self, trait_name: &str, type_name: &str, methods: Vec<ImplMethod>) {
-        self.trait_impls.insert((trait_name.to_string(), type_name.to_string()), methods);
+        self.trait_impls
+            .insert((trait_name.to_string(), type_name.to_string()), methods);
     }
 
     /// Get all fields for a class, including inherited fields from parent classes
@@ -1849,7 +1879,10 @@ impl TypeEnv {
 
         while let Some(class) = current_class {
             if let Some(type_def) = self.lookup_type(&class) {
-                if let TypeDefKind::Class { parent, methods, .. } = &type_def.kind {
+                if let TypeDefKind::Class {
+                    parent, methods, ..
+                } = &type_def.kind
+                {
                     current_class = parent.clone();
                     // Add methods, later ones (from child) will be found first in lookups
                     all_methods.extend(methods.iter().cloned());
@@ -1929,8 +1962,15 @@ impl GenericInstantiation {
         if self.type_args.is_empty() {
             self.function_name.clone()
         } else {
-            let type_suffix: Vec<String> = self.type_args.iter()
-                .map(|t| t.replace(" ", "_").replace("<", "_").replace(">", "_").replace(",", "_"))
+            let type_suffix: Vec<String> = self
+                .type_args
+                .iter()
+                .map(|t| {
+                    t.replace(" ", "_")
+                        .replace("<", "_")
+                        .replace(">", "_")
+                        .replace(",", "_")
+                })
                 .collect();
             format!("{}${}", self.function_name, type_suffix.join("$"))
         }
@@ -2188,7 +2228,10 @@ impl TypeChecker {
                 // Set current type params for generic structs
                 let old_type_params = std::mem::replace(
                     &mut self.current_type_params,
-                    type_params.iter().map(|tp| (tp.name.clone(), tp.bounds.clone())).collect(),
+                    type_params
+                        .iter()
+                        .map(|tp| (tp.name.clone(), tp.bounds.clone()))
+                        .collect(),
                 );
 
                 let field_types: Vec<_> = fields
@@ -2225,7 +2268,7 @@ impl TypeChecker {
                                 Type::Function {
                                     params: param_types,
                                     return_type: Box::new(ret),
-                required_params: 1,
+                                    required_params: 1,
                                 },
                                 *is_public,
                             ))
@@ -2283,7 +2326,7 @@ impl TypeChecker {
                             Type::Function {
                                 params: param_types,
                                 return_type: Box::new(ret),
-                required_params: 1,
+                                required_params: 1,
                             },
                         )
                     })
@@ -2390,7 +2433,8 @@ impl TypeChecker {
                     if let Some(trait_methods) = self.env.get_trait(trait_nm).cloned() {
                         // Check for missing methods
                         for trait_method in &trait_methods {
-                            let impl_method = impl_methods.iter().find(|m| m.name == trait_method.name);
+                            let impl_method =
+                                impl_methods.iter().find(|m| m.name == trait_method.name);
 
                             match impl_method {
                                 None => {
@@ -2417,13 +2461,12 @@ impl TypeChecker {
                         }
 
                         // Store the trait implementation
-                        self.env.add_trait_impl(trait_nm, type_name, impl_methods.clone());
+                        self.env
+                            .add_trait_impl(trait_nm, type_name, impl_methods.clone());
                     } else {
                         // Trait doesn't exist
-                        self.env.error(
-                            &stmt.span,
-                            format!("trait `{}` is not defined", trait_nm),
-                        );
+                        self.env
+                            .error(&stmt.span, format!("trait `{}` is not defined", trait_nm));
                     }
                 }
 
@@ -2449,8 +2492,16 @@ impl TypeChecker {
     ) {
         // Check has_self matches
         if trait_method.has_self != impl_method.has_self {
-            let expected = if trait_method.has_self { "a `self` receiver" } else { "no `self` receiver" };
-            let got = if impl_method.has_self { "has `self`" } else { "has no `self`" };
+            let expected = if trait_method.has_self {
+                "a `self` receiver"
+            } else {
+                "no `self` receiver"
+            };
+            let got = if impl_method.has_self {
+                "has `self`"
+            } else {
+                "has no `self`"
+            };
             self.env.error(
                 span,
                 format!(
@@ -2462,10 +2513,14 @@ impl TypeChecker {
         }
 
         // Get params to compare (skip 'self' if present)
-        let trait_params: Vec<_> = trait_method.params.iter()
+        let trait_params: Vec<_> = trait_method
+            .params
+            .iter()
             .filter(|(name, _)| name != "self")
             .collect();
-        let impl_params: Vec<_> = impl_method.params.iter()
+        let impl_params: Vec<_> = impl_method
+            .params
+            .iter()
             .filter(|(name, _)| name != "self")
             .collect();
 
@@ -2482,7 +2537,9 @@ impl TypeChecker {
         }
 
         // Check each parameter type (resolve Self to actual type)
-        for (i, ((_, trait_ty), (_, impl_ty))) in trait_params.iter().zip(impl_params.iter()).enumerate() {
+        for (i, ((_, trait_ty), (_, impl_ty))) in
+            trait_params.iter().zip(impl_params.iter()).enumerate()
+        {
             let resolved_trait_ty = self.resolve_self_type(trait_ty, type_name);
             if !resolved_trait_ty.is_compatible_with(impl_ty) {
                 self.env.error(
@@ -2514,28 +2571,25 @@ impl TypeChecker {
     fn resolve_self_type(&self, ty: &Type, type_name: &str) -> Type {
         match ty {
             // Self can be stored as TypeParam("Self") or Struct("Self")
-            Type::TypeParam(name) if name == "Self" => {
-                Type::Struct(type_name.to_string())
-            }
-            Type::Struct(name) if name == "Self" => {
-                Type::Struct(type_name.to_string())
-            }
-            Type::Class(name) if name == "Self" => {
-                Type::Class(type_name.to_string())
-            }
+            Type::TypeParam(name) if name == "Self" => Type::Struct(type_name.to_string()),
+            Type::Struct(name) if name == "Self" => Type::Struct(type_name.to_string()),
+            Type::Class(name) if name == "Self" => Type::Class(type_name.to_string()),
             Type::Optional(inner) => {
                 Type::Optional(Box::new(self.resolve_self_type(inner, type_name)))
             }
-            Type::Array(inner) => {
-                Type::Array(Box::new(self.resolve_self_type(inner, type_name)))
-            }
-            Type::Function { params, return_type, required_params } => {
-                Type::Function {
-                    params: params.iter().map(|p| self.resolve_self_type(p, type_name)).collect(),
-                    return_type: Box::new(self.resolve_self_type(return_type, type_name)),
-                    required_params: *required_params,
-                }
-            }
+            Type::Array(inner) => Type::Array(Box::new(self.resolve_self_type(inner, type_name))),
+            Type::Function {
+                params,
+                return_type,
+                required_params,
+            } => Type::Function {
+                params: params
+                    .iter()
+                    .map(|p| self.resolve_self_type(p, type_name))
+                    .collect(),
+                return_type: Box::new(self.resolve_self_type(return_type, type_name)),
+                required_params: *required_params,
+            },
             _ => ty.clone(),
         }
     }
@@ -2554,7 +2608,10 @@ impl TypeChecker {
             // Set current type params for generic functions
             let old_type_params = std::mem::replace(
                 &mut self.current_type_params,
-                type_params.iter().map(|tp| (tp.name.clone(), tp.bounds.clone())).collect(),
+                type_params
+                    .iter()
+                    .map(|tp| (tp.name.clone(), tp.bounds.clone()))
+                    .collect(),
             );
 
             // Build the function type from params and return type
@@ -2588,9 +2645,8 @@ impl TypeChecker {
 
             // Register generic function type parameters for monomorphization
             if !type_params.is_empty() {
-                let type_param_names: Vec<String> = type_params.iter()
-                    .map(|tp| tp.name.clone())
-                    .collect();
+                let type_param_names: Vec<String> =
+                    type_params.iter().map(|tp| tp.name.clone()).collect();
                 self.env.register_generic_function(name, type_param_names);
             }
         }
@@ -2617,7 +2673,11 @@ impl TypeChecker {
                         if !init.is_compatible_with(&decl) {
                             self.env.error(
                                 &stmt.span,
-                                format!("Type mismatch: expected '{}', got '{}'", decl.display_name(), init.display_name()),
+                                format!(
+                                    "Type mismatch: expected '{}', got '{}'",
+                                    decl.display_name(),
+                                    init.display_name()
+                                ),
                             );
                         }
                         decl
@@ -2651,7 +2711,8 @@ impl TypeChecker {
                             &stmt.span,
                             format!(
                                 "Type mismatch: expected '{}', got '{}'",
-                                declared.display_name(), init_type.display_name()
+                                declared.display_name(),
+                                init_type.display_name()
                             ),
                         );
                     }
@@ -2679,7 +2740,10 @@ impl TypeChecker {
                 // Set current type params for generic functions
                 let old_type_params = std::mem::replace(
                     &mut self.current_type_params,
-                    type_params.iter().map(|tp| (tp.name.clone(), tp.bounds.clone())).collect(),
+                    type_params
+                        .iter()
+                        .map(|tp| (tp.name.clone(), tp.bounds.clone()))
+                        .collect(),
                 );
 
                 let param_types: Vec<_> = params
@@ -2749,7 +2813,8 @@ impl TypeChecker {
                             &stmt.span,
                             format!(
                                 "Return type mismatch: expected '{}', got '{}'",
-                                expected.display_name(), return_type.display_name()
+                                expected.display_name(),
+                                return_type.display_name()
                             ),
                         );
                     }
@@ -2899,7 +2964,10 @@ impl TypeChecker {
                         } else {
                             self.env.error(
                                 &expr.span,
-                                format!("'super' used in class '{}' which has no parent class", current_class),
+                                format!(
+                                    "'super' used in class '{}' which has no parent class",
+                                    current_class
+                                ),
                             );
                             return Type::Unknown;
                         }
@@ -3040,8 +3108,10 @@ impl TypeChecker {
                 match op {
                     UnaryOp::Neg => {
                         if !operand_type.is_numeric() {
-                            self.env
-                                .error(&expr.span, format!("Cannot negate type '{}'", operand_type.display_name()));
+                            self.env.error(
+                                &expr.span,
+                                format!("Cannot negate type '{}'", operand_type.display_name()),
+                            );
                         }
                         operand_type
                     }
@@ -3086,7 +3156,11 @@ impl TypeChecker {
                 }
             }
 
-            ExpressionKind::Call { callee, args, type_args: _ } => {
+            ExpressionKind::Call {
+                callee,
+                args,
+                type_args: _,
+            } => {
                 let callee_type = self.check_expression(callee);
 
                 // Get function name for generic tracking
@@ -3124,12 +3198,20 @@ impl TypeChecker {
                             if args.len() < min_args {
                                 self.env.error(
                                     &expr.span,
-                                    format!("Expected at least {} arguments, got {}", min_args, args.len()),
+                                    format!(
+                                        "Expected at least {} arguments, got {}",
+                                        min_args,
+                                        args.len()
+                                    ),
                                 );
                             } else if args.len() > max_args {
                                 self.env.error(
                                     &expr.span,
-                                    format!("Expected at most {} arguments, got {}", max_args, args.len()),
+                                    format!(
+                                        "Expected at most {} arguments, got {}",
+                                        max_args,
+                                        args.len()
+                                    ),
                                 );
                             }
                         }
@@ -3151,7 +3233,8 @@ impl TypeChecker {
                                     &arg.span,
                                     format!(
                                         "Argument type mismatch: expected '{}', got '{}'",
-                                        param_type.display_name(), arg_type.display_name()
+                                        param_type.display_name(),
+                                        arg_type.display_name()
                                     ),
                                 );
                             }
@@ -3164,10 +3247,8 @@ impl TypeChecker {
                         // Record generic instantiation if this is a generic function
                         if let Some(ref fn_name) = function_name {
                             if self.env.is_generic_function(fn_name) && !inferred_types.is_empty() {
-                                let instantiation = GenericInstantiation::new(
-                                    fn_name.clone(),
-                                    &inferred_types,
-                                );
+                                let instantiation =
+                                    GenericInstantiation::new(fn_name.clone(), &inferred_types);
                                 self.generic_instantiations.insert(instantiation);
                             }
                         }
@@ -3178,7 +3259,10 @@ impl TypeChecker {
                     _ => {
                         self.env.error(
                             &expr.span,
-                            format!("Cannot call non-function type: '{}'", callee_type.display_name()),
+                            format!(
+                                "Cannot call non-function type: '{}'",
+                                callee_type.display_name()
+                            ),
                         );
                         Type::Unknown
                     }
@@ -3220,7 +3304,9 @@ impl TypeChecker {
                         }
                         // Check methods from impl blocks
                         if let Some(impl_method) = self.env.lookup_method(name, field) {
-                            let param_types: Vec<Type> = impl_method.params.iter()
+                            let param_types: Vec<Type> = impl_method
+                                .params
+                                .iter()
                                 .map(|(_, ty)| ty.clone())
                                 .collect();
                             return Type::Function {
@@ -3231,10 +3317,7 @@ impl TypeChecker {
                         }
                         self.env.error(
                             &expr.span,
-                            format!(
-                                "Unknown field or method: {} on type {}",
-                                field, name
-                            ),
+                            format!("Unknown field or method: {} on type {}", field, name),
                         );
                         Type::Unknown
                     }
@@ -3255,7 +3338,9 @@ impl TypeChecker {
                                 }
                                 // Check methods from impl blocks
                                 if let Some(impl_method) = self.env.lookup_method(name, field) {
-                                    let param_types: Vec<Type> = impl_method.params.iter()
+                                    let param_types: Vec<Type> = impl_method
+                                        .params
+                                        .iter()
                                         .map(|(_, ty)| ty.clone())
                                         .collect();
                                     return Type::Function {
@@ -3266,10 +3351,7 @@ impl TypeChecker {
                                 }
                                 self.env.error(
                                     &expr.span,
-                                    format!(
-                                        "Unknown field or method: {} on type {}",
-                                        field, name
-                                    ),
+                                    format!("Unknown field or method: {} on type {}", field, name),
                                 );
                             }
                         }
@@ -3283,7 +3365,9 @@ impl TypeChecker {
                             if let Some(impl_method) = self.env.lookup_method(type_name, field) {
                                 if !impl_method.has_self {
                                     // Static method
-                                    let param_types: Vec<Type> = impl_method.params.iter()
+                                    let param_types: Vec<Type> = impl_method
+                                        .params
+                                        .iter()
                                         .map(|(_, ty)| ty.clone())
                                         .collect();
                                     return Type::Function {
@@ -3300,7 +3384,9 @@ impl TypeChecker {
                     // Check impl methods for built-in types (e.g., impl string { ... })
                     Type::String => {
                         if let Some(impl_method) = self.env.lookup_method("string", field) {
-                            let param_types: Vec<Type> = impl_method.params.iter()
+                            let param_types: Vec<Type> = impl_method
+                                .params
+                                .iter()
                                 .map(|(_, ty)| ty.clone())
                                 .collect();
                             return Type::Function {
@@ -3314,19 +3400,19 @@ impl TypeChecker {
                             return Type::Function {
                                 params: vec![],
                                 return_type: Box::new(Type::Int),
-                required_params: 0,
+                                required_params: 0,
                             };
                         }
-                        self.env.error(
-                            &expr.span,
-                            format!("Unknown method: {} on string", field),
-                        );
+                        self.env
+                            .error(&expr.span, format!("Unknown method: {} on string", field));
                         Type::Unknown
                     }
                     Type::Array(inner) => {
                         // Check impl methods for array
                         if let Some(impl_method) = self.env.lookup_method("array", field) {
-                            let param_types: Vec<Type> = impl_method.params.iter()
+                            let param_types: Vec<Type> = impl_method
+                                .params
+                                .iter()
                                 .map(|(_, ty)| ty.clone())
                                 .collect();
                             return Type::Function {
@@ -3340,12 +3426,12 @@ impl TypeChecker {
                             "len" => Type::Function {
                                 params: vec![],
                                 return_type: Box::new(Type::Int),
-                required_params: 0,
+                                required_params: 0,
                             },
                             "push" => Type::Function {
                                 params: vec![*inner.clone()],
                                 return_type: Box::new(Type::Void),
-                required_params: 1,
+                                required_params: 1,
                             },
                             "pop" => Type::Function {
                                 params: vec![],
@@ -3414,8 +3500,10 @@ impl TypeChecker {
                     // Allow indexing Any type (for json_parse results and other dynamic values)
                     Type::Any => Type::Any,
                     _ => {
-                        self.env
-                            .error(&expr.span, format!("Cannot index type: '{}'", obj_type.display_name()));
+                        self.env.error(
+                            &expr.span,
+                            format!("Cannot index type: '{}'", obj_type.display_name()),
+                        );
                         Type::Unknown
                     }
                 }
@@ -3433,7 +3521,8 @@ impl TypeChecker {
                                 &elem.span,
                                 format!(
                                     "Array element type mismatch: expected '{}', got '{}'",
-                                    first_type.display_name(), elem_type.display_name()
+                                    first_type.display_name(),
+                                    elem_type.display_name()
                                 ),
                             );
                         }
@@ -3494,7 +3583,7 @@ impl TypeChecker {
                 Type::Function {
                     params: param_types,
                     return_type: Box::new(return_type),
-                required_params: 0,
+                    required_params: 0,
                 }
             }
 
@@ -3567,7 +3656,8 @@ impl TypeChecker {
                                 &arm.span,
                                 format!(
                                     "Match arm type mismatch: expected '{}', got '{}'",
-                                    first.display_name(), arm_type.display_name()
+                                    first.display_name(),
+                                    arm_type.display_name()
                                 ),
                             );
                         }
@@ -3621,7 +3711,8 @@ impl TypeChecker {
                         &expr.span,
                         format!(
                             "Assignment type mismatch: expected '{}', got '{}'",
-                            target_type.display_name(), value_type.display_name()
+                            target_type.display_name(),
+                            value_type.display_name()
                         ),
                     );
                 }
@@ -3736,7 +3827,9 @@ impl TypeChecker {
                 if let Some(type_def) = self.env.lookup_type(enum_name) {
                     if let TypeDefKind::Enum { variants } = &type_def.kind {
                         // Find the variant
-                        if let Some((_, field_types)) = variants.iter().find(|(name, _)| name == variant_name) {
+                        if let Some((_, field_types)) =
+                            variants.iter().find(|(name, _)| name == variant_name)
+                        {
                             // Special case for Result type - return Type::Result instead of Type::Enum
                             let return_type = if enum_name == "Result" {
                                 Type::Result {
@@ -3757,7 +3850,7 @@ impl TypeChecker {
                                 Type::Function {
                                     params: field_types.clone(),
                                     return_type: Box::new(return_type),
-                required_params: 0,
+                                    required_params: 0,
                                 }
                             }
                         } else {
@@ -3807,7 +3900,9 @@ impl TypeChecker {
                         // Check that we're in a function that returns a compatible Result
                         if let Some(ref ret_type) = self.current_function_return_type {
                             match ret_type {
-                                Type::Result { err_type: ret_err, .. } => {
+                                Type::Result {
+                                    err_type: ret_err, ..
+                                } => {
                                     if !err_type.is_compatible_with(ret_err) {
                                         self.env.error(
                                             &expr.span,
@@ -3931,7 +4026,13 @@ impl TypeChecker {
     }
 
     /// Bind destructuring pattern variables for let/var declarations
-    fn bind_destructuring_pattern(&mut self, pattern: &Pattern, subject_type: &Type, mutable: bool, span: &Span) {
+    fn bind_destructuring_pattern(
+        &mut self,
+        pattern: &Pattern,
+        subject_type: &Type,
+        mutable: bool,
+        span: &Span,
+    ) {
         match &pattern.kind {
             PatternKind::Variable(name) => {
                 self.env.define(Symbol {
@@ -3953,7 +4054,8 @@ impl TypeChecker {
                                 span,
                                 format!(
                                     "Tuple pattern has {} elements but value has {}",
-                                    patterns.len(), types.len()
+                                    patterns.len(),
+                                    types.len()
                                 ),
                             );
                             return;
@@ -3979,27 +4081,39 @@ impl TypeChecker {
                     }
                 }
             }
-            PatternKind::Struct { fields: pattern_fields, .. } => {
+            PatternKind::Struct {
+                fields: pattern_fields,
+                ..
+            } => {
                 // For struct patterns, look up field types from the struct definition
                 if let Type::Struct(struct_name) = subject_type {
                     // Clone the struct fields to avoid borrow issues
-                    let struct_fields_opt = self.env.lookup_type(struct_name)
-                        .and_then(|td| {
-                            if let TypeDefKind::Struct { fields, .. } = &td.kind {
-                                Some(fields.clone())
-                            } else {
-                                None
-                            }
-                        });
+                    let struct_fields_opt = self.env.lookup_type(struct_name).and_then(|td| {
+                        if let TypeDefKind::Struct { fields, .. } = &td.kind {
+                            Some(fields.clone())
+                        } else {
+                            None
+                        }
+                    });
 
                     if let Some(struct_fields) = struct_fields_opt {
                         for (field_name, field_pattern) in pattern_fields {
-                            if let Some((_, field_type, _)) = struct_fields.iter().find(|(n, _, _)| n == field_name) {
-                                self.bind_destructuring_pattern(field_pattern, field_type, mutable, span);
+                            if let Some((_, field_type, _)) =
+                                struct_fields.iter().find(|(n, _, _)| n == field_name)
+                            {
+                                self.bind_destructuring_pattern(
+                                    field_pattern,
+                                    field_type,
+                                    mutable,
+                                    span,
+                                );
                             } else {
                                 self.env.error(
                                     span,
-                                    format!("Unknown field '{}' in struct '{}'", field_name, struct_name),
+                                    format!(
+                                        "Unknown field '{}' in struct '{}'",
+                                        field_name, struct_name
+                                    ),
                                 );
                             }
                         }
@@ -4015,10 +4129,8 @@ impl TypeChecker {
                 }
             }
             _ => {
-                self.env.error(
-                    span,
-                    "Unsupported pattern in destructuring".to_string(),
-                );
+                self.env
+                    .error(span, "Unsupported pattern in destructuring".to_string());
             }
         }
     }
@@ -4113,7 +4225,8 @@ impl TypeChecker {
                         } else {
                             self.env.error(
                                 &type_expr.span,
-                                "Result takes two type arguments: Result<OkType, ErrType>".to_string(),
+                                "Result takes two type arguments: Result<OkType, ErrType>"
+                                    .to_string(),
                             );
                             Type::Unknown
                         }
@@ -4137,7 +4250,7 @@ impl TypeChecker {
                 Type::Function {
                     params: param_types,
                     return_type: Box::new(ret),
-                required_params: 0,
+                    required_params: 0,
                 }
             }
             TypeExprKind::Tuple(elements) => {
@@ -4147,10 +4260,7 @@ impl TypeChecker {
             TypeExprKind::Array(element_type) => {
                 Type::Array(Box::new(self.resolve_type_expr(element_type)))
             }
-            TypeExprKind::Result {
-                ok_type,
-                err_type,
-            } => {
+            TypeExprKind::Result { ok_type, err_type } => {
                 let ok = self.resolve_type_expr(ok_type);
                 let err = self.resolve_type_expr(err_type);
                 Type::Result {
@@ -4295,17 +4405,15 @@ mod tests {
     #[test]
     fn test_variable_shadowing_in_scope() {
         // Shadowing is allowed in nested scopes
-        assert!(
-            check_source(
-                r#"
+        assert!(check_source(
+            r#"
             let x = 5
             if true {
                 let x = "hello"
             }
             "#
-            )
-            .is_ok()
-        );
+        )
+        .is_ok());
     }
 
     // ========================================================================
@@ -4331,15 +4439,13 @@ mod tests {
 
     #[test]
     fn test_function_call_correct_args() {
-        assert!(
-            check_source(
-                r#"
+        assert!(check_source(
+            r#"
             fn add(a: int, b: int) -> int { return a + b }
             let result = add(1, 2)
             "#
-            )
-            .is_ok()
-        );
+        )
+        .is_ok());
     }
 
     #[test]
@@ -4351,7 +4457,9 @@ mod tests {
             "#,
         );
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Expected at least 2 arguments"));
+        assert!(result
+            .unwrap_err()
+            .contains("Expected at least 2 arguments"));
     }
 
     #[test]
@@ -4379,9 +4487,8 @@ mod tests {
 
     #[test]
     fn test_recursive_function() {
-        assert!(
-            check_source(
-                r#"
+        assert!(check_source(
+            r#"
             fn factorial(n: int) -> int {
                 if n <= 1 {
                     return 1
@@ -4389,16 +4496,14 @@ mod tests {
                 return n * factorial(n - 1)
             }
             "#
-            )
-            .is_ok()
-        );
+        )
+        .is_ok());
     }
 
     #[test]
     fn test_mutually_recursive_functions() {
-        assert!(
-            check_source(
-                r#"
+        assert!(check_source(
+            r#"
             fn is_even(n: int) -> bool {
                 if n == 0 { return true }
                 return is_odd(n - 1)
@@ -4408,9 +4513,8 @@ mod tests {
                 return is_even(n - 1)
             }
             "#
-            )
-            .is_ok()
-        );
+        )
+        .is_ok());
     }
 
     #[test]
@@ -4426,40 +4530,35 @@ mod tests {
 
     #[test]
     fn test_struct_declaration() {
-        assert!(
-            check_source(
-                r#"
+        assert!(check_source(
+            r#"
             struct Point {
                 x: int
                 y: int
             }
             "#
-            )
-            .is_ok()
-        );
+        )
+        .is_ok());
     }
 
     #[test]
     fn test_struct_instantiation() {
-        assert!(
-            check_source(
-                r#"
+        assert!(check_source(
+            r#"
             struct Point {
                 x: int
                 y: int
             }
             let p = Point { x: 10, y: 20 }
             "#
-            )
-            .is_ok()
-        );
+        )
+        .is_ok());
     }
 
     #[test]
     fn test_struct_field_access() {
-        assert!(
-            check_source(
-                r#"
+        assert!(check_source(
+            r#"
             struct Point {
                 x: int
                 y: int
@@ -4467,9 +4566,8 @@ mod tests {
             let p = Point { x: 10, y: 20 }
             let px = p.x
             "#
-            )
-            .is_ok()
-        );
+        )
+        .is_ok());
     }
 
     #[test]
@@ -4530,11 +4628,9 @@ mod tests {
     fn test_logical_ops_type_error() {
         let result = check_source("let x = 1 && 2");
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .contains("Logical operators require bool")
-        );
+        assert!(result
+            .unwrap_err()
+            .contains("Logical operators require bool"));
     }
 
     #[test]
@@ -4657,9 +4753,8 @@ mod tests {
 
     #[test]
     fn test_match_expression() {
-        assert!(
-            check_source(
-                r#"
+        assert!(check_source(
+            r#"
             let x = 5
             let result = match x {
                 1 => "one"
@@ -4667,9 +4762,8 @@ mod tests {
                 _ => "other"
             }
             "#
-            )
-            .is_ok()
-        );
+        )
+        .is_ok());
     }
 
     #[test]
@@ -4690,15 +4784,13 @@ mod tests {
 
     #[test]
     fn test_array_index_access() {
-        assert!(
-            check_source(
-                r#"
+        assert!(check_source(
+            r#"
             let arr = [1, 2, 3]
             let x = arr[0]
             "#
-            )
-            .is_ok()
-        );
+        )
+        .is_ok());
     }
 
     #[test]
@@ -4715,15 +4807,13 @@ mod tests {
 
     #[test]
     fn test_string_index_access() {
-        assert!(
-            check_source(
-                r#"
+        assert!(check_source(
+            r#"
             let s = "hello"
             let c = s[0]
             "#
-            )
-            .is_ok()
-        );
+        )
+        .is_ok());
     }
 
     #[test]
@@ -4744,25 +4834,22 @@ mod tests {
 
     #[test]
     fn test_enum_declaration() {
-        assert!(
-            check_source(
-                r#"
+        assert!(check_source(
+            r#"
             enum Color {
                 Red
                 Green
                 Blue
             }
             "#
-            )
-            .is_ok()
-        );
+        )
+        .is_ok());
     }
 
     #[test]
     fn test_enum_variant_access() {
-        assert!(
-            check_source(
-                r#"
+        assert!(check_source(
+            r#"
             enum Color {
                 Red
                 Green
@@ -4770,9 +4857,8 @@ mod tests {
             }
             let c = Color::Red
             "#
-            )
-            .is_ok()
-        );
+        )
+        .is_ok());
     }
 
     #[test]
@@ -4811,15 +4897,13 @@ mod tests {
     #[test]
     fn test_lambda_call() {
         // Lira uses pipe syntax for lambdas
-        assert!(
-            check_source(
-                r#"
+        assert!(check_source(
+            r#"
             let add = |a: int, b: int| a + b
             let result = add(1, 2)
             "#
-            )
-            .is_ok()
-        );
+        )
+        .is_ok());
     }
 
     #[test]
@@ -4856,14 +4940,12 @@ mod tests {
 
     #[test]
     fn test_type_alias() {
-        assert!(
-            check_source(
-                r#"
+        assert!(check_source(
+            r#"
             type IntArray = [int]
             "#
-            )
-            .is_ok()
-        );
+        )
+        .is_ok());
     }
 
     // ========================================================================
@@ -4945,33 +5027,29 @@ mod tests {
     #[test]
     fn test_pre_increment() {
         // Pre-increment as part of an expression (avoids newline parsing issues)
-        assert!(
-            check_source(
-                r#"
+        assert!(check_source(
+            r#"
             fn test() {
                 var x = 5
                 let y = ++x
             }
             "#
-            )
-            .is_ok()
-        );
+        )
+        .is_ok());
     }
 
     #[test]
     fn test_post_increment() {
         // Post-increment as part of an expression
-        assert!(
-            check_source(
-                r#"
+        assert!(check_source(
+            r#"
             fn test() {
                 var x = 5
                 let y = x++
             }
             "#
-            )
-            .is_ok()
-        );
+        )
+        .is_ok());
     }
 
     #[test]
@@ -4985,11 +5063,9 @@ mod tests {
             "#,
         );
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .contains("Increment/decrement requires numeric")
-        );
+        assert!(result
+            .unwrap_err()
+            .contains("Increment/decrement requires numeric"));
     }
 
     // ========================================================================
@@ -5069,18 +5145,16 @@ mod tests {
 
     #[test]
     fn test_block_scope() {
-        assert!(
-            check_source(
-                r#"
+        assert!(check_source(
+            r#"
             let x = 1
             {
                 let y = 2
                 let z = x + y
             }
             "#
-            )
-            .is_ok()
-        );
+        )
+        .is_ok());
     }
 
     #[test]
@@ -5103,9 +5177,8 @@ mod tests {
 
     #[test]
     fn test_struct_with_method() {
-        assert!(
-            check_source(
-                r#"
+        assert!(check_source(
+            r#"
             struct Counter {
                 value: int
             }
@@ -5116,9 +5189,8 @@ mod tests {
                 }
             }
             "#
-            )
-            .is_ok()
-        );
+        )
+        .is_ok());
     }
 
     // ========================================================================
@@ -5235,7 +5307,7 @@ mod tests {
 
             let p = Point { x: 1, y: 2 }
             let v = p.get_x(42)
-            "#
+            "#,
         );
         assert!(result.is_err());
     }
@@ -5295,7 +5367,7 @@ mod tests {
             impl Clone for Point {
                 // Missing clone method!
             }
-            "#
+            "#,
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("requires method `clone`"));
@@ -5319,7 +5391,7 @@ mod tests {
                     return 42
                 }
             }
-            "#
+            "#,
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("wrong return type"));
@@ -5341,7 +5413,7 @@ mod tests {
                     return 0
                 }
             }
-            "#
+            "#,
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("wrong number of parameters"));
@@ -5361,7 +5433,7 @@ mod tests {
                     return 0
                 }
             }
-            "#
+            "#,
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("is not defined"));
@@ -5479,7 +5551,7 @@ mod tests {
                 }
                 return b
             }
-            "#
+            "#,
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("unconstrained generic type"));
@@ -5534,7 +5606,7 @@ mod tests {
             }
 
             let c = Color::Blue
-            "#
+            "#,
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Unknown variant"));
@@ -5548,7 +5620,7 @@ mod tests {
             struct Point { x: int, y: int }
 
             let p = Point::new
-            "#
+            "#,
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("is not an enum"));
@@ -5572,7 +5644,8 @@ mod tests {
                 return x + 1
             }
             "#
-        ).is_ok());
+        )
+        .is_ok());
     }
 
     #[test]
@@ -5588,7 +5661,7 @@ mod tests {
                 let x = get_value()?
                 return x
             }
-            "#
+            "#,
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("expected Optional or Result"));
@@ -5609,7 +5682,8 @@ mod tests {
                 return Result::Ok(a / b)
             }
             "#
-        ).is_ok());
+        )
+        .is_ok());
     }
 
     #[test]
@@ -5618,7 +5692,8 @@ mod tests {
             r#"
             let ok_val = Result::Ok(42)
             "#
-        ).is_ok());
+        )
+        .is_ok());
     }
 
     #[test]
@@ -5627,7 +5702,8 @@ mod tests {
             r#"
             let err_val = Result::Err("something went wrong")
             "#
-        ).is_ok());
+        )
+        .is_ok());
     }
 
     #[test]
@@ -5643,7 +5719,8 @@ mod tests {
                 return Result::Ok(x + 1)
             }
             "#
-        ).is_ok());
+        )
+        .is_ok());
     }
 
     #[test]
@@ -5663,7 +5740,8 @@ mod tests {
                 }
             }
             "#
-        ).is_ok());
+        )
+        .is_ok());
     }
 
     // ========================================================================
@@ -5688,7 +5766,8 @@ mod tests {
                 }
             }
             "#
-        ).is_ok());
+        )
+        .is_ok());
     }
 
     #[test]
@@ -5718,7 +5797,8 @@ mod tests {
                 }
             }
             "#
-        ).is_ok());
+        )
+        .is_ok());
     }
 
     // ========================================================================
@@ -5728,36 +5808,48 @@ mod tests {
     #[test]
     fn test_const_declaration_registers_in_scope() {
         // TDD: Const should be registered and accessible
-        assert!(check_source(
-            r#"
+        assert!(
+            check_source(
+                r#"
             const MAX: int = 100
             let x = MAX
             "#
-        ).is_ok(), "Const should be accessible after declaration");
+            )
+            .is_ok(),
+            "Const should be accessible after declaration"
+        );
     }
 
     #[test]
     fn test_const_at_top_level_accessible_in_function() {
         // TDD: Top-level const should be accessible inside functions
-        assert!(check_source(
-            r#"
+        assert!(
+            check_source(
+                r#"
             const GLOBAL: int = 42
             fn get_global() -> int {
                 return GLOBAL
             }
             "#
-        ).is_ok(), "Top-level const should be accessible in functions");
+            )
+            .is_ok(),
+            "Top-level const should be accessible in functions"
+        );
     }
 
     #[test]
     fn test_const_type_checking() {
         // TDD: Const type should be checked
-        assert!(check_source(
-            r#"
+        assert!(
+            check_source(
+                r#"
             const VALUE: int = 100
             let x: int = VALUE
             "#
-        ).is_ok(), "Const should have correct type");
+            )
+            .is_ok(),
+            "Const should have correct type"
+        );
     }
 
     #[test]
@@ -5767,7 +5859,7 @@ mod tests {
             r#"
             const VALUE: int = 100
             let x: string = VALUE
-            "#
+            "#,
         );
         assert!(result.is_err(), "Const type mismatch should error");
     }
@@ -5775,26 +5867,34 @@ mod tests {
     #[test]
     fn test_multiple_consts() {
         // TDD: Multiple const declarations
-        assert!(check_source(
-            r#"
+        assert!(
+            check_source(
+                r#"
             const A: int = 1
             const B: int = 2
             const C: int = 3
             let sum = A + B + C
             "#
-        ).is_ok(), "Multiple consts should all be accessible");
+            )
+            .is_ok(),
+            "Multiple consts should all be accessible"
+        );
     }
 
     #[test]
     fn test_const_in_expression() {
         // TDD: Const used in complex expressions
-        assert!(check_source(
-            r#"
+        assert!(
+            check_source(
+                r#"
             const MULT: int = 10
             let x = 5
             let result = x * MULT + MULT
             "#
-        ).is_ok(), "Const should work in expressions");
+            )
+            .is_ok(),
+            "Const should work in expressions"
+        );
     }
 
     // ========================================================================
@@ -5804,46 +5904,59 @@ mod tests {
     #[test]
     fn test_default_param_declaration() {
         // TDD: Function with default param should parse and check
-        assert!(check_source(
-            r#"
+        assert!(
+            check_source(
+                r#"
             fn greet(name: string, greeting: string = "Hello") {
                 println(greeting + " " + name)
             }
             "#
-        ).is_ok(), "Function with default param should type-check");
+            )
+            .is_ok(),
+            "Function with default param should type-check"
+        );
     }
 
     #[test]
     fn test_default_param_call_with_all_args() {
         // TDD: Call with all arguments should work
-        assert!(check_source(
-            r#"
+        assert!(
+            check_source(
+                r#"
             fn greet(name: string, greeting: string = "Hello") {
                 println(greeting + " " + name)
             }
             greet("World", "Hi")
             "#
-        ).is_ok(), "Call with all args should work");
+            )
+            .is_ok(),
+            "Call with all args should work"
+        );
     }
 
     #[test]
     fn test_default_param_call_with_minimum_args() {
         // TDD: Call with fewer args should use defaults
-        assert!(check_source(
-            r#"
+        assert!(
+            check_source(
+                r#"
             fn greet(name: string, greeting: string = "Hello") {
                 println(greeting + " " + name)
             }
             greet("World")
             "#
-        ).is_ok(), "Call with fewer args should use defaults");
+            )
+            .is_ok(),
+            "Call with fewer args should use defaults"
+        );
     }
 
     #[test]
     fn test_default_param_multiple_defaults() {
         // TDD: Multiple default parameters
-        assert!(check_source(
-            r#"
+        assert!(
+            check_source(
+                r#"
             fn format(val: int, pre: string = "[", suf: string = "]") -> string {
                 return pre + val + suf
             }
@@ -5851,7 +5964,10 @@ mod tests {
             let b = format(2, "(")
             let c = format(3, "(", ")")
             "#
-        ).is_ok(), "Multiple defaults should work");
+            )
+            .is_ok(),
+            "Multiple defaults should work"
+        );
     }
 
     #[test]
@@ -5862,7 +5978,7 @@ mod tests {
             fn bad(x: int = "wrong") {
                 println(x)
             }
-            "#
+            "#,
         );
         assert!(result.is_err(), "Default value type mismatch should error");
     }
@@ -5876,7 +5992,7 @@ mod tests {
                 return a + b
             }
             needs_one()
-            "#
+            "#,
         );
         assert!(result.is_err(), "Missing required arg should error");
     }
@@ -5890,7 +6006,7 @@ mod tests {
                 return a + b
             }
             takes_two(1, 2, 3)
-            "#
+            "#,
         );
         assert!(result.is_err(), "Too many args should error");
     }
@@ -5902,32 +6018,46 @@ mod tests {
     #[test]
     fn test_power_operator_types() {
         // TDD: Power operator should work with int and float
-        assert!(check_source("let x = 2 ** 3").is_ok(), "int ** int should work");
-        assert!(check_source("let x = 2.0 ** 3.0").is_ok(), "float ** float should work");
+        assert!(
+            check_source("let x = 2 ** 3").is_ok(),
+            "int ** int should work"
+        );
+        assert!(
+            check_source("let x = 2.0 ** 3.0").is_ok(),
+            "float ** float should work"
+        );
     }
 
     #[test]
     fn test_power_operator_mixed_types() {
         // TDD: Power with mixed types - depends on language design
         // For now, just test that same types work
-        assert!(check_source(
-            r#"
+        assert!(
+            check_source(
+                r#"
             let base = 2
             let exp = 10
             let result = base ** exp
             "#
-        ).is_ok(), "Power with int variables should work");
+            )
+            .is_ok(),
+            "Power with int variables should work"
+        );
     }
 
     #[test]
     fn test_power_operator_result_type() {
         // TDD: Result type should be numeric
-        assert!(check_source(
-            r#"
+        assert!(
+            check_source(
+                r#"
             let x: int = 2 ** 3
             let y: float = 2.0 ** 3.0
             "#
-        ).is_ok(), "Power result types should match operands");
+            )
+            .is_ok(),
+            "Power result types should match operands"
+        );
     }
 
     // ==========================================================================
@@ -5937,33 +6067,45 @@ mod tests {
     #[test]
     fn test_tuple_destructuring_basic() {
         // TDD: Basic tuple destructuring should work
-        assert!(check_source(
-            r#"
+        assert!(
+            check_source(
+                r#"
             let (a, b) = (1, 2)
             let sum = a + b
             "#
-        ).is_ok(), "Basic tuple destructuring should type-check");
+            )
+            .is_ok(),
+            "Basic tuple destructuring should type-check"
+        );
     }
 
     #[test]
     fn test_tuple_destructuring_with_types() {
         // TDD: Tuple destructuring with type annotations
-        assert!(check_source(
-            r#"
+        assert!(
+            check_source(
+                r#"
             let (x, y): (int, int) = (10, 20)
             "#
-        ).is_ok(), "Tuple destructuring with type annotation should work");
+            )
+            .is_ok(),
+            "Tuple destructuring with type annotation should work"
+        );
     }
 
     #[test]
     fn test_tuple_destructuring_nested() {
         // TDD: Nested tuple destructuring
-        assert!(check_source(
-            r#"
+        assert!(
+            check_source(
+                r#"
             let (a, (b, c)) = (1, (2, 3))
             let sum = a + b + c
             "#
-        ).is_ok(), "Nested tuple destructuring should work");
+            )
+            .is_ok(),
+            "Nested tuple destructuring should work"
+        );
     }
 
     #[test]
@@ -5972,34 +6114,45 @@ mod tests {
         let result = check_source(
             r#"
             let (a, b, c) = (1, 2)
-            "#
+            "#,
         );
-        assert!(result.is_err(), "Destructuring with wrong count should error");
+        assert!(
+            result.is_err(),
+            "Destructuring with wrong count should error"
+        );
     }
 
     #[test]
     fn test_struct_destructuring_basic() {
         // TDD: Basic struct destructuring
-        assert!(check_source(
-            r#"
+        assert!(
+            check_source(
+                r#"
             struct Point { x: int, y: int }
             let p = Point { x: 10, y: 20 }
             let { x, y } = p
             let sum = x + y
             "#
-        ).is_ok(), "Basic struct destructuring should work");
+            )
+            .is_ok(),
+            "Basic struct destructuring should work"
+        );
     }
 
     #[test]
     fn test_struct_destructuring_partial() {
         // TDD: Partial struct destructuring (only some fields)
-        assert!(check_source(
-            r#"
+        assert!(
+            check_source(
+                r#"
             struct Point3D { x: int, y: int, z: int }
             let p = Point3D { x: 1, y: 2, z: 3 }
             let { x, z } = p
             "#
-        ).is_ok(), "Partial struct destructuring should work");
+            )
+            .is_ok(),
+            "Partial struct destructuring should work"
+        );
     }
 
     #[test]
@@ -6010,7 +6163,7 @@ mod tests {
             struct Point { x: int, y: int }
             let p = Point { x: 1, y: 2 }
             let { x, z } = p
-            "#
+            "#,
         );
         assert!(result.is_err(), "Destructuring unknown field should error");
     }
@@ -6019,26 +6172,34 @@ mod tests {
     #[ignore] // Future enhancement: requires updating Parameter to support patterns
     fn test_destructuring_in_function_param() {
         // TDD: Destructuring in function parameters
-        assert!(check_source(
-            r#"
+        assert!(
+            check_source(
+                r#"
             fn sum_tuple((a, b): (int, int)) -> int {
                 return a + b
             }
             let result = sum_tuple((1, 2))
             "#
-        ).is_ok(), "Destructuring in function params should work");
+            )
+            .is_ok(),
+            "Destructuring in function params should work"
+        );
     }
 
     #[test]
     fn test_var_destructuring_mutable() {
         // TDD: var destructuring creates mutable bindings
-        assert!(check_source(
-            r#"
+        assert!(
+            check_source(
+                r#"
             var (x, y) = (1, 2)
             x = 10
             y = 20
             "#
-        ).is_ok(), "var destructuring should create mutable bindings");
+            )
+            .is_ok(),
+            "var destructuring should create mutable bindings"
+        );
     }
 
     // ========================================================================
@@ -6057,7 +6218,8 @@ mod tests {
                 breed: string
             }
             "#
-        ).is_ok());
+        )
+        .is_ok());
     }
 
     #[test]
@@ -6080,7 +6242,8 @@ mod tests {
                 }
             }
             "#
-        ).is_ok());
+        )
+        .is_ok());
     }
 
     #[test]
@@ -6099,7 +6262,7 @@ mod tests {
                     return "Woof!"
                 }
             }
-            "#
+            "#,
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not marked with 'override'"));
@@ -6119,10 +6282,12 @@ mod tests {
                     return "Woof!"
                 }
             }
-            "#
+            "#,
         );
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("does not override any parent method"));
+        assert!(result
+            .unwrap_err()
+            .contains("does not override any parent method"));
     }
 
     #[test]
@@ -6133,7 +6298,7 @@ mod tests {
             class Dog extends UnknownAnimal {
                 name: string
             }
-            "#
+            "#,
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not found"));
@@ -6151,7 +6316,7 @@ mod tests {
             class ColoredPoint extends Point {
                 color: string
             }
-            "#
+            "#,
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("cannot be extended"));
@@ -6178,7 +6343,8 @@ mod tests {
             println(lab.name)
             println(lab.breed)
             "#
-        ).is_ok());
+        )
+        .is_ok());
     }
 
     #[test]
@@ -6195,7 +6361,8 @@ mod tests {
                 override fn bar(self) -> int { return 20 }
             }
             "#
-        ).is_ok());
+        )
+        .is_ok());
     }
 
     #[test]
@@ -6213,7 +6380,8 @@ mod tests {
                 // bar is inherited, not overridden
             }
             "#
-        ).is_ok());
+        )
+        .is_ok());
     }
 
     #[test]
@@ -6231,7 +6399,8 @@ mod tests {
                 }
             }
             "#
-        ).is_ok());
+        )
+        .is_ok());
     }
 
     #[test]
@@ -6245,7 +6414,8 @@ mod tests {
             // D cannot extend both B and C - only single inheritance
             class D extends B {}
             "#
-        ).is_ok());
+        )
+        .is_ok());
     }
 
     // ========================================================================
@@ -6263,7 +6433,8 @@ mod tests {
                 // Function body
             }
             "#
-        ).is_ok());
+        )
+        .is_ok());
     }
 
     #[test]
@@ -6277,7 +6448,8 @@ mod tests {
                 // Implementation would go here
             }
             "#
-        ).is_ok());
+        )
+        .is_ok());
     }
 
     #[test]
@@ -6297,7 +6469,8 @@ mod tests {
                 return true
             }
             "#
-        ).is_ok());
+        )
+        .is_ok());
     }
 
     #[test]
@@ -6310,7 +6483,7 @@ mod tests {
             fn compare<T>(a: T) where U: Eq {
                 // U is not declared
             }
-            "#
+            "#,
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not declared"));
@@ -6329,7 +6502,8 @@ mod tests {
                 // T has Eq from inline, U has Hash + Debug from where
             }
             "#
-        ).is_ok());
+        )
+        .is_ok());
     }
 
     #[test]
@@ -6344,7 +6518,8 @@ mod tests {
                 // T now has both Eq (inline) and Hash (where)
             }
             "#
-        ).is_ok());
+        )
+        .is_ok());
     }
 
     #[test]
@@ -6360,7 +6535,8 @@ mod tests {
                 return b
             }
             "#
-        ).is_ok());
+        )
+        .is_ok());
     }
 
     #[test]
@@ -6372,7 +6548,8 @@ mod tests {
 
             fn make_default<T>() -> T where T: Default => null
             "#
-        ).is_ok());
+        )
+        .is_ok());
     }
 
     // ========================================================================
@@ -6401,18 +6578,25 @@ mod tests {
             let a = identity(42)
             let b = identity("hello")
             let c = identity(true)
-            "#
-        ).unwrap();
+            "#,
+        )
+        .unwrap();
 
         // Should have 3 different instantiations
         assert_eq!(checker.generic_instantiations.len(), 3);
 
         // Check that the instantiations are recorded
-        let has_int = checker.generic_instantiations.iter()
+        let has_int = checker
+            .generic_instantiations
+            .iter()
             .any(|i| i.function_name == "identity" && i.type_args.contains(&"int".to_string()));
-        let has_string = checker.generic_instantiations.iter()
+        let has_string = checker
+            .generic_instantiations
+            .iter()
             .any(|i| i.function_name == "identity" && i.type_args.contains(&"string".to_string()));
-        let has_bool = checker.generic_instantiations.iter()
+        let has_bool = checker
+            .generic_instantiations
+            .iter()
             .any(|i| i.function_name == "identity" && i.type_args.contains(&"bool".to_string()));
 
         assert!(has_int, "Should have int instantiation");
@@ -6438,8 +6622,9 @@ mod tests {
             }
 
             let result = add(1, 2)
-            "#
-        ).unwrap();
+            "#,
+        )
+        .unwrap();
 
         // Non-generic function should not record any instantiations
         assert!(checker.generic_instantiations.is_empty());
@@ -6456,8 +6641,9 @@ mod tests {
             let a = identity(1)
             let b = identity(2)
             let c = identity(3)
-            "#
-        ).unwrap();
+            "#,
+        )
+        .unwrap();
 
         // All calls are with int, so should only have 1 instantiation
         assert_eq!(checker.generic_instantiations.len(), 1);
@@ -6473,8 +6659,9 @@ mod tests {
 
             let x = pair(1, "hello")
             let y = pair("world", 42)
-            "#
-        ).unwrap();
+            "#,
+        )
+        .unwrap();
 
         // Two different instantiations: (int, string) and (string, int)
         assert_eq!(checker.generic_instantiations.len(), 2);
@@ -6494,8 +6681,9 @@ mod tests {
 
             let x = choose(1, 2, true)
             let y = choose("a", "b", false)
-            "#
-        ).unwrap();
+            "#,
+        )
+        .unwrap();
 
         // Should have 2 instantiations: int and string
         assert_eq!(checker.generic_instantiations.len(), 2);
@@ -6517,7 +6705,8 @@ mod tests {
             let a = wrap(42)
             let b = wrap("hello")
             "#
-        ).is_ok());
+        )
+        .is_ok());
     }
 
     #[test]
@@ -6539,8 +6728,9 @@ mod tests {
             }
 
             let d = process(4)
-            "#
-        ).unwrap();
+            "#,
+        )
+        .unwrap();
 
         // All int instantiations should be deduped to 1
         assert_eq!(checker.generic_instantiations.len(), 1);
@@ -6606,7 +6796,8 @@ mod tests {
             let text = identity("hello")
             let result = dog.describe()
             "#
-        ).is_ok());
+        )
+        .is_ok());
     }
 
     #[test]
@@ -6629,7 +6820,8 @@ mod tests {
             let b = inner("test")
             let c = inner(true)
             "#
-        ).is_ok());
+        )
+        .is_ok());
     }
 
     #[test]
@@ -6654,7 +6846,7 @@ mod tests {
             let c = Container { value: 42 }
             let v = c.get()
             let d = c.double()
-            "#
+            "#,
         );
         if let Err(e) = &result {
             eprintln!("test_struct_with_impl_instance_methods error: {}", e);
@@ -6686,6 +6878,7 @@ mod tests {
             let result = d.map(21)
             let generic_result = apply_generic(result)
             "#
-        ).is_ok());
+        )
+        .is_ok());
     }
 }
