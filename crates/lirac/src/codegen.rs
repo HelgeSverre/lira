@@ -149,7 +149,9 @@ impl CodeGenerator {
                         }
                     }
                 }
-                StatementKind::ConstDecl { name, initializer, .. } => {
+                StatementKind::ConstDecl {
+                    name, initializer, ..
+                } => {
                     // Collect module-level constants
                     // Only literal values are supported for module-level consts
                     if let Some(const_idx) = self.eval_const_expr(initializer) {
@@ -443,7 +445,10 @@ impl CodeGenerator {
                             self.define_local_type(name, type_name);
                         }
                     }
-                } else if let ExpressionKind::StructLiteral { name: struct_name, .. } = &init.kind {
+                } else if let ExpressionKind::StructLiteral {
+                    name: struct_name, ..
+                } = &init.kind
+                {
                     if let Some(sn) = struct_name {
                         self.define_local_type(name, sn);
                     }
@@ -554,7 +559,9 @@ impl CodeGenerator {
         match &expr.kind {
             ExpressionKind::IntLiteral(v) => Some(self.add_constant(Constant::Int(*v))),
             ExpressionKind::FloatLiteral(v) => Some(self.add_constant(Constant::Float(*v))),
-            ExpressionKind::StringLiteral(v) => Some(self.add_constant(Constant::String(v.clone()))),
+            ExpressionKind::StringLiteral(v) => {
+                Some(self.add_constant(Constant::String(v.clone())))
+            }
             ExpressionKind::BoolLiteral(v) => Some(self.add_constant(Constant::Bool(*v))),
             ExpressionKind::CharLiteral(v) => Some(self.add_constant(Constant::Int(*v as i64))),
             ExpressionKind::Unary { op, operand } => {
@@ -754,8 +761,7 @@ impl CodeGenerator {
 
                 // Check __variant field matches (same for all variants)
                 // Stack has the subject (enum object)
-                let variant_field =
-                    self.add_constant(Constant::String("__variant".to_string()));
+                let variant_field = self.add_constant(Constant::String("__variant".to_string()));
                 self.emit_opcode(Opcode::GetField);
                 self.emit_u16(variant_field);
                 // Stack now has the variant name string
@@ -878,7 +884,9 @@ impl CodeGenerator {
 
         match &stmt.kind {
             StatementKind::VarDecl {
-                pattern, initializer, ..
+                pattern,
+                initializer,
+                ..
             } => {
                 if let Some(init) = initializer {
                     // Generate the initializer value
@@ -1422,7 +1430,7 @@ impl CodeGenerator {
                     self.emit_opcode(Opcode::JumpIfFalse);
                     let end_jump = self.current_offset();
                     self.emit_i16(0); // Placeholder
-                    // Left was null - pop the null value
+                                      // Left was null - pop the null value
                     self.emit_opcode(Opcode::Pop);
                     // Evaluate right side
                     self.generate_expression(right);
@@ -2927,7 +2935,9 @@ impl CodeGenerator {
                             }
 
                             // Look up the function
-                            if let Some(func) = self.functions.iter().find(|f| f.name == mangled_name) {
+                            if let Some(func) =
+                                self.functions.iter().find(|f| f.name == mangled_name)
+                            {
                                 let offset = func.code_offset;
                                 let idx = self.add_constant_internal(Constant::Function(offset));
                                 if offset == 0 {
@@ -2938,7 +2948,8 @@ impl CodeGenerator {
                                 self.emit_opcode(Opcode::Call);
                                 self.emit_u8(args.len() as u8);
                             } else {
-                                self.errors.push(format!("Method not found: {}", mangled_name));
+                                self.errors
+                                    .push(format!("Method not found: {}", mangled_name));
                             }
                         } else {
                             // Check if it's an instance method on a variable (c.method())
@@ -2966,9 +2977,12 @@ impl CodeGenerator {
                                     }
 
                                     // Look up and call the function
-                                    if let Some(func) = self.functions.iter().find(|f| f.name == mangled_name) {
+                                    if let Some(func) =
+                                        self.functions.iter().find(|f| f.name == mangled_name)
+                                    {
                                         let offset = func.code_offset;
-                                        let idx = self.add_constant_internal(Constant::Function(offset));
+                                        let idx =
+                                            self.add_constant_internal(Constant::Function(offset));
                                         if offset == 0 {
                                             self.pending_func_patches.push((idx, mangled_name));
                                         }
@@ -2977,7 +2991,8 @@ impl CodeGenerator {
                                         self.emit_opcode(Opcode::Call);
                                         self.emit_u8((args.len() + 1) as u8); // +1 for self
                                     } else {
-                                        self.errors.push(format!("Method not found: {}", mangled_name));
+                                        self.errors
+                                            .push(format!("Method not found: {}", mangled_name));
                                     }
                                 } else {
                                     // No matching method, fall back to field access
@@ -3022,7 +3037,11 @@ impl CodeGenerator {
                         self.emit_opcode(Opcode::Call);
                         self.emit_u8((args.len() + 1) as u8);
                     }
-                } else if let ExpressionKind::EnumVariant { enum_name, variant_name } = &callee.kind {
+                } else if let ExpressionKind::EnumVariant {
+                    enum_name,
+                    variant_name,
+                } = &callee.kind
+                {
                     // Enum variant constructor call - e.g., Option::Some(42)
                     // Create an enum value object with __enum, __variant, and __data fields
                     self.emit_opcode(Opcode::NewObject);
@@ -3041,7 +3060,8 @@ impl CodeGenerator {
                     let variant_str = self.add_constant(Constant::String(variant_name.clone()));
                     self.emit_opcode(Opcode::LoadConst);
                     self.emit_u16(variant_str);
-                    let variant_field = self.add_constant(Constant::String("__variant".to_string()));
+                    let variant_field =
+                        self.add_constant(Constant::String("__variant".to_string()));
                     self.emit_opcode(Opcode::SetField);
                     self.emit_u16(variant_field);
 
@@ -5497,5 +5517,4 @@ mod tests {
             result.err()
         );
     }
-
 }
