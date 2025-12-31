@@ -1,0 +1,47 @@
+<idea-plugin>
+    <id>com.liralang.intellij</id>
+    <name>Lira</name>
+    <version>0.1.0</version>
+    <vendor email="lira@example.com" url="https://github.com/lira-lang/lira">Lira Contributors</vendor>
+
+    <description><![CDATA[
+    Syntax highlighting for Lira programming language files.
+
+    <p>
+    <a href="https://github.com/lira-lang/lira">Repository</a>
+    </p>
+
+    <h2>Features</h2>
+    <ul>
+        <li>Syntax highlighting for <code>*.li</code> and <code>*.lira</code> files</li>
+        <li>Comment toggling</li>
+        <li>Bracket matching</li>
+    </ul>
+
+    <h2>Highlighted Elements</h2>
+    <ul>
+        <li><b>Keywords</b>: fn, let, var, const, struct, class, enum, trait, impl, etc.</li>
+        <li><b>Control Flow</b>: if, else, match, while, for, loop, break, continue, return</li>
+        <li><b>Concurrency</b>: spawn, select, async</li>
+        <li><b>Types</b>: int, float, bool, string, List, Map, Option, Result, etc.</li>
+        <li><b>Literals</b>: Numbers, strings, characters, booleans</li>
+        <li><b>Comments</b>: Line (//) and block (/* */) comments</li>
+    </ul>
+    ]]></description>
+
+    <change-notes><![CDATA[
+    <h2>0.1.0</h2>
+    <ul>
+        <li>Initial release</li>
+        <li>Syntax highlighting via TextMate grammar</li>
+    </ul>
+    ]]></change-notes>
+
+    <!-- Product compatibility -->
+    <depends>com.intellij.modules.platform</depends>
+    <depends>org.jetbrains.plugins.textmate</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <textmate.bundleProvider implementation="com.liralang.intellij.LiraTextMateBundleProvider"/>
+    </extensions>
+</idea-plugin>
