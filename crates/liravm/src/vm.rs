@@ -212,8 +212,12 @@ impl VM {
                         (Value::String(a), Value::String(b)) => {
                             Value::String(Rc::new(format!("{}{}", a, b)))
                         }
-                        (Value::String(a), b) => Value::String(Rc::new(format!("{}{}", a, b.to_string()))),
-                        (a, Value::String(b)) => Value::String(Rc::new(format!("{}{}", a.to_string(), b))),
+                        (Value::String(a), b) => {
+                            Value::String(Rc::new(format!("{}{}", a, b.to_string())))
+                        }
+                        (a, Value::String(b)) => {
+                            Value::String(Rc::new(format!("{}{}", a.to_string(), b)))
+                        }
                         _ => return Err(format!("Cannot add {:?} and {:?}", a, b)),
                     };
                     self.stack.push(result);
@@ -295,7 +299,9 @@ impl VM {
                     let result = match (&a, &b) {
                         (Value::Int(base), Value::Int(exp)) => {
                             if *exp < 0 {
-                                return Err(format!("Negative exponent not supported for integers"));
+                                return Err(format!(
+                                    "Negative exponent not supported for integers"
+                                ));
                             }
                             Value::Int(base.pow(*exp as u32))
                         }
@@ -444,7 +450,9 @@ impl VM {
                             self.stack.push(Value::Int(result))
                         }
                         _ => {
-                            return Err("Unsigned shift right requires integer operands".to_string());
+                            return Err(
+                                "Unsigned shift right requires integer operands".to_string()
+                            );
                         }
                     }
                 }
@@ -1208,7 +1216,10 @@ impl VM {
             // env_args() -> array of strings
             21 => {
                 let args = self.runtime.env_args();
-                let arr: Vec<Value> = args.into_iter().map(|s| Value::String(Rc::new(s))).collect();
+                let arr: Vec<Value> = args
+                    .into_iter()
+                    .map(|s| Value::String(Rc::new(s)))
+                    .collect();
                 self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
                 Ok(())
             }
@@ -1245,14 +1256,20 @@ impl VM {
             // env_all() -> [string] (key=value pairs)
             202 => {
                 let vars = self.runtime.env_all();
-                let arr: Vec<Value> = vars.into_iter().map(|s| Value::String(Rc::new(s))).collect();
+                let arr: Vec<Value> = vars
+                    .into_iter()
+                    .map(|s| Value::String(Rc::new(s)))
+                    .collect();
                 self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
                 Ok(())
             }
             // env_keys() -> [string]
             203 => {
                 let keys = self.runtime.env_keys();
-                let arr: Vec<Value> = keys.into_iter().map(|s| Value::String(Rc::new(s))).collect();
+                let arr: Vec<Value> = keys
+                    .into_iter()
+                    .map(|s| Value::String(Rc::new(s)))
+                    .collect();
                 self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
                 Ok(())
             }
@@ -1374,7 +1391,10 @@ impl VM {
                 match (s, delimiter) {
                     (Value::String(s), Value::String(delimiter)) => {
                         let parts = self.runtime.str_split(&s, &delimiter);
-                        let arr: Vec<Value> = parts.into_iter().map(|s| Value::String(Rc::new(s))).collect();
+                        let arr: Vec<Value> = parts
+                            .into_iter()
+                            .map(|s| Value::String(Rc::new(s)))
+                            .collect();
                         self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
                         Ok(())
                     }
@@ -1760,7 +1780,10 @@ impl VM {
                 match path {
                     Value::String(path) => {
                         let entries = self.runtime.os_listdir(&path);
-                        let arr: Vec<Value> = entries.into_iter().map(|s| Value::String(Rc::new(s))).collect();
+                        let arr: Vec<Value> = entries
+                            .into_iter()
+                            .map(|s| Value::String(Rc::new(s)))
+                            .collect();
                         self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
                         Ok(())
                     }
@@ -1883,7 +1906,8 @@ impl VM {
                     (Value::String(url), Value::String(body), Value::String(content_type)) => {
                         match self.runtime.http_post(&url, &body, &content_type) {
                             Ok((status, _headers, response_body)) => {
-                                let arr = vec![Value::Int(status), Value::String(Rc::new(response_body))];
+                                let arr =
+                                    vec![Value::Int(status), Value::String(Rc::new(response_body))];
                                 self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
                                 Ok(())
                             }
@@ -1911,7 +1935,8 @@ impl VM {
                         Value::String(body),
                     ) => match self.runtime.http_request(&method, &url, &headers, &body) {
                         Ok((status, response_body)) => {
-                            let arr = vec![Value::Int(status), Value::String(Rc::new(response_body))];
+                            let arr =
+                                vec![Value::Int(status), Value::String(Rc::new(response_body))];
                             self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
                             Ok(())
                         }
@@ -2355,7 +2380,10 @@ impl VM {
                 match (pattern, text) {
                     (Value::String(pattern), Value::String(text)) => {
                         let matches = self.runtime.regex_find_all(&pattern, &text);
-                        let arr: Vec<Value> = matches.into_iter().map(|s| Value::String(Rc::new(s))).collect();
+                        let arr: Vec<Value> = matches
+                            .into_iter()
+                            .map(|s| Value::String(Rc::new(s)))
+                            .collect();
                         self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
                         Ok(())
                     }
@@ -2403,7 +2431,10 @@ impl VM {
                 match (pattern, text) {
                     (Value::String(pattern), Value::String(text)) => {
                         let parts = self.runtime.regex_split(&pattern, &text);
-                        let arr: Vec<Value> = parts.into_iter().map(|s| Value::String(Rc::new(s))).collect();
+                        let arr: Vec<Value> = parts
+                            .into_iter()
+                            .map(|s| Value::String(Rc::new(s)))
+                            .collect();
                         self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
                         Ok(())
                     }
@@ -2417,7 +2448,10 @@ impl VM {
                 match (pattern, text) {
                     (Value::String(pattern), Value::String(text)) => {
                         let captures = self.runtime.regex_captures(&pattern, &text);
-                        let arr: Vec<Value> = captures.into_iter().map(|s| Value::String(Rc::new(s))).collect();
+                        let arr: Vec<Value> = captures
+                            .into_iter()
+                            .map(|s| Value::String(Rc::new(s)))
+                            .collect();
                         self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
                         Ok(())
                     }
@@ -2981,8 +3015,8 @@ mod tests {
                 0, // Load 2
                 Opcode::LoadConst as u8,
                 1,
-                0,                  // Load 3
-                Opcode::Pow as u8,  // 2 ** 3 = 8
+                0,                 // Load 3
+                Opcode::Pow as u8, // 2 ** 3 = 8
                 Opcode::Halt as u8,
             ],
         );
@@ -3008,8 +3042,8 @@ mod tests {
                 0, // Load 2.0
                 Opcode::LoadConst as u8,
                 1,
-                0,                  // Load 3.0
-                Opcode::Pow as u8,  // 2.0 ** 3.0 = 8.0
+                0,                 // Load 3.0
+                Opcode::Pow as u8, // 2.0 ** 3.0 = 8.0
                 Opcode::Halt as u8,
             ],
         );
@@ -3085,8 +3119,14 @@ mod tests {
         let s3 = vm.intern_string("world".to_string());
 
         // Same content should return same Rc pointer
-        assert!(Rc::ptr_eq(&s1, &s2), "Interned strings should share same Rc");
-        assert!(!Rc::ptr_eq(&s1, &s3), "Different strings should not share Rc");
+        assert!(
+            Rc::ptr_eq(&s1, &s2),
+            "Interned strings should share same Rc"
+        );
+        assert!(
+            !Rc::ptr_eq(&s1, &s3),
+            "Different strings should not share Rc"
+        );
 
         // Pool should have exactly 2 unique strings
         assert_eq!(vm.string_pool.len(), 2);
