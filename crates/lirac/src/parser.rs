@@ -220,7 +220,7 @@ impl Parser {
         } else if self.match_token(&TokenKind::Const) {
             self.const_declaration(span)
         } else if self.match_token(&TokenKind::Fn) {
-            self.fn_declaration(is_public, span)
+            self.fn_declaration(is_public, false, span)
         } else if self.match_token(&TokenKind::Struct) {
             self.struct_declaration(span)
         } else if self.match_token(&TokenKind::Class) {
@@ -364,7 +364,7 @@ impl Parser {
         })
     }
 
-    fn fn_declaration(&mut self, is_public: bool, span: Span) -> Result<Statement, String> {
+    fn fn_declaration(&mut self, is_public: bool, is_override: bool, span: Span) -> Result<Statement, String> {
         let name = self.expect_identifier("Expected function name")?;
 
         // Parse optional generic type parameters <T> or <T, U>
@@ -384,6 +384,12 @@ impl Parser {
             None
         };
 
+        // Parse optional where clause: fn foo<T>() where T: Eq + Hash { }
+        let mut type_params = type_params;
+        if self.match_token(&TokenKind::Where) {
+            self.parse_where_clause(&mut type_params)?;
+        }
+
         // Check for expression body: fn foo() -> int => expr
         if self.match_token(&TokenKind::FatArrow) {
             let expr = self.expression()?;
@@ -402,6 +408,7 @@ impl Parser {
                     return_type,
                     body,
                     is_public,
+                    is_override,
                 },
                 span,
             });
@@ -417,6 +424,7 @@ impl Parser {
                 return_type,
                 body,
                 is_public,
+                is_override,
             },
             span,
         })
@@ -525,6 +533,44 @@ impl Parser {
         Ok(type_params)
     }
 
+    /// Parse where clause bounds: where T: Eq + Hash, U: Display
+    fn parse_where_clause(&mut self, type_params: &mut Vec<TypeParam>) -> Result<(), String> {
+        loop {
+            let param_name = self.expect_identifier("Expected type parameter name in where clause")?;
+            self.consume(&TokenKind::Colon, "Expected ':' after type parameter in where clause")?;
+
+            // Parse trait bounds: Trait or Trait + Other
+            let mut bounds = Vec::new();
+            loop {
+                bounds.push(self.expect_identifier("Expected trait name")?);
+                if !self.match_token(&TokenKind::Plus) {
+                    break;
+                }
+            }
+
+            // Find the type parameter and add the bounds
+            let mut found = false;
+            for tp in type_params.iter_mut() {
+                if tp.name == param_name {
+                    tp.bounds.extend(bounds.clone());
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                return Err(format!(
+                    "Type parameter '{}' in where clause is not declared in the type parameter list",
+                    param_name
+                ));
+            }
+
+            if !self.match_token(&TokenKind::Comma) {
+                break;
+            }
+        }
+        Ok(())
+    }
+
     fn struct_declaration(&mut self, span: Span) -> Result<Statement, String> {
         let name = self.expect_identifier("Expected struct name")?;
 
@@ -545,7 +591,7 @@ impl Parser {
             let is_public = self.match_token(&TokenKind::Pub);
 
             if self.match_token(&TokenKind::Fn) {
-                methods.push(self.fn_declaration(is_public, member_span)?);
+                methods.push(self.fn_declaration(is_public, false, member_span)?);
             } else {
                 let is_mutable = self.match_token(&TokenKind::Var);
                 if !is_mutable {
@@ -585,16 +631,16 @@ impl Parser {
     fn class_declaration(&mut self, span: Span) -> Result<Statement, String> {
         let name = self.expect_identifier("Expected class name")?;
 
-        // Parse inheritance
-        let parent = if self.match_token(&TokenKind::Colon) {
+        // Parse inheritance: class Child extends Parent { } or class Child : Parent { }
+        let parent = if self.match_token(&TokenKind::Extends) || self.match_token(&TokenKind::Colon) {
             Some(self.expect_identifier("Expected parent class name")?)
         } else {
             None
         };
 
-        // Parse interfaces
+        // Parse interfaces: class Child extends Parent, Interface1, Interface2 { }
         let mut interfaces = Vec::new();
-        if self.match_token(&TokenKind::Comma) {
+        if parent.is_some() && self.match_token(&TokenKind::Comma) {
             loop {
                 interfaces.push(self.expect_identifier("Expected interface name")?);
                 if !self.match_token(&TokenKind::Comma) {
@@ -612,10 +658,14 @@ impl Parser {
             let member_span = self.span();
             let is_public = self.match_token(&TokenKind::Pub);
             let _is_private = self.match_token(&TokenKind::Priv);
+            let is_override = self.match_token(&TokenKind::Override);
 
             if self.match_token(&TokenKind::Fn) {
-                methods.push(self.fn_declaration(is_public, member_span)?);
+                methods.push(self.fn_declaration(is_public, is_override, member_span)?);
             } else {
+                if is_override {
+                    return Err("'override' can only be used on methods".to_string());
+                }
                 let is_mutable = self.match_token(&TokenKind::Var);
                 if !is_mutable {
                     self.match_token(&TokenKind::Let);
@@ -864,7 +914,7 @@ impl Parser {
             let is_public = self.match_token(&TokenKind::Pub);
 
             if self.match_token(&TokenKind::Fn) {
-                let fn_decl = self.fn_declaration(is_public, method_span)?;
+                let fn_decl = self.fn_declaration(is_public, false, method_span)?;
                 methods.push(fn_decl);
             } else {
                 let span = self.span();
@@ -1501,6 +1551,7 @@ impl Parser {
                 Ok(Expression {
                     kind: ExpressionKind::Call {
                         callee: Box::new(left),
+                        type_args: Vec::new(), // TODO: Parse turbofish syntax ::<T>
                         args,
                     },
                     span,
