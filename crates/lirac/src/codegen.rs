@@ -23,6 +23,7 @@ pub struct CodeGenerator {
     /// Function table
     functions: Vec<FunctionInfo>,
     /// Current function being compiled
+    #[allow(dead_code)]
     current_function: Option<usize>,
     /// Local variable slots per scope
     locals: Vec<HashMap<String, u16>>,
@@ -69,6 +70,7 @@ type FunctionDefaults = HashMap<String, Vec<(usize, Expression)>>;
 
 /// Loop context for break/continue
 struct LoopContext {
+    #[allow(dead_code)]
     start_offset: usize,
     continue_target: Option<usize>, // None = use patches; Some(x) = direct jump to x
     break_patches: Vec<usize>,
@@ -445,13 +447,8 @@ impl CodeGenerator {
                             self.define_local_type(name, type_name);
                         }
                     }
-                } else if let ExpressionKind::StructLiteral {
-                    name: struct_name, ..
-                } = &init.kind
-                {
-                    if let Some(sn) = struct_name {
-                        self.define_local_type(name, sn);
-                    }
+                } else if let ExpressionKind::StructLiteral { name: Some(sn), .. } = &init.kind {
+                    self.define_local_type(name, sn);
                 }
 
                 // Simple variable binding - store the value
@@ -600,10 +597,11 @@ impl CodeGenerator {
         match &expr.kind {
             ExpressionKind::Identifier(name) => {
                 // If not bound locally and not already captured, and exists in enclosing scope
-                if !bound.contains(name) && !free.contains(name) {
-                    if self.lookup_local(name).is_some() {
-                        free.push(name.clone());
-                    }
+                if !bound.contains(name)
+                    && !free.contains(name)
+                    && self.lookup_local(name).is_some()
+                {
+                    free.push(name.clone());
                 }
             }
             ExpressionKind::Binary { left, right, .. } => {
@@ -682,11 +680,15 @@ impl CodeGenerator {
             StatementKind::Expression(expr) => {
                 self.collect_free_vars(expr, bound, free);
             }
-            StatementKind::VarDecl { initializer, .. } => {
-                if let Some(init) = initializer {
-                    self.collect_free_vars(init, bound, free);
-                }
+            StatementKind::VarDecl {
+                initializer: Some(init),
+                ..
+            } => {
+                self.collect_free_vars(init, bound, free);
             }
+            StatementKind::VarDecl {
+                initializer: None, ..
+            } => {}
             StatementKind::Return(Some(expr)) => {
                 self.collect_free_vars(expr, bound, free);
             }
@@ -780,7 +782,7 @@ impl CodeGenerator {
                 self.emit_opcode(Opcode::Pop);
                 true
             }
-            PatternKind::Or(patterns) => {
+            PatternKind::Or(_patterns) => {
                 // Any of the patterns can match
                 self.emit_opcode(Opcode::Pop);
                 // Simplified

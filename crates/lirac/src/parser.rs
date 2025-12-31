@@ -106,6 +106,7 @@ impl Parser {
         }
     }
 
+    #[allow(dead_code)]
     fn match_any(&mut self, kinds: &[TokenKind]) -> bool {
         for kind in kinds {
             if self.check(kind) {
@@ -541,7 +542,7 @@ impl Parser {
     }
 
     /// Parse where clause bounds: where T: Eq + Hash, U: Display
-    fn parse_where_clause(&mut self, type_params: &mut Vec<TypeParam>) -> Result<(), String> {
+    fn parse_where_clause(&mut self, type_params: &mut [TypeParam]) -> Result<(), String> {
         loop {
             let param_name =
                 self.expect_identifier("Expected type parameter name in where clause")?;

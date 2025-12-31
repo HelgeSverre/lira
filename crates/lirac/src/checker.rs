@@ -2002,11 +2002,13 @@ impl TypeChecker {
     }
 
     /// Get the bounds for a type parameter, if it exists
+    #[allow(dead_code)]
     fn get_type_param_bounds(&self, name: &str) -> Option<&Vec<String>> {
         self.current_type_params.get(name)
     }
 
     /// Check if a type parameter has a specific bound (trait)
+    #[allow(dead_code)]
     fn type_param_has_bound(&self, type_param: &str, bound: &str) -> bool {
         self.current_type_params
             .get(type_param)
@@ -2662,11 +2664,7 @@ impl TypeChecker {
             } => {
                 let declared_type = type_ann.as_ref().map(|t| self.resolve_type_expr(t));
 
-                let inferred_type = if let Some(init) = initializer {
-                    Some(self.check_expression(init))
-                } else {
-                    None
-                };
+                let inferred_type = initializer.as_ref().map(|init| self.check_expression(init));
 
                 let final_type = match (declared_type, inferred_type) {
                     (Some(decl), Some(init)) => {
@@ -3734,7 +3732,7 @@ impl TypeChecker {
 
             ExpressionKind::CompoundAssign { target, op, value } => {
                 let target_type = self.check_expression(target);
-                let value_type = self.check_expression(value);
+                let _value_type = self.check_expression(value);
 
                 // Similar to binary op checking
                 let result_type = self.check_expression(&Expression {
@@ -3748,7 +3746,7 @@ impl TypeChecker {
 
                 if !result_type.is_compatible_with(&target_type) {
                     self.env
-                        .error(&expr.span, format!("Compound assignment type mismatch"));
+                        .error(&expr.span, "Compound assignment type mismatch".to_string());
                 }
 
                 Type::Void

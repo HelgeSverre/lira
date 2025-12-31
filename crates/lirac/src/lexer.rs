@@ -186,6 +186,7 @@ pub enum TokenKind {
 
 /// The lexer
 pub struct Lexer<'a> {
+    #[allow(dead_code)]
     source: &'a str,
     chars: Peekable<Chars<'a>>,
     line: usize,
@@ -407,7 +408,7 @@ impl<'a> Lexer<'a> {
 
         // Check for float
         let mut is_float = false;
-        if self.peek() == Some('.') && self.peek_next().map_or(false, |c| c.is_ascii_digit()) {
+        if self.peek() == Some('.') && self.peek_next().is_some_and(|c| c.is_ascii_digit()) {
             is_float = true;
             self.advance(); // consume .
             while let Some(ch) = self.peek() {
