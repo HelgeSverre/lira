@@ -482,7 +482,7 @@ just fmt
 | T8.10 | Go to definition | Navigate to symbol definitions | [x] |
 | T8.11 | Find references | Find all references to a symbol | [x] |
 | T8.12 | Document symbols | Outline view for files | [x] |
-| T8.13 | Semantic tokens | Enhanced syntax highlighting | [ ] |
+| T8.13 | Semantic tokens | Enhanced syntax highlighting | [x] |
 
 ### 8.3 Editor Extensions
 
