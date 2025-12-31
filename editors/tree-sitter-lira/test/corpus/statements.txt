@@ -48,7 +48,8 @@ const PI = 3.14159
 
 (source_file
   (variable_declaration
-    pattern: (identifier)
+    pattern: (enum_pattern
+      (type_identifier))
     value: (float_literal)))
 
 ================================================================================
@@ -66,7 +67,7 @@ fn foo() {
     name: (identifier)
     parameters: (parameters)
     body: (block
-      (return_statement))))
+      (return_expression))))
 
 ================================================================================
 Return with value
@@ -84,7 +85,7 @@ fn bar() -> int {
     parameters: (parameters)
     return_type: (primitive_type)
     body: (block
-      (return_statement
+      (return_expression
         (integer_literal)))))
 
 ================================================================================
@@ -106,7 +107,7 @@ fn test() {
     body: (block
       (loop_statement
         body: (block
-          (break_statement))))))
+          (break_expression))))))
 
 ================================================================================
 Break with value
@@ -127,7 +128,7 @@ fn test() {
     body: (block
       (loop_statement
         body: (block
-          (break_statement
+          (break_expression
             (integer_literal)))))))
 
 ================================================================================
@@ -149,7 +150,7 @@ fn test() {
     body: (block
       (loop_statement
         body: (block
-          (continue_statement))))))
+          (continue_expression))))))
 
 ================================================================================
 If expression
@@ -429,7 +430,7 @@ match cmd {
       (match_arm
         pattern: (match_pattern
           (wildcard_pattern))
-        body: (continue_statement)))))
+        body: (continue_expression)))))
 
 ================================================================================
 Try statement

@@ -477,9 +477,10 @@ obj.method()
 --------------------------------------------------------------------------------
 
 (source_file
-  (method_call_expression
-    receiver: (identifier)
-    method: (identifier)
+  (call_expression
+    function: (member_expression
+      object: (identifier)
+      member: (identifier))
     arguments: (arguments)))
 
 ================================================================================
@@ -491,12 +492,14 @@ a.b().c()
 --------------------------------------------------------------------------------
 
 (source_file
-  (method_call_expression
-    receiver: (method_call_expression
-      receiver: (identifier)
-      method: (identifier)
-      arguments: (arguments))
-    method: (identifier)
+  (call_expression
+    function: (member_expression
+      object: (call_expression
+        function: (member_expression
+          object: (identifier)
+          member: (identifier))
+        arguments: (arguments))
+      member: (identifier))
     arguments: (arguments)))
 
 ================================================================================
@@ -821,9 +824,10 @@ new Object()
 --------------------------------------------------------------------------------
 
 (source_file
-  (new_expression
-    type: (type_identifier)
-    (arguments)))
+  (call_expression
+    function: (new_expression
+      type: (type_identifier))
+    arguments: (arguments)))
 
 ================================================================================
 Path expression

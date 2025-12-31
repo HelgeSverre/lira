@@ -1,0 +1,394 @@
+================================================================================
+Wildcard pattern
+================================================================================
+
+let _ = expr
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (wildcard_pattern)
+    value: (identifier)))
+
+================================================================================
+Identifier pattern
+================================================================================
+
+let x = 42
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (identifier)
+    value: (integer_literal)))
+
+================================================================================
+Literal pattern in match
+================================================================================
+
+match x {
+  42 => true,
+  _ => false,
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (match_expression
+    value: (identifier)
+    (match_body
+      (match_arm
+        pattern: (match_pattern
+          (integer_literal))
+        body: (boolean_literal))
+      (match_arm
+        pattern: (match_pattern
+          (wildcard_pattern))
+        body: (boolean_literal)))))
+
+================================================================================
+String literal pattern
+================================================================================
+
+match cmd {
+  "quit" => exit(),
+  _ => continue,
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (match_expression
+    value: (identifier)
+    (match_body
+      (match_arm
+        pattern: (match_pattern
+          (string_literal
+            (string_content)))
+        body: (call_expression
+          function: (identifier)
+          arguments: (arguments)))
+      (match_arm
+        pattern: (match_pattern
+          (wildcard_pattern))
+        body: (continue_expression)))))
+
+================================================================================
+Tuple pattern
+================================================================================
+
+let (a, b) = pair
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (tuple_pattern
+      (identifier)
+      (identifier))
+    value: (identifier)))
+
+================================================================================
+Tuple pattern with wildcard
+================================================================================
+
+let (x, _) = pair
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (tuple_pattern
+      (identifier)
+      (wildcard_pattern))
+    value: (identifier)))
+
+================================================================================
+Struct pattern
+================================================================================
+
+let Point { x, y } = point
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (struct_pattern
+      (type_identifier)
+      (identifier)
+      (identifier))
+    value: (identifier)))
+
+================================================================================
+Struct pattern with renaming
+================================================================================
+
+let Point { x: a, y: b } = point
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (struct_pattern
+      (type_identifier)
+      name: (identifier)
+      pattern: (identifier)
+      name: (identifier)
+      pattern: (identifier))
+    value: (identifier)))
+
+================================================================================
+Struct pattern with rest
+================================================================================
+
+let Point { x, .. } = point
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (struct_pattern
+      (type_identifier)
+      (identifier)
+      (rest_pattern))
+    value: (identifier)))
+
+================================================================================
+Enum pattern simple
+================================================================================
+
+match opt {
+  Some(x) => x,
+  None => 0,
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (match_expression
+    value: (identifier)
+    (match_body
+      (match_arm
+        pattern: (match_pattern
+          (enum_pattern
+            (type_identifier)
+            (identifier)))
+        body: (identifier))
+      (match_arm
+        pattern: (match_pattern
+          (enum_pattern
+            (type_identifier)))
+        body: (integer_literal)))))
+
+================================================================================
+Enum pattern with path
+================================================================================
+
+match msg {
+  Message::Quit => exit(),
+  Message::Move(x, y) => move_to(x, y),
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (match_expression
+    value: (identifier)
+    (match_body
+      (match_arm
+        pattern: (match_pattern
+          (enum_pattern
+            (type_identifier)
+            (identifier)))
+        body: (call_expression
+          function: (identifier)
+          arguments: (arguments)))
+      (match_arm
+        pattern: (match_pattern
+          (enum_pattern
+            (type_identifier)
+            (identifier)
+            (identifier)
+            (identifier)))
+        body: (call_expression
+          function: (identifier)
+          arguments: (arguments
+            (argument
+              (identifier))
+            (argument
+              (identifier))))))))
+
+================================================================================
+Range pattern
+================================================================================
+
+match x {
+  0..10 => "small",
+  _ => "large",
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (match_expression
+    value: (identifier)
+    (match_body
+      (match_arm
+        pattern: (match_pattern
+          (range_pattern
+            (integer_literal)
+            (integer_literal)))
+        body: (string_literal
+          (string_content)))
+      (match_arm
+        pattern: (match_pattern
+          (wildcard_pattern))
+        body: (string_literal
+          (string_content))))))
+
+================================================================================
+Inclusive range pattern
+================================================================================
+
+match ch {
+  'a'..='z' => true,
+  _ => false,
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (match_expression
+    value: (identifier)
+    (match_body
+      (match_arm
+        pattern: (match_pattern
+          (range_pattern
+            (char_literal)
+            (char_literal)))
+        body: (boolean_literal))
+      (match_arm
+        pattern: (match_pattern
+          (wildcard_pattern))
+        body: (boolean_literal)))))
+
+================================================================================
+Binding pattern
+================================================================================
+
+match x {
+  n @ 1..10 => use_n(n),
+  _ => other(),
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (match_expression
+    value: (identifier)
+    (match_body
+      (match_arm
+        pattern: (match_pattern
+          (binding_pattern
+            name: (identifier)
+            pattern: (range_pattern
+              (integer_literal)
+              (integer_literal))))
+        body: (call_expression
+          function: (identifier)
+          arguments: (arguments
+            (argument
+              (identifier)))))
+      (match_arm
+        pattern: (match_pattern
+          (wildcard_pattern))
+        body: (call_expression
+          function: (identifier)
+          arguments: (arguments))))))
+
+================================================================================
+Or pattern
+================================================================================
+
+match x {
+  1 | 2 | 3 => "few",
+  _ => "many",
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (match_expression
+    value: (identifier)
+    (match_body
+      (match_arm
+        pattern: (match_pattern
+          (integer_literal)
+          (integer_literal)
+          (integer_literal))
+        body: (string_literal
+          (string_content)))
+      (match_arm
+        pattern: (match_pattern
+          (wildcard_pattern))
+        body: (string_literal
+          (string_content))))))
+
+================================================================================
+Nested pattern
+================================================================================
+
+let Some((x, y)) = nested
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (enum_pattern
+      (type_identifier)
+      (tuple_pattern
+        (identifier)
+        (identifier)))
+    value: (identifier)))
+
+================================================================================
+Pattern in for loop
+================================================================================
+
+for (key, value) in map {
+  print(key, value)
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (for_statement
+    pattern: (tuple_pattern
+      (identifier)
+      (identifier))
+    iterable: (identifier)
+    body: (block
+      (call_expression
+        function: (identifier)
+        arguments: (arguments
+          (argument
+            (identifier))
+          (argument
+            (identifier)))))))
+
+================================================================================
+Anonymous struct pattern
+================================================================================
+
+let { x, y } = point
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (struct_pattern
+      (identifier)
+      (identifier))
+    value: (identifier)))

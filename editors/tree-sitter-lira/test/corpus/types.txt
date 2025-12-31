@@ -1,0 +1,552 @@
+================================================================================
+Primitive int
+================================================================================
+
+let x: int = 0
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (identifier)
+    type: (primitive_type)
+    value: (integer_literal)))
+
+================================================================================
+Primitive int8
+================================================================================
+
+let x: int8 = 0
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (identifier)
+    type: (primitive_type)
+    value: (integer_literal)))
+
+================================================================================
+Primitive int16
+================================================================================
+
+let x: int16 = 0
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (identifier)
+    type: (primitive_type)
+    value: (integer_literal)))
+
+================================================================================
+Primitive int32
+================================================================================
+
+let x: int32 = 0
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (identifier)
+    type: (primitive_type)
+    value: (integer_literal)))
+
+================================================================================
+Primitive int64
+================================================================================
+
+let x: int64 = 0
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (identifier)
+    type: (primitive_type)
+    value: (integer_literal)))
+
+================================================================================
+Primitive uint
+================================================================================
+
+let x: uint = 0
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (identifier)
+    type: (primitive_type)
+    value: (integer_literal)))
+
+================================================================================
+Primitive float
+================================================================================
+
+let x: float = 0.0
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (identifier)
+    type: (primitive_type)
+    value: (float_literal)))
+
+================================================================================
+Primitive float32
+================================================================================
+
+let x: float32 = 0.0
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (identifier)
+    type: (primitive_type)
+    value: (float_literal)))
+
+================================================================================
+Primitive float64
+================================================================================
+
+let x: float64 = 0.0
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (identifier)
+    type: (primitive_type)
+    value: (float_literal)))
+
+================================================================================
+Primitive bool
+================================================================================
+
+let x: bool = true
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (identifier)
+    type: (primitive_type)
+    value: (boolean_literal)))
+
+================================================================================
+Primitive string
+================================================================================
+
+let x: string = ""
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (identifier)
+    type: (primitive_type)
+    value: (string_literal)))
+
+================================================================================
+Primitive char
+================================================================================
+
+let x: char = 'a'
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (identifier)
+    type: (primitive_type)
+    value: (char_literal)))
+
+================================================================================
+Primitive void
+================================================================================
+
+fn nothing() -> void {}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    parameters: (parameters)
+    return_type: (primitive_type)
+    body: (block)))
+
+================================================================================
+Named type
+================================================================================
+
+let p: Point = Point { x: 0, y: 0 }
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (identifier)
+    type: (type_identifier)
+    value: (struct_expression
+      type: (type_identifier)
+      (struct_field_initializer
+        name: (identifier)
+        value: (integer_literal))
+      (struct_field_initializer
+        name: (identifier)
+        value: (integer_literal)))))
+
+================================================================================
+Generic type
+================================================================================
+
+let list: Vec<int> = []
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (identifier)
+    type: (generic_type
+      (type_identifier)
+      (type_arguments
+        (primitive_type)))
+    value: (array_expression)))
+
+================================================================================
+Nested generic type
+================================================================================
+
+let map: Map<string, Vec<int>> = {}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (identifier)
+    type: (generic_type
+      (type_identifier)
+      (type_arguments
+        (primitive_type)
+        (generic_type
+          (type_identifier)
+          (type_arguments
+            (primitive_type)))))
+    value: (map_expression)))
+
+================================================================================
+Array type
+================================================================================
+
+let arr: [int] = []
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (identifier)
+    type: (array_type
+      (primitive_type))
+    value: (array_expression)))
+
+================================================================================
+Nested array type
+================================================================================
+
+let matrix: [[int]] = []
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (identifier)
+    type: (array_type
+      (array_type
+        (primitive_type)))
+    value: (array_expression)))
+
+================================================================================
+Tuple type
+================================================================================
+
+let pair: (int, string) = (0, "")
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (identifier)
+    type: (tuple_type
+      (primitive_type)
+      (primitive_type))
+    value: (tuple_expression
+      (integer_literal)
+      (string_literal))))
+
+================================================================================
+Function type
+================================================================================
+
+let f: fn(int) -> int = |x| x
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (identifier)
+    type: (function_type
+      (primitive_type)
+      (primitive_type))
+    value: (lambda_expression
+      (lambda_parameter
+        name: (identifier))
+      body: (identifier))))
+
+================================================================================
+Function type no params
+================================================================================
+
+let f: fn() -> int = || 42
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (identifier)
+    type: (function_type
+      (primitive_type))
+    value: (lambda_expression
+      body: (integer_literal))))
+
+================================================================================
+Function type no return
+================================================================================
+
+let f: fn(int) = |x| print(x)
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (identifier)
+    type: (function_type
+      (primitive_type))
+    value: (lambda_expression
+      (lambda_parameter
+        name: (identifier))
+      body: (call_expression
+        function: (identifier)
+        arguments: (arguments
+          (argument
+            (identifier)))))))
+
+================================================================================
+Optional type
+================================================================================
+
+let x: int? = null
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (identifier)
+    type: (optional_type
+      (primitive_type))
+    value: (null_literal)))
+
+================================================================================
+Optional generic type
+================================================================================
+
+let x: Option<int>? = null
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (identifier)
+    type: (optional_type
+      (generic_type
+        (type_identifier)
+        (type_arguments
+          (primitive_type))))
+    value: (null_literal)))
+
+================================================================================
+Path type
+================================================================================
+
+let x: std::io::Reader = reader
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    pattern: (identifier)
+    type: (path_type
+      (identifier)
+      (identifier)
+      (type_identifier))
+    value: (identifier)))
+
+================================================================================
+Self type
+================================================================================
+
+trait Clonable {
+  fn clone(self) -> Self
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (trait_declaration
+    name: (type_identifier)
+    (trait_body
+      (trait_method
+        name: (identifier)
+        parameters: (parameters
+          (parameter))
+        return_type: (type_identifier)))))
+
+================================================================================
+Type parameter with bound
+================================================================================
+
+fn foo<T: Display>(x: T) {}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    (type_parameters
+      (type_parameter
+        name: (type_identifier)
+        (trait_bound
+          (type_identifier))))
+    parameters: (parameters
+      (parameter
+        name: (identifier)
+        type: (type_identifier)))
+    body: (block)))
+
+================================================================================
+Type parameter with multiple bounds
+================================================================================
+
+fn foo<T: Display + Clone>(x: T) {}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    (type_parameters
+      (type_parameter
+        name: (type_identifier)
+        (trait_bound
+          (type_identifier))
+        (trait_bound
+          (type_identifier))))
+    parameters: (parameters
+      (parameter
+        name: (identifier)
+        type: (type_identifier)))
+    body: (block)))
+
+================================================================================
+Multiple type parameters
+================================================================================
+
+fn map<T, U>(x: T, f: fn(T) -> U) -> U {}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    (type_parameters
+      (type_parameter
+        name: (type_identifier))
+      (type_parameter
+        name: (type_identifier)))
+    parameters: (parameters
+      (parameter
+        name: (identifier)
+        type: (type_identifier))
+      (parameter
+        name: (identifier)
+        type: (function_type
+          (type_identifier)
+          (type_identifier))))
+    return_type: (type_identifier)
+    body: (block)))
+
+================================================================================
+Where clause
+================================================================================
+
+fn print<T>(x: T) where T: Display {}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    (type_parameters
+      (type_parameter
+        name: (type_identifier)))
+    parameters: (parameters
+      (parameter
+        name: (identifier)
+        type: (type_identifier)))
+    (where_clause
+      (where_predicate
+        (type_identifier)
+        (trait_bound
+          (type_identifier))))
+    body: (block)))
+
+================================================================================
+Complex where clause
+================================================================================
+
+fn complex<T, U>(x: T, y: U) where T: Display + Clone, U: Debug {}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    (type_parameters
+      (type_parameter
+        name: (type_identifier))
+      (type_parameter
+        name: (type_identifier)))
+    parameters: (parameters
+      (parameter
+        name: (identifier)
+        type: (type_identifier))
+      (parameter
+        name: (identifier)
+        type: (type_identifier)))
+    (where_clause
+      (where_predicate
+        (type_identifier)
+        (trait_bound
+          (type_identifier))
+        (trait_bound
+          (type_identifier)))
+      (where_predicate
+        (type_identifier)
+        (trait_bound
+          (type_identifier))))
+    body: (block)))

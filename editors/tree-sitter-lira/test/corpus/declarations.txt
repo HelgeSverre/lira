@@ -34,7 +34,7 @@ fn add(a: int, b: int) -> int {
         type: (primitive_type)))
     return_type: (primitive_type)
     body: (block
-      (return_statement
+      (return_expression
         (binary_expression
           (identifier)
           (identifier))))))
@@ -116,7 +116,7 @@ fn identity<T>(x: T) -> T {
         type: (type_identifier)))
     return_type: (type_identifier)
     body: (block
-      (return_statement
+      (return_expression
         (identifier)))))
 
 ================================================================================
@@ -149,7 +149,7 @@ fn compare<T>(a: T, b: T) -> bool where T: Comparable {
         (trait_bound
           (type_identifier))))
     body: (block
-      (return_statement
+      (return_expression
         (binary_expression
           (identifier)
           (identifier))))))
@@ -456,7 +456,7 @@ trait Greeting {
           (parameter))
         return_type: (primitive_type)
         body: (block
-          (return_statement
+          (return_expression
             (string_literal
               (string_content))))))))
 
@@ -482,7 +482,7 @@ trait Ordered: Comparable {
           (parameter)
           (parameter
             name: (identifier)
-            type: (self_type)))
+            type: (type_identifier)))
         return_type: (primitive_type)))))
 
 ================================================================================
@@ -512,7 +512,7 @@ impl Point {
             type: (primitive_type)))
         return_type: (type_identifier)
         body: (block
-          (return_statement
+          (return_expression
             (struct_expression
               type: (type_identifier)
               (struct_field_initializer
@@ -543,7 +543,7 @@ impl Display for Point {
           (parameter))
         return_type: (primitive_type)
         body: (block
-          (return_statement
+          (return_expression
             (string_literal
               (string_content))))))))
 
@@ -592,9 +592,8 @@ import std.io
 (source_file
   (import_declaration
     (import_path
-      (module_path
-        (identifier)
-        (identifier)))))
+      (identifier)
+      (identifier))))
 
 ================================================================================
 Import with alias
@@ -607,10 +606,9 @@ import std.collections.HashMap as Map
 (source_file
   (import_declaration
     (import_path
-      (module_path
-        (identifier)
-        (identifier)
-        (identifier))
+      (identifier)
+      (identifier)
+      (identifier)
       (identifier))))
 
 ================================================================================
@@ -624,9 +622,8 @@ import std.io.{print, println}
 (source_file
   (import_declaration
     (import_path
-      (module_path
-        (identifier)
-        (identifier))
+      (identifier)
+      (identifier)
       (import_group
         (identifier)
         (identifier)))))
@@ -642,9 +639,8 @@ import std.io.*
 (source_file
   (import_declaration
     (import_path
-      (module_path
-        (identifier)
-        (identifier)))))
+      (identifier)
+      (identifier))))
 
 ================================================================================
 Use declaration
@@ -657,10 +653,9 @@ use std::collections::Vec
 (source_file
   (use_declaration
     (use_path
-      (namespace_path
-        (identifier)
-        (identifier)
-        (identifier)))))
+      (identifier)
+      (identifier)
+      (identifier))))
 
 ================================================================================
 Interface declaration
