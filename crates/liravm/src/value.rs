@@ -22,7 +22,7 @@ pub enum Value {
     Bool(bool),
     Int(i64),
     Float(f64),
-    String(IString),  // Interned string for memory efficiency
+    String(IString), // Interned string for memory efficiency
     Array(Rc<RefCell<Vec<Value>>>),
     Object(Rc<RefCell<HashMap<String, Value>>>),
     Function(usize),          // Code offset

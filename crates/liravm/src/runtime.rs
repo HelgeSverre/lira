@@ -583,13 +583,13 @@ impl Runtime {
 
     /// Encode string to base64 (standard encoding)
     pub fn base64_encode(&self, input: &str) -> String {
-        use base64::{Engine as _, engine::general_purpose::STANDARD};
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
         STANDARD.encode(input.as_bytes())
     }
 
     /// Decode base64 to string (standard encoding)
     pub fn base64_decode(&self, input: &str) -> Result<String, String> {
-        use base64::{Engine as _, engine::general_purpose::STANDARD};
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
         let bytes = STANDARD
             .decode(input)
             .map_err(|e| format!("Base64 decode error: {}", e))?;
@@ -598,13 +598,13 @@ impl Runtime {
 
     /// Encode string to base64 (URL-safe encoding)
     pub fn base64_encode_url(&self, input: &str) -> String {
-        use base64::{Engine as _, engine::general_purpose::URL_SAFE};
+        use base64::{engine::general_purpose::URL_SAFE, Engine as _};
         URL_SAFE.encode(input.as_bytes())
     }
 
     /// Decode URL-safe base64 to string
     pub fn base64_decode_url(&self, input: &str) -> Result<String, String> {
-        use base64::{Engine as _, engine::general_purpose::URL_SAFE};
+        use base64::{engine::general_purpose::URL_SAFE, Engine as _};
         let bytes = URL_SAFE
             .decode(input)
             .map_err(|e| format!("Base64 decode error: {}", e))?;
@@ -1251,4 +1251,3 @@ impl Default for Runtime {
         Self::new()
     }
 }
-
