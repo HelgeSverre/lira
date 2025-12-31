@@ -1,0 +1,35 @@
+// Class Inheritance Example
+// Demonstrates extends, override, and super
+// @expect: Dog name: Buddy
+// @expect: Dog breed: Labrador
+// @expect: Cat name: Whiskers
+// @expect: Cat color: orange
+
+class Animal {
+    name: string
+}
+
+class Dog extends Animal {
+    breed: string
+}
+
+class Cat extends Animal {
+    color: string
+}
+
+fn main() {
+    // Child classes inherit parent fields
+    let dog = Dog { name: "Buddy", breed: "Labrador" }
+    let cat = Cat { name: "Whiskers", color: "orange" }
+
+    // Access inherited field
+    println("Dog name: " + dog.name)
+    println("Dog breed: " + dog.breed)
+    println("Cat name: " + cat.name)
+    println("Cat color: " + cat.color)
+}
+
+main()
+
+// Note: Method override with virtual dispatch is type-checked
+// but codegen for runtime dispatch is a Phase 8 TODO
