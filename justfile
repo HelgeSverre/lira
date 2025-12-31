@@ -7,9 +7,17 @@ default: build
 build:
     cargo build --package lirac --package liravm
 
+# Build all including LSP
+build-all:
+    cargo build --package lirac --package liravm --package lira-lsp
+
 # Build in release mode
 release:
     cargo build --package lirac --package liravm --release
+
+# Build all in release mode
+release-all:
+    cargo build --package lirac --package liravm --package lira-lsp --release
 
 # Run all tests
 test:
@@ -42,3 +50,14 @@ fmt:
 # Clean build artifacts
 clean:
     cargo clean
+
+# Run the LSP server (for testing)
+lsp:
+    cargo run --package lira-lsp
+
+# Build and install binaries to ~/.local/bin
+install: release-all
+    mkdir -p ~/.local/bin
+    cp target/release/lirac ~/.local/bin/
+    cp target/release/liravm ~/.local/bin/
+    cp target/release/lira-lsp ~/.local/bin/
