@@ -216,12 +216,8 @@ impl VM {
                         (Value::String(a), Value::String(b)) => {
                             Value::String(Rc::new(format!("{}{}", a, b)))
                         }
-                        (Value::String(a), b) => {
-                            Value::String(Rc::new(format!("{}{}", a, b)))
-                        }
-                        (a, Value::String(b)) => {
-                            Value::String(Rc::new(format!("{}{}", a, b)))
-                        }
+                        (Value::String(a), b) => Value::String(Rc::new(format!("{}{}", a, b))),
+                        (a, Value::String(b)) => Value::String(Rc::new(format!("{}{}", a, b))),
                         _ => return Err(format!("Cannot add {:?} and {:?}", a, b)),
                     };
                     self.stack.push(result);
