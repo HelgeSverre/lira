@@ -606,7 +606,7 @@ impl CodeGenerator {
             ExpressionKind::Unary { operand, .. } => {
                 self.collect_free_vars(operand, bound, free);
             }
-            ExpressionKind::Call { callee, args } => {
+            ExpressionKind::Call { callee, args, .. } => {
                 self.collect_free_vars(callee, bound, free);
                 for arg in args {
                     self.collect_free_vars(&arg.value, bound, free);
@@ -1539,7 +1539,7 @@ impl CodeGenerator {
                 }
             }
 
-            ExpressionKind::Call { callee, args } => {
+            ExpressionKind::Call { callee, args, .. } => {
                 // Special handling for built-in functions
                 if let ExpressionKind::Identifier(name) = &callee.kind {
                     match name.as_str() {
@@ -3346,7 +3346,7 @@ impl CodeGenerator {
                 // Spawn creates a new fiber to execute the given expression
                 // The spawned expression is typically a function call
                 match &inner.kind {
-                    ExpressionKind::Call { callee, args } => {
+                    ExpressionKind::Call { callee, args, .. } => {
                         // Push arguments first
                         for arg in args {
                             self.generate_expression(&arg.value);
@@ -3846,6 +3846,7 @@ impl CodeGenerator {
                 receiver,
                 method,
                 args,
+                type_args: _, // TODO: Handle explicit type args for monomorphization
             } => {
                 // Generate receiver - keep on stack for method lookup
                 self.generate_expression(receiver);
