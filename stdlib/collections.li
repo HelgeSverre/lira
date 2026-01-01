@@ -1,15 +1,14 @@
 // Lira Standard Library - Collections Module
-// Enhanced array/list operations
+// Array operations as standalone functions.
+//
+// Note: Lira's parser doesn't currently support impl blocks on array types,
+// so these remain as standalone functions.
 
-// ============================================================
-// Array Transformation
-// ============================================================
+// ============================================================================
+// Transformation
+// ============================================================================
 
-// Map: apply function to each element
-// Note: Lira currently doesn't support passing functions as arguments
-// So we implement common specific transformations
-
-// Double each number
+/// Double each element
 fn map_double(arr: [int]) -> [int] {
     let result = [0]
     pop(result)
@@ -21,7 +20,7 @@ fn map_double(arr: [int]) -> [int] {
     return result
 }
 
-// Square each number
+/// Square each element
 fn map_square(arr: [int]) -> [int] {
     let result = [0]
     pop(result)
@@ -33,11 +32,11 @@ fn map_square(arr: [int]) -> [int] {
     return result
 }
 
-// ============================================================
-// Array Filtering
-// ============================================================
+// ============================================================================
+// Filtering
+// ============================================================================
 
-// Filter positive numbers
+/// Filter positive numbers
 fn filter_positive(arr: [int]) -> [int] {
     let result = [0]
     pop(result)
@@ -51,7 +50,7 @@ fn filter_positive(arr: [int]) -> [int] {
     return result
 }
 
-// Filter even numbers
+/// Filter even numbers
 fn filter_even(arr: [int]) -> [int] {
     let result = [0]
     pop(result)
@@ -65,7 +64,7 @@ fn filter_even(arr: [int]) -> [int] {
     return result
 }
 
-// Filter odd numbers
+/// Filter odd numbers
 fn filter_odd(arr: [int]) -> [int] {
     let result = [0]
     pop(result)
@@ -79,11 +78,11 @@ fn filter_odd(arr: [int]) -> [int] {
     return result
 }
 
-// ============================================================
-// Array Reduction
-// ============================================================
+// ============================================================================
+// Reduction
+// ============================================================================
 
-// Sum all elements
+/// Sum all elements
 fn sum(arr: [int]) -> int {
     var total = 0
     var i = 0
@@ -94,7 +93,7 @@ fn sum(arr: [int]) -> int {
     return total
 }
 
-// Product of all elements
+/// Product of all elements
 fn product(arr: [int]) -> int {
     var result = 1
     var i = 0
@@ -105,7 +104,7 @@ fn product(arr: [int]) -> int {
     return result
 }
 
-// Find minimum
+/// Find minimum value
 fn min_of(arr: [int]) -> int {
     if len(arr) == 0 {
         return 0
@@ -121,7 +120,7 @@ fn min_of(arr: [int]) -> int {
     return m
 }
 
-// Find maximum
+/// Find maximum value
 fn max_of(arr: [int]) -> int {
     if len(arr) == 0 {
         return 0
@@ -137,7 +136,7 @@ fn max_of(arr: [int]) -> int {
     return m
 }
 
-// Average
+/// Calculate average
 fn average(arr: [int]) -> float {
     if len(arr) == 0 {
         return 0.0
@@ -145,11 +144,11 @@ fn average(arr: [int]) -> float {
     return sum(arr) / len(arr)
 }
 
-// ============================================================
-// Array Search
-// ============================================================
+// ============================================================================
+// Search
+// ============================================================================
 
-// Check if array contains value
+/// Check if array contains value
 fn contains_int(arr: [int], value: int) -> bool {
     var i = 0
     while i < len(arr) {
@@ -161,7 +160,7 @@ fn contains_int(arr: [int], value: int) -> bool {
     return false
 }
 
-// Find index of value (-1 if not found)
+/// Find index of value (-1 if not found)
 fn index_of_int(arr: [int], value: int) -> int {
     var i = 0
     while i < len(arr) {
@@ -173,7 +172,7 @@ fn index_of_int(arr: [int], value: int) -> int {
     return -1
 }
 
-// Count occurrences
+/// Count occurrences of value
 fn count(arr: [int], value: int) -> int {
     var c = 0
     var i = 0
@@ -186,11 +185,11 @@ fn count(arr: [int], value: int) -> int {
     return c
 }
 
-// ============================================================
-// Array Manipulation
-// ============================================================
+// ============================================================================
+// Manipulation
+// ============================================================================
 
-// Reverse array
+/// Reverse array
 fn reverse_int(arr: [int]) -> [int] {
     let result = [0]
     pop(result)
@@ -202,7 +201,7 @@ fn reverse_int(arr: [int]) -> [int] {
     return result
 }
 
-// Take first n elements
+/// Take first n elements
 fn take(arr: [int], n: int) -> [int] {
     let result = [0]
     pop(result)
@@ -218,7 +217,7 @@ fn take(arr: [int], n: int) -> [int] {
     return result
 }
 
-// Skip first n elements
+/// Skip first n elements
 fn skip(arr: [int], n: int) -> [int] {
     let result = [0]
     pop(result)
@@ -230,7 +229,7 @@ fn skip(arr: [int], n: int) -> [int] {
     return result
 }
 
-// Slice array from start to end (exclusive)
+/// Slice from start to end (exclusive)
 fn slice(arr: [int], start: int, end: int) -> [int] {
     let result = [0]
     pop(result)
@@ -242,7 +241,21 @@ fn slice(arr: [int], start: int, end: int) -> [int] {
     return result
 }
 
-// Concatenate two arrays
+/// Remove duplicates (keep first occurrence)
+fn unique(arr: [int]) -> [int] {
+    let result = [0]
+    pop(result)
+    var i = 0
+    while i < len(arr) {
+        if !contains_int(result, arr[i]) {
+            push(result, arr[i])
+        }
+        i = i + 1
+    }
+    return result
+}
+
+/// Concatenate two arrays
 fn concat(arr1: [int], arr2: [int]) -> [int] {
     let result = [0]
     pop(result)
@@ -259,40 +272,11 @@ fn concat(arr1: [int], arr2: [int]) -> [int] {
     return result
 }
 
-// Remove duplicates
-fn unique(arr: [int]) -> [int] {
-    let result = [0]
-    pop(result)
-    var i = 0
-    while i < len(arr) {
-        if !contains_int(result, arr[i]) {
-            push(result, arr[i])
-        }
-        i = i + 1
-    }
-    return result
-}
+// ============================================================================
+// Sorting
+// ============================================================================
 
-// Flatten nested operation (combine multiple arrays)
-fn flatten(arrays: [[int]]) -> [int] {
-    let result = [0]
-    pop(result)
-    var i = 0
-    while i < len(arrays) {
-        var j = 0
-        while j < len(arrays[i]) {
-            push(result, arrays[i][j])
-            j = j + 1
-        }
-        i = i + 1
-    }
-    return result
-}
-
-// ============================================================
-// Sorting (Selection sort - works by finding min and appending)
-// ============================================================
-
+/// Sort in ascending order (selection sort)
 fn sort(arr: [int]) -> [int] {
     let result = [0]
     pop(result)
@@ -301,8 +285,7 @@ fn sort(arr: [int]) -> [int] {
         return result
     }
 
-    // Create a tracking array to mark used indices
-    // We use 0 = not used, 1 = used
+    // Create tracking array for used indices
     let used = [0]
     pop(used)
     var k = 0
@@ -311,10 +294,9 @@ fn sort(arr: [int]) -> [int] {
         k = k + 1
     }
 
-    // Selection sort: find min element not yet used, add to result
+    // Selection sort: find min element not yet used
     var count = 0
     while count < len(arr) {
-        // Find minimum element among unused ones
         var min_idx = -1
         var min_val = 0
         var j = 0
@@ -328,9 +310,7 @@ fn sort(arr: [int]) -> [int] {
             j = j + 1
         }
 
-        // Mark as used and add to result
-        // Since array element assignment doesn't work, we need a workaround
-        // We'll rebuild the used array with the new value
+        // Mark as used
         let new_used = [0]
         pop(new_used)
         j = 0
@@ -342,7 +322,6 @@ fn sort(arr: [int]) -> [int] {
             }
             j = j + 1
         }
-        // Clear old used and copy from new_used
         while len(used) > 0 {
             pop(used)
         }
@@ -359,15 +338,49 @@ fn sort(arr: [int]) -> [int] {
     return result
 }
 
+/// Sort in descending order
 fn sort_desc(arr: [int]) -> [int] {
     return reverse_int(sort(arr))
 }
 
-// ============================================================
-// Array Generation
-// ============================================================
+// ============================================================================
+// Boolean Operations
+// ============================================================================
 
-// Generate range [start, end)
+/// Check if all elements are non-zero
+fn all_truthy(arr: [int]) -> bool {
+    var i = 0
+    while i < len(arr) {
+        if arr[i] == 0 {
+            return false
+        }
+        i = i + 1
+    }
+    return true
+}
+
+/// Check if any element is non-zero
+fn any_truthy(arr: [int]) -> bool {
+    var i = 0
+    while i < len(arr) {
+        if arr[i] != 0 {
+            return true
+        }
+        i = i + 1
+    }
+    return false
+}
+
+/// Check if no elements are non-zero
+fn none_truthy(arr: [int]) -> bool {
+    return !any_truthy(arr)
+}
+
+// ============================================================================
+// Generation
+// ============================================================================
+
+/// Generate range [start, end)
 fn range(start: int, end: int) -> [int] {
     let result = [0]
     pop(result)
@@ -379,7 +392,7 @@ fn range(start: int, end: int) -> [int] {
     return result
 }
 
-// Generate range with step
+/// Generate range with step
 fn range_step(start: int, end: int, step: int) -> [int] {
     let result = [0]
     pop(result)
@@ -398,7 +411,7 @@ fn range_step(start: int, end: int, step: int) -> [int] {
     return result
 }
 
-// Repeat value n times
+/// Create array with value repeated n times
 fn repeat_int(value: int, n: int) -> [int] {
     let result = [0]
     pop(result)
@@ -410,27 +423,31 @@ fn repeat_int(value: int, n: int) -> [int] {
     return result
 }
 
-// ============================================================
-// Boolean Operations
-// ============================================================
-
-// Check if all elements are non-zero
-fn all_truthy(arr: [int]) -> bool {
+/// Flatten nested arrays into single array
+fn flatten(arrays: [[int]]) -> [int] {
+    let result = [0]
+    pop(result)
     var i = 0
-    while i < len(arr) {
-        if arr[i] == 0 {
-            return false
+    while i < len(arrays) {
+        var j = 0
+        while j < len(arrays[i]) {
+            push(result, arrays[i][j])
+            j = j + 1
         }
         i = i + 1
     }
-    return true
+    return result
 }
 
-// Check if any element is non-zero
-fn any_truthy(arr: [int]) -> bool {
+// ============================================================================
+// String Array Functions
+// ============================================================================
+
+/// Check if string array contains value
+fn contains_str(arr: [string], value: string) -> bool {
     var i = 0
     while i < len(arr) {
-        if arr[i] != 0 {
+        if arr[i] == value {
             return true
         }
         i = i + 1
@@ -438,7 +455,26 @@ fn any_truthy(arr: [int]) -> bool {
     return false
 }
 
-// Check if no elements are non-zero
-fn none_truthy(arr: [int]) -> bool {
-    return !any_truthy(arr)
+/// Find index of value in string array (-1 if not found)
+fn index_of_str(arr: [string], value: string) -> int {
+    var i = 0
+    while i < len(arr) {
+        if arr[i] == value {
+            return i
+        }
+        i = i + 1
+    }
+    return -1
+}
+
+/// Reverse string array
+fn reverse_str(arr: [string]) -> [string] {
+    let result = [""]
+    pop(result)
+    var i = len(arr) - 1
+    while i >= 0 {
+        push(result, arr[i])
+        i = i - 1
+    }
+    return result
 }

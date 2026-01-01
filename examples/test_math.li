@@ -11,11 +11,12 @@
 // @expect-contains: All Math Tests Passed
 
 import std.math
+import std.core
 
 println("=== Math Module Comprehensive Tests ===")
 
 // ============================================================================
-// Test sqrt
+// Test sqrt (builtin)
 // ============================================================================
 println("\n--- Testing sqrt ---")
 let root4 = sqrt(4.0)
@@ -31,7 +32,7 @@ if root4 == 2.0 && root16 == 4.0 {
 }
 
 // ============================================================================
-// Test pow
+// Test pow (builtin)
 // ============================================================================
 println("\n--- Testing pow ---")
 let pow_result = pow(2.0, 10.0)
@@ -84,7 +85,7 @@ if pi_const > 3.14 && pi_const < 3.15 && e_const > 2.71 && e_const < 2.72 && tau
 }
 
 // ============================================================================
-// Test rounding functions
+// Test rounding functions (builtins)
 // ============================================================================
 println("\n--- Testing rounding ---")
 let f = floor(3.7)
@@ -102,7 +103,7 @@ if f == 3.0 && ce == 4.0 && r == 4.0 && tr == -3.0 {
 }
 
 // ============================================================================
-// Test exp and logarithm functions
+// Test exp and logarithm functions (builtins)
 // ============================================================================
 println("\n--- Testing exp/log ---")
 let exp_result = exp(1.0)
@@ -120,7 +121,7 @@ if exp_result > 2.71 && exp_result < 2.72 && log10_result == 2.0 && log2_result 
 }
 
 // ============================================================================
-// Test hyperbolic functions
+// Test hyperbolic functions (builtins)
 // ============================================================================
 println("\n--- Testing hyperbolic functions ---")
 let sinh_result = sinh(0.0)
@@ -136,7 +137,7 @@ if sinh_result == 0.0 && cosh_result == 1.0 && tanh_result == 0.0 {
 }
 
 // ============================================================================
-// Test arc functions
+// Test arc functions (builtins)
 // ============================================================================
 println("\n--- Testing arc functions ---")
 let asin_result = asin(1.0)
@@ -149,7 +150,7 @@ println("atan(1.0) = " + atan_result)
 println("atan2(1.0, 1.0) = " + atan2_result)
 
 // ============================================================================
-// Test abs
+// Test abs (builtin for float)
 // ============================================================================
 println("\n--- Testing abs ---")
 let abs1 = abs(-5.5)
@@ -157,8 +158,10 @@ let abs2 = abs(3.3)
 println("abs(-5.5) = " + abs1)
 println("abs(3.3) = " + abs2)
 
+// Note: int.abs() requires core.li, tested separately
+
 // ============================================================================
-// Test is_nan, is_infinite, is_finite
+// Test is_nan, is_infinite, is_finite (builtins)
 // ============================================================================
 println("\n--- Testing classification functions ---")
 let nan_check = is_nan(0.0 / 0.0)
@@ -169,7 +172,7 @@ println("is_infinite(1/0) = " + inf_check)
 println("is_finite(42) = " + finite_check)
 
 // ============================================================================
-// Test gcd/lcm
+// Test gcd/lcm (standalone)
 // ============================================================================
 println("\n--- Testing gcd/lcm ---")
 
@@ -189,17 +192,17 @@ println("lcm(4, 6) = " + l1)
 println("lcm(3, 5) = " + l2)
 
 // ============================================================================
-// Test is_prime
+// Test is_prime (now method on int)
 // ============================================================================
 println("\n--- Testing is_prime ---")
-let p17 = is_prime(17)
-let p16 = is_prime(16)
-let p2 = is_prime(2)
-let p1 = is_prime(1)
-println("is_prime(17) = " + p17)
-println("is_prime(16) = " + p16)
-println("is_prime(2) = " + p2)
-println("is_prime(1) = " + p1)
+let p17 = 17.is_prime()
+let p16 = 16.is_prime()
+let p2 = 2.is_prime()
+let p1 = 1.is_prime()
+println("17.is_prime() = " + p17)
+println("16.is_prime() = " + p16)
+println("2.is_prime() = " + p2)
+println("1.is_prime() = " + p1)
 if p17 && !p16 && p2 && !p1 {
     println("prime test passed")
 } else {
@@ -207,33 +210,33 @@ if p17 && !p16 && p2 && !p1 {
 }
 
 // ============================================================================
-// Test factorial
+// Test factorial (now method on int)
 // ============================================================================
 println("\n--- Testing factorial ---")
-let f0 = factorial(0)
-let f1 = factorial(1)
-let f5 = factorial(5)
-let f10 = factorial(10)
-println("factorial(0) = " + f0)
-println("factorial(1) = " + f1)
-println("factorial(5) = " + f5)
-println("factorial(10) = " + f10)
+let f0 = 0.factorial()
+let f1 = 1.factorial()
+let f5 = 5.factorial()
+let f10 = 10.factorial()
+println("0.factorial() = " + f0)
+println("1.factorial() = " + f1)
+println("5.factorial() = " + f5)
+println("10.factorial() = " + f10)
 
 // ============================================================================
 // Test helper functions
 // ============================================================================
 println("\n--- Testing helper functions ---")
 
-let clamped = clamp(15.0, 0.0, 10.0)
-println("clamp(15, 0, 10) = " + clamped)
+let clamped = 15.0.clamp(0.0, 10.0)
+println("15.0.clamp(0, 10) = " + clamped)
 
 let lerp_result = lerp(0.0, 100.0, 0.5)
 println("lerp(0, 100, 0.5) = " + lerp_result)
 
-let rad = radians(180.0)
-let deg = degrees(3.141592653589793)
-println("radians(180) = " + rad)
-println("degrees(PI) = " + deg)
+let rad = 180.0.to_radians()
+let deg = 3.141592653589793.to_degrees()
+println("180.0.to_radians() = " + rad)
+println("PI.to_degrees() = " + deg)
 
 let dist = distance(0.0, 0.0, 3.0, 4.0)
 println("distance(0,0 to 3,4) = " + dist)
@@ -242,90 +245,90 @@ let hyp = hypot(3.0, 4.0)
 println("hypot(3, 4) = " + hyp)
 
 // ============================================================================
-// Test sign functions
+// Test sign functions (now methods)
 // ============================================================================
 println("\n--- Testing sign ---")
-let sign_pos = sign(5.0)
-let sign_neg = sign(-3.0)
-let sign_zero = sign(0.0)
-println("sign(5.0) = " + sign_pos)
-println("sign(-3.0) = " + sign_neg)
-println("sign(0.0) = " + sign_zero)
+let sign_pos = 5.0.sign()
+let sign_neg = (-3.0).sign()
+let sign_zero = 0.0.sign()
+println("5.0.sign() = " + sign_pos)
+println("(-3.0).sign() = " + sign_neg)
+println("0.0.sign() = " + sign_zero)
 
 // ============================================================================
-// Test min/max functions
+// Test min/max functions (from core)
 // ============================================================================
 println("\n--- Testing min/max ---")
 let min_result = min_float(3.5, 7.2)
 let max_result = max_float(3.5, 7.2)
-let min_int_result = min_int(5, 3)
-let max_int_result = max_int(5, 3)
+let min_int_result = min(5, 3)
+let max_int_result = max(5, 3)
 println("min_float(3.5, 7.2) = " + min_result)
 println("max_float(3.5, 7.2) = " + max_result)
-println("min_int(5, 3) = " + min_int_result)
-println("max_int(5, 3) = " + max_int_result)
+println("min(5, 3) = " + min_int_result)
+println("max(5, 3) = " + max_int_result)
 
 // ============================================================================
-// Test power functions
+// Test power functions (now methods on float)
 // ============================================================================
 println("\n--- Testing power functions ---")
-let sq = square(5.0)
-let cu = cube(3.0)
-let cbrt_result = cbrt(27.0)
-println("square(5.0) = " + sq)
-println("cube(3.0) = " + cu)
-println("cbrt(27.0) = " + cbrt_result)
+let sq = 5.0.square()
+let cu = 3.0.cube()
+let cbrt_result = 27.0.cbrt()
+println("5.0.square() = " + sq)
+println("3.0.cube() = " + cu)
+println("27.0.cbrt() = " + cbrt_result)
 
 // ============================================================================
-// Test integer power
+// Test integer power (now method on int)
 // ============================================================================
-println("\n--- Testing pow_int ---")
-let pow_int_result = pow_int(2, 10)
-println("pow_int(2, 10) = " + pow_int_result)
+println("\n--- Testing int.pow ---")
+let pow_int_result = 2.pow(10)
+println("2.pow(10) = " + pow_int_result)
 
 // ============================================================================
-// Test fibonacci
+// Test fibonacci (now method on int)
 // ============================================================================
 println("\n--- Testing fibonacci ---")
-let fib0 = fibonacci(0)
-let fib1 = fibonacci(1)
-let fib10 = fibonacci(10)
-println("fibonacci(0) = " + fib0)
-println("fibonacci(1) = " + fib1)
-println("fibonacci(10) = " + fib10)
+let fib0 = 0.fibonacci()
+let fib1 = 1.fibonacci()
+let fib10 = 10.fibonacci()
+println("0.fibonacci() = " + fib0)
+println("1.fibonacci() = " + fib1)
+println("10.fibonacci() = " + fib10)
 
 // ============================================================================
-// Test is_power_of_two
+// Test is_power_of_two (now method on int)
 // ============================================================================
 println("\n--- Testing is_power_of_two ---")
-let pot8 = is_power_of_two(8)
-let pot10 = is_power_of_two(10)
-println("is_power_of_two(8) = " + pot8)
-println("is_power_of_two(10) = " + pot10)
+let pot8 = 8.is_power_of_two()
+let pot10 = 10.is_power_of_two()
+println("8.is_power_of_two() = " + pot8)
+println("10.is_power_of_two() = " + pot10)
 
 // ============================================================================
-// Test popcount
+// Test popcount (now method on int)
 // ============================================================================
 println("\n--- Testing popcount ---")
-let pop7 = popcount(7)   // 111 in binary = 3 bits
-let pop15 = popcount(15) // 1111 in binary = 4 bits
-println("popcount(7) = " + pop7)
-println("popcount(15) = " + pop15)
+let pop7 = 7.popcount()   // 111 in binary = 3 bits
+let pop15 = 15.popcount() // 1111 in binary = 4 bits
+println("7.popcount() = " + pop7)
+println("15.popcount() = " + pop15)
 
 // ============================================================================
-// Test sigmoid
+// Test sigmoid (now method on float)
 // ============================================================================
 println("\n--- Testing sigmoid ---")
-let sig0 = sigmoid(0.0)
-println("sigmoid(0) = " + sig0)
+let sig0 = 0.0.sigmoid()
+println("0.0.sigmoid() = " + sig0)
 
 // ============================================================================
-// Test sum functions
+// Test sum functions (now methods on int)
 // ============================================================================
 println("\n--- Testing sum functions ---")
-let sum_10 = sum_to(10)
-let sum_sq_5 = sum_squares_to(5)
-println("sum_to(10) = " + sum_10)
-println("sum_squares_to(5) = " + sum_sq_5)
+let sum_10 = 10.sum_to()
+let sum_sq_5 = 5.sum_squares_to()
+println("10.sum_to() = " + sum_10)
+println("5.sum_squares_to() = " + sum_sq_5)
 
 println("\n=== All Math Tests Passed ===")

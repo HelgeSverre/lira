@@ -1,138 +1,394 @@
 // Lira Standard Library - Strings Module
-// String manipulation utilities
-// Note: Named "strings" (plural) to avoid conflict with the "string" type keyword.
+// String manipulation via extension methods on the string type.
 //
-// This module provides comprehensive string manipulation functions.
-// It uses a combination of pure Lira implementations and host primitives
-// (syscalls 30-39) for operations that require character-level access.
+// Usage: "hello".to_upper() instead of to_upper("hello")
+//
+// Uses syscalls 30-39 for character-level operations.
 
-// ============================================================================
-// Case Conversion (using host primitives)
-// ============================================================================
+impl string {
+    // ========================================================================
+    // Case Conversion
+    // ========================================================================
 
-// Convert string to uppercase
-fn to_upper(s: string) -> string {
-    return str_to_upper(s)
-}
-
-// Convert string to lowercase
-fn to_lower(s: string) -> string {
-    return str_to_lower(s)
-}
-
-// ============================================================================
-// Substring and Character Access
-// ============================================================================
-
-// Get character at index (as a string)
-// Returns empty string if index is out of bounds
-fn char_at(s: string, index: int) -> string {
-    if index < 0 || index >= len(s) {
-        return ""
+    /// Convert to uppercase
+    fn to_upper(self) -> string {
+        return str_to_upper(self)
     }
-    return str_substring(s, index, index + 1)
+
+    /// Convert to lowercase
+    fn to_lower(self) -> string {
+        return str_to_lower(self)
+    }
+
+    /// Capitalize first character
+    fn capitalize(self) -> string {
+        if len(self) == 0 {
+            return self
+        }
+        let first = str_to_upper(str_substring(self, 0, 1))
+        if len(self) == 1 {
+            return first
+        }
+        return first + str_substring(self, 1, len(self))
+    }
+
+    /// Convert to title case (capitalize each word)
+    fn title_case(self) -> string {
+        if len(self) == 0 {
+            return self
+        }
+
+        var result = ""
+        var capitalize_next = true
+        var i = 0
+        while i < len(self) {
+            let ch = str_substring(self, i, i + 1)
+            let code = str_char_code(self, i)
+
+            if code == 32 || code == 9 || code == 10 {
+                result = result + ch
+                capitalize_next = true
+            } else if capitalize_next {
+                result = result + str_to_upper(ch)
+                capitalize_next = false
+            } else {
+                result = result + str_to_lower(ch)
+            }
+            i = i + 1
+        }
+        return result
+    }
+
+    // ========================================================================
+    // Substring and Character Access
+    // ========================================================================
+
+    /// Get character at index (as a string), empty if out of bounds
+    fn char_at(self, index: int) -> string {
+        if index < 0 || index >= len(self) {
+            return ""
+        }
+        return str_substring(self, index, index + 1)
+    }
+
+    /// Get substring from start (inclusive) to end (exclusive)
+    fn substring(self, start: int, end: int) -> string {
+        return str_substring(self, start, end)
+    }
+
+    /// Get character code at index, -1 if out of bounds
+    fn char_code(self, index: int) -> int {
+        return str_char_code(self, index)
+    }
+
+    // ========================================================================
+    // Search Functions
+    // ========================================================================
+
+    /// Find first occurrence of substring, -1 if not found
+    fn index_of(self, substr: string) -> int {
+        return str_index_of(self, substr)
+    }
+
+    /// Find last occurrence of substring, -1 if not found
+    fn last_index_of(self, substr: string) -> int {
+        if len(substr) == 0 {
+            return len(self)
+        }
+        if len(substr) > len(self) {
+            return -1
+        }
+
+        var last = -1
+        var pos = 0
+        while pos <= len(self) - len(substr) {
+            let idx = str_index_of(str_substring(self, pos, len(self)), substr)
+            if idx < 0 {
+                return last
+            }
+            last = pos + idx
+            pos = last + 1
+        }
+        return last
+    }
+
+    /// Check if string contains substring
+    fn contains(self, substr: string) -> bool {
+        return str_index_of(self, substr) >= 0
+    }
+
+    /// Check if string starts with prefix
+    fn starts_with(self, prefix: string) -> bool {
+        if len(prefix) > len(self) {
+            return false
+        }
+        return str_substring(self, 0, len(prefix)) == prefix
+    }
+
+    /// Check if string ends with suffix
+    fn ends_with(self, suffix: string) -> bool {
+        if len(suffix) > len(self) {
+            return false
+        }
+        let start = len(self) - len(suffix)
+        return str_substring(self, start, len(self)) == suffix
+    }
+
+    // ========================================================================
+    // Trimming Functions
+    // ========================================================================
+
+    /// Trim whitespace from both ends
+    fn trim(self) -> string {
+        return str_trim(self)
+    }
+
+    /// Trim whitespace from start
+    fn trim_start(self) -> string {
+        return str_trim_start(self)
+    }
+
+    /// Trim whitespace from end
+    fn trim_end(self) -> string {
+        return str_trim_end(self)
+    }
+
+    // ========================================================================
+    // Split and Join
+    // ========================================================================
+
+    /// Split string by delimiter
+    fn split(self, delimiter: string) -> [string] {
+        return str_split(self, delimiter)
+    }
+
+    // ========================================================================
+    // Replacement Functions
+    // ========================================================================
+
+    /// Replace all occurrences of old_str with new_str
+    fn replace(self, old_str: string, new_str: string) -> string {
+        if len(old_str) == 0 {
+            return self
+        }
+        let parts = str_split(self, old_str)
+        return join(parts, new_str)
+    }
+
+    /// Replace first occurrence of old_str with new_str
+    fn replace_first(self, old_str: string, new_str: string) -> string {
+        let idx = str_index_of(self, old_str)
+        if idx < 0 {
+            return self
+        }
+        let before = str_substring(self, 0, idx)
+        let after = str_substring(self, idx + len(old_str), len(self))
+        return before + new_str + after
+    }
+
+    // ========================================================================
+    // Repetition and Reversal
+    // ========================================================================
+
+    /// Repeat string n times
+    fn repeat(self, count: int) -> string {
+        if count <= 0 {
+            return ""
+        }
+        var result = ""
+        var i = 0
+        while i < count {
+            result = result + self
+            i = i + 1
+        }
+        return result
+    }
+
+    /// Reverse the string
+    fn reverse(self) -> string {
+        var result = ""
+        var i = len(self) - 1
+        while i >= 0 {
+            result = result + str_substring(self, i, i + 1)
+            i = i - 1
+        }
+        return result
+    }
+
+    // ========================================================================
+    // Padding Functions
+    // ========================================================================
+
+    /// Pad start of string to reach target length
+    fn pad_start(self, length: int, pad: string) -> string {
+        if len(self) >= length {
+            return self
+        }
+        if len(pad) == 0 {
+            return self
+        }
+
+        var padding = ""
+        while len(padding) + len(self) < length {
+            padding = padding + pad
+        }
+        let needed = length - len(self)
+        if len(padding) > needed {
+            padding = str_substring(padding, 0, needed)
+        }
+        return padding + self
+    }
+
+    /// Pad end of string to reach target length
+    fn pad_end(self, length: int, pad: string) -> string {
+        if len(self) >= length {
+            return self
+        }
+        if len(pad) == 0 {
+            return self
+        }
+
+        var padding = ""
+        while len(self) + len(padding) < length {
+            padding = padding + pad
+        }
+        let needed = length - len(self)
+        if len(padding) > needed {
+            padding = str_substring(padding, 0, needed)
+        }
+        return self + padding
+    }
+
+    // ========================================================================
+    // Validation Functions
+    // ========================================================================
+
+    /// Check if string is empty
+    fn is_empty(self) -> bool {
+        return len(self) == 0
+    }
+
+    /// Check if string is empty or contains only whitespace
+    fn is_blank(self) -> bool {
+        return len(str_trim(self)) == 0
+    }
+
+    /// Check if string consists only of digits
+    fn is_numeric(self) -> bool {
+        if len(self) == 0 {
+            return false
+        }
+        var i = 0
+        while i < len(self) {
+            let code = str_char_code(self, i)
+            if code < 48 || code > 57 {
+                return false
+            }
+            i = i + 1
+        }
+        return true
+    }
+
+    /// Check if string consists only of letters (a-z, A-Z)
+    fn is_alpha(self) -> bool {
+        if len(self) == 0 {
+            return false
+        }
+        var i = 0
+        while i < len(self) {
+            let code = str_char_code(self, i)
+            let is_upper = code >= 65 && code <= 90
+            let is_lower = code >= 97 && code <= 122
+            if !is_upper && !is_lower {
+                return false
+            }
+            i = i + 1
+        }
+        return true
+    }
+
+    /// Check if string consists only of letters and digits
+    fn is_alphanumeric(self) -> bool {
+        if len(self) == 0 {
+            return false
+        }
+        var i = 0
+        while i < len(self) {
+            let code = str_char_code(self, i)
+            let is_digit = code >= 48 && code <= 57
+            let is_upper = code >= 65 && code <= 90
+            let is_lower = code >= 97 && code <= 122
+            if !is_digit && !is_upper && !is_lower {
+                return false
+            }
+            i = i + 1
+        }
+        return true
+    }
+
+    // ========================================================================
+    // Counting Functions
+    // ========================================================================
+
+    /// Count occurrences of substring
+    fn count(self, substr: string) -> int {
+        if len(substr) == 0 || len(self) == 0 {
+            return 0
+        }
+
+        var total = 0
+        var pos = 0
+        while pos <= len(self) - len(substr) {
+            let remaining = str_substring(self, pos, len(self))
+            let idx = str_index_of(remaining, substr)
+            if idx < 0 {
+                return total
+            }
+            total = total + 1
+            pos = pos + idx + len(substr)
+        }
+        return total
+    }
+
+    /// Count number of words (space-separated)
+    fn word_count(self) -> int {
+        let trimmed = str_trim(self)
+        if len(trimmed) == 0 {
+            return 0
+        }
+
+        var words = 0
+        var in_word = false
+        var i = 0
+        while i < len(trimmed) {
+            let ch = trimmed[i]
+            if ch == " " || ch == "\t" || ch == "\n" {
+                if in_word {
+                    words = words + 1
+                    in_word = false
+                }
+            } else {
+                in_word = true
+            }
+            i = i + 1
+        }
+        if in_word {
+            words = words + 1
+        }
+        return words
+    }
 }
 
-// Get substring from start (inclusive) to end (exclusive)
-fn substring(s: string, start: int, end: int) -> string {
-    return str_substring(s, start, end)
-}
+// ============================================================================
+// Standalone Functions (for operations not on a single string)
+// ============================================================================
 
-// Get character code at index
-// Returns -1 if index is out of bounds
-fn char_code(s: string, index: int) -> int {
-    return str_char_code(s, index)
-}
-
-// Create a single-character string from a character code
+/// Create a single-character string from a character code
 fn from_char_code(code: int) -> string {
     return str_from_char_code(code)
 }
 
-// ============================================================================
-// Search Functions
-// ============================================================================
-
-// Find first occurrence of substring
-// Returns -1 if not found
-fn index_of(s: string, substr: string) -> int {
-    return str_index_of(s, substr)
-}
-
-// Find last occurrence of substring
-// Returns -1 if not found
-fn last_index_of(s: string, substr: string) -> int {
-    if len(substr) == 0 {
-        return len(s)
-    }
-    if len(substr) > len(s) {
-        return -1
-    }
-
-    var last = -1
-    var pos = 0
-    while pos <= len(s) - len(substr) {
-        let idx = str_index_of(str_substring(s, pos, len(s)), substr)
-        if idx < 0 {
-            return last
-        }
-        last = pos + idx
-        pos = last + 1
-    }
-    return last
-}
-
-// Check if string contains substring
-fn contains(s: string, substr: string) -> bool {
-    return str_index_of(s, substr) >= 0
-}
-
-// Check if string starts with prefix
-fn starts_with(s: string, prefix: string) -> bool {
-    if len(prefix) > len(s) {
-        return false
-    }
-    return str_substring(s, 0, len(prefix)) == prefix
-}
-
-// Check if string ends with suffix
-fn ends_with(s: string, suffix: string) -> bool {
-    if len(suffix) > len(s) {
-        return false
-    }
-    let start = len(s) - len(suffix)
-    return str_substring(s, start, len(s)) == suffix
-}
-
-// ============================================================================
-// Trimming Functions
-// ============================================================================
-
-// Trim whitespace from both ends
-fn trim(s: string) -> string {
-    return str_trim(s)
-}
-
-// Trim whitespace from start
-fn trim_start(s: string) -> string {
-    return str_trim_start(s)
-}
-
-// Trim whitespace from end
-fn trim_end(s: string) -> string {
-    return str_trim_end(s)
-}
-
-// ============================================================================
-// Split and Join
-// ============================================================================
-
-// Split string by delimiter
-fn split(s: string, delimiter: string) -> [string] {
-    return str_split(s, delimiter)
-}
-
-// Join array of strings with delimiter
+/// Join array of strings with delimiter
 fn join(arr: [string], delimiter: string) -> string {
     if len(arr) == 0 {
         return ""
@@ -145,274 +401,4 @@ fn join(arr: [string], delimiter: string) -> string {
         i = i + 1
     }
     return result
-}
-
-// ============================================================================
-// Replacement Functions
-// ============================================================================
-
-// Replace all occurrences of old_str with new_str
-fn replace(s: string, old_str: string, new_str: string) -> string {
-    if len(old_str) == 0 {
-        return s
-    }
-
-    let parts = str_split(s, old_str)
-    return join(parts, new_str)
-}
-
-// Replace first occurrence of old_str with new_str
-fn replace_first(s: string, old_str: string, new_str: string) -> string {
-    let idx = str_index_of(s, old_str)
-    if idx < 0 {
-        return s
-    }
-
-    let before = str_substring(s, 0, idx)
-    let after = str_substring(s, idx + len(old_str), len(s))
-    return before + new_str + after
-}
-
-// ============================================================================
-// Repetition and Reversal
-// ============================================================================
-
-// Repeat string n times
-fn repeat(s: string, count: int) -> string {
-    if count <= 0 {
-        return ""
-    }
-
-    var result = ""
-    var i = 0
-    while i < count {
-        result = result + s
-        i = i + 1
-    }
-    return result
-}
-
-// Reverse a string
-fn reverse(s: string) -> string {
-    var result = ""
-    var i = len(s) - 1
-    while i >= 0 {
-        result = result + str_substring(s, i, i + 1)
-        i = i - 1
-    }
-    return result
-}
-
-// ============================================================================
-// Padding Functions
-// ============================================================================
-
-// Pad start of string to reach target length
-fn pad_start(s: string, length: int, pad: string) -> string {
-    if len(s) >= length {
-        return s
-    }
-    if len(pad) == 0 {
-        return s
-    }
-
-    var padding = ""
-    while len(padding) + len(s) < length {
-        padding = padding + pad
-    }
-    // Trim excess padding if needed
-    let needed = length - len(s)
-    if len(padding) > needed {
-        padding = str_substring(padding, 0, needed)
-    }
-    return padding + s
-}
-
-// Pad end of string to reach target length
-fn pad_end(s: string, length: int, pad: string) -> string {
-    if len(s) >= length {
-        return s
-    }
-    if len(pad) == 0 {
-        return s
-    }
-
-    var padding = ""
-    while len(s) + len(padding) < length {
-        padding = padding + pad
-    }
-    // Trim excess padding if needed
-    let needed = length - len(s)
-    if len(padding) > needed {
-        padding = str_substring(padding, 0, needed)
-    }
-    return s + padding
-}
-
-// ============================================================================
-// Validation Functions
-// ============================================================================
-
-// Check if string is empty
-fn is_empty(s: string) -> bool {
-    return len(s) == 0
-}
-
-// Check if string is empty or contains only whitespace
-fn is_blank(s: string) -> bool {
-    return len(str_trim(s)) == 0
-}
-
-// Check if string consists only of digits
-fn is_numeric(s: string) -> bool {
-    if len(s) == 0 {
-        return false
-    }
-
-    var i = 0
-    while i < len(s) {
-        let code = str_char_code(s, i)
-        // '0' = 48, '9' = 57
-        if code < 48 || code > 57 {
-            return false
-        }
-        i = i + 1
-    }
-    return true
-}
-
-// Check if string consists only of letters (a-z, A-Z)
-fn is_alpha(s: string) -> bool {
-    if len(s) == 0 {
-        return false
-    }
-
-    var i = 0
-    while i < len(s) {
-        let code = str_char_code(s, i)
-        // 'A' = 65, 'Z' = 90, 'a' = 97, 'z' = 122
-        let is_upper = code >= 65 && code <= 90
-        let is_lower = code >= 97 && code <= 122
-        if !is_upper && !is_lower {
-            return false
-        }
-        i = i + 1
-    }
-    return true
-}
-
-// Check if string consists only of letters and digits
-fn is_alphanumeric(s: string) -> bool {
-    if len(s) == 0 {
-        return false
-    }
-
-    var i = 0
-    while i < len(s) {
-        let code = str_char_code(s, i)
-        let is_digit = code >= 48 && code <= 57
-        let is_upper = code >= 65 && code <= 90
-        let is_lower = code >= 97 && code <= 122
-        if !is_digit && !is_upper && !is_lower {
-            return false
-        }
-        i = i + 1
-    }
-    return true
-}
-
-// ============================================================================
-// Capitalization Functions
-// ============================================================================
-
-// Capitalize first character
-fn capitalize(s: string) -> string {
-    if len(s) == 0 {
-        return s
-    }
-    let first = str_to_upper(str_substring(s, 0, 1))
-    if len(s) == 1 {
-        return first
-    }
-    return first + str_substring(s, 1, len(s))
-}
-
-// Convert to title case (capitalize each word)
-fn title_case(s: string) -> string {
-    if len(s) == 0 {
-        return s
-    }
-
-    var result = ""
-    var capitalize_next = true
-    var i = 0
-    while i < len(s) {
-        let ch = str_substring(s, i, i + 1)
-        let code = str_char_code(s, i)
-
-        // Check if it's a space or punctuation (space=32, tab=9, newline=10)
-        if code == 32 || code == 9 || code == 10 {
-            result = result + ch
-            capitalize_next = true
-        } else if capitalize_next {
-            result = result + str_to_upper(ch)
-            capitalize_next = false
-        } else {
-            result = result + str_to_lower(ch)
-        }
-        i = i + 1
-    }
-    return result
-}
-
-// ============================================================================
-// Counting Functions
-// ============================================================================
-
-// Count occurrences of substring
-fn count(s: string, substr: string) -> int {
-    if len(substr) == 0 || len(s) == 0 {
-        return 0
-    }
-
-    var total = 0
-    var pos = 0
-    while pos <= len(s) - len(substr) {
-        let remaining = str_substring(s, pos, len(s))
-        let idx = str_index_of(remaining, substr)
-        if idx < 0 {
-            return total
-        }
-        total = total + 1
-        pos = pos + idx + len(substr)
-    }
-    return total
-}
-
-// Count number of words (space-separated)
-fn word_count(s: string) -> int {
-    let trimmed = str_trim(s)
-    if len(trimmed) == 0 {
-        return 0
-    }
-
-    var words = 0
-    var in_word = false
-    var i = 0
-    while i < len(trimmed) {
-        let ch = trimmed[i]
-        if ch == " " || ch == "\t" || ch == "\n" {
-            if in_word {
-                words = words + 1
-                in_word = false
-            }
-        } else {
-            in_word = true
-        }
-        i = i + 1
-    }
-    if in_word {
-        words = words + 1
-    }
-    return words
 }

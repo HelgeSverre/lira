@@ -1,10 +1,14 @@
 // Lira Standard Library - Math Module
-// Mathematical functions and constants
+// Mathematical functions and constants.
+//
+// Usage: 5.factorial() or (-3).sign() instead of factorial(5) or sign(-3)
+//
+// Note: Many basic trig functions (sin, cos, sqrt, etc.) are VM builtins.
+// See the "Built-in Functions" section for the full list.
 
 // ============================================================================
 // Mathematical Constants
 // ============================================================================
-// These are provided as functions to work around module-level visibility issues
 
 fn math_pi() -> float {
     return 3.141592653589793
@@ -15,132 +19,322 @@ fn math_e() -> float {
 }
 
 fn math_tau() -> float {
-    return 6.283185307179586    // 2 * PI
+    return 6.283185307179586
 }
 
 fn math_sqrt2() -> float {
-    return 1.4142135623730951   // sqrt(2)
+    return 1.4142135623730951
 }
 
 fn math_sqrt3() -> float {
-    return 1.7320508075688772   // sqrt(3)
+    return 1.7320508075688772
 }
 
 fn math_ln2() -> float {
-    return 0.6931471805599453   // ln(2)
+    return 0.6931471805599453
 }
 
 fn math_ln10() -> float {
-    return 2.302585092994046    // ln(10)
+    return 2.302585092994046
 }
 
 fn math_log2e() -> float {
-    return 1.4426950408889634   // log2(e)
+    return 1.4426950408889634
 }
 
 fn math_log10e() -> float {
-    return 0.4342944819032518   // log10(e)
+    return 0.4342944819032518
 }
 
 // ============================================================================
-// Built-in Math Functions (syscalls 140-163)
-// These are implemented as native functions in the runtime:
-//
-// Power and Logarithm Functions:
-//   sqrt(x: float) -> float        - Square root
-//   pow(base: float, exp: float) -> float - Power
-//   exp(x: float) -> float         - Exponential (e^x)
-//   ln(x: float) -> float          - Natural logarithm
-//   log10(x: float) -> float       - Base-10 logarithm
-//   log2(x: float) -> float        - Base-2 logarithm
-//
-// Trigonometric Functions:
-//   sin(x: float) -> float         - Sine
-//   cos(x: float) -> float         - Cosine
-//   tan(x: float) -> float         - Tangent
-//   asin(x: float) -> float        - Arcsine
-//   acos(x: float) -> float        - Arccosine
-//   atan(x: float) -> float        - Arctangent
-//   atan2(y: float, x: float) -> float - Two-argument arctangent
-//
-// Hyperbolic Functions:
-//   sinh(x: float) -> float        - Hyperbolic sine
-//   cosh(x: float) -> float        - Hyperbolic cosine
-//   tanh(x: float) -> float        - Hyperbolic tangent
-//
-// Rounding Functions:
-//   floor(x: float) -> float       - Round down
-//   ceil(x: float) -> float        - Round up
-//   round(x: float) -> float       - Round to nearest
-//   trunc(x: float) -> float       - Truncate (round towards zero)
-//   abs(x: float) -> float         - Absolute value
-//
-// Classification Functions:
-//   is_nan(x: float) -> bool       - Check if NaN
-//   is_infinite(x: float) -> bool  - Check if infinite
-//   is_finite(x: float) -> bool    - Check if finite
+// Built-in Math Functions (VM syscalls 140-163)
 // ============================================================================
+//
+// These are native functions available without import:
+//
+// Power and Logarithm:
+//   sqrt(x: float) -> float       - Square root
+//   pow(base: float, exp: float)  - Power
+//   exp(x: float) -> float        - Exponential (e^x)
+//   ln(x: float) -> float         - Natural logarithm
+//   log10(x: float) -> float      - Base-10 logarithm
+//   log2(x: float) -> float       - Base-2 logarithm
+//
+// Trigonometric:
+//   sin(x), cos(x), tan(x)        - Basic trig
+//   asin(x), acos(x), atan(x)     - Inverse trig
+//   atan2(y, x)                   - Two-argument arctangent
+//
+// Hyperbolic:
+//   sinh(x), cosh(x), tanh(x)     - Hyperbolic functions
+//
+// Rounding:
+//   floor(x), ceil(x), round(x), trunc(x)
+//   abs(x: float) -> float        - Absolute value (float)
+//
+// Classification:
+//   is_nan(x), is_infinite(x), is_finite(x)
 
 // ============================================================================
-// Additional Pure Lira Functions
+// Integer Methods
 // ============================================================================
 
-// Absolute value for integers
-fn abs_int(x: int) -> int {
-    if x < 0 {
-        return -x
+impl int {
+    /// Sign function: returns -1, 0, or 1
+    fn sign(self) -> int {
+        if self < 0 {
+            return -1
+        } else if self > 0 {
+            return 1
+        }
+        return 0
     }
-    return x
+
+    /// Factorial (non-recursive)
+    fn factorial(self) -> int {
+        if self <= 1 {
+            return 1
+        }
+        var result = 1
+        var i = 2
+        while i <= self {
+            result = result * i
+            i = i + 1
+        }
+        return result
+    }
+
+    /// Fibonacci number (iterative)
+    fn fibonacci(self) -> int {
+        if self <= 0 {
+            return 0
+        }
+        if self == 1 {
+            return 1
+        }
+        var a = 0
+        var b = 1
+        var i = 2
+        while i <= self {
+            let temp = a + b
+            a = b
+            b = temp
+            i = i + 1
+        }
+        return b
+    }
+
+    /// Check if prime
+    fn is_prime(self) -> bool {
+        if self < 2 {
+            return false
+        }
+        if self == 2 {
+            return true
+        }
+        if self % 2 == 0 {
+            return false
+        }
+        var i = 3
+        while i * i <= self {
+            if self % i == 0 {
+                return false
+            }
+            i = i + 2
+        }
+        return true
+    }
+
+    /// Check if even
+    fn is_even(self) -> bool {
+        return self % 2 == 0
+    }
+
+    /// Check if odd
+    fn is_odd(self) -> bool {
+        return self % 2 != 0
+    }
+
+    /// Check if power of 2
+    fn is_power_of_two(self) -> bool {
+        return self > 0 && (self & (self - 1)) == 0
+    }
+
+    /// Square
+    fn square(self) -> int {
+        return self * self
+    }
+
+    /// Cube
+    fn cube(self) -> int {
+        return self * self * self
+    }
+
+    /// Next power of 2 >= self
+    fn next_power_of_two(self) -> int {
+        if self <= 0 {
+            return 1
+        }
+        var v = self - 1
+        v = v | (v >> 1)
+        v = v | (v >> 2)
+        v = v | (v >> 4)
+        v = v | (v >> 8)
+        v = v | (v >> 16)
+        v = v | (v >> 32)
+        return v + 1
+    }
+
+    /// Population count (number of set bits)
+    fn popcount(self) -> int {
+        var count = 0
+        var x = self
+        while x != 0 {
+            count = count + 1
+            x = x & (x - 1)
+        }
+        return count
+    }
+
+    /// Sum from 1 to self
+    fn sum_to(self) -> int {
+        return self * (self + 1) / 2
+    }
+
+    /// Sum of squares from 1 to self
+    fn sum_squares_to(self) -> int {
+        return self * (self + 1) * (2 * self + 1) / 6
+    }
+
+    /// Power (integer exponent)
+    fn pow(self, exp: int) -> int {
+        if exp == 0 {
+            return 1
+        }
+        if exp < 0 {
+            return 0
+        }
+        var result = 1
+        var b = self
+        var e = exp
+        while e > 0 {
+            if e % 2 == 1 {
+                result = result * b
+            }
+            b = b * b
+            e = e / 2
+        }
+        return result
+    }
+
+    /// Floor modulo (handles negatives correctly)
+    fn mod_floor(self, divisor: int) -> int {
+        return ((self % divisor) + divisor) % divisor
+    }
 }
 
-// Sign function: returns -1, 0, or 1
-fn sign(x: float) -> int {
-    if x < 0.0 {
-        return -1
-    } else if x > 0.0 {
-        return 1
+// ============================================================================
+// Float Methods
+// ============================================================================
+
+impl float {
+    /// Sign function: returns -1, 0, or 1
+    fn sign(self) -> int {
+        if self < 0.0 {
+            return -1
+        } else if self > 0.0 {
+            return 1
+        }
+        return 0
     }
-    return 0
+
+    /// Clamp to range [min_val, max_val]
+    fn clamp(self, min_val: float, max_val: float) -> float {
+        if self < min_val {
+            return min_val
+        }
+        if self > max_val {
+            return max_val
+        }
+        return self
+    }
+
+    /// Square
+    fn square(self) -> float {
+        return self * self
+    }
+
+    /// Cube
+    fn cube(self) -> float {
+        return self * self * self
+    }
+
+    /// Cube root
+    fn cbrt(self) -> float {
+        if self >= 0.0 {
+            return pow(self, 1.0 / 3.0)
+        }
+        return -pow(-self, 1.0 / 3.0)
+    }
+
+    /// Sigmoid (logistic function)
+    fn sigmoid(self) -> float {
+        return 1.0 / (1.0 + exp(-self))
+    }
+
+    /// ReLU (Rectified Linear Unit)
+    fn relu(self) -> float {
+        if self > 0.0 {
+            return self
+        }
+        return 0.0
+    }
+
+    /// Convert degrees to radians
+    fn to_radians(self) -> float {
+        return self * 3.141592653589793 / 180.0
+    }
+
+    /// Convert radians to degrees
+    fn to_degrees(self) -> float {
+        return self * 180.0 / 3.141592653589793
+    }
+
+    /// Wrap angle to [0, 2*PI)
+    fn wrap_angle(self) -> float {
+        let tau = 6.283185307179586
+        var result = self
+        while result < 0.0 {
+            result = result + tau
+        }
+        while result >= tau {
+            result = result - tau
+        }
+        return result
+    }
+
+    /// Normalize angle to [-PI, PI]
+    fn normalize_angle(self) -> float {
+        let pi = 3.141592653589793
+        let tau = 6.283185307179586
+        var result = self.wrap_angle()
+        if result > pi {
+            result = result - tau
+        }
+        return result
+    }
 }
 
-// Sign function for integers
-fn sign_int(x: int) -> int {
-    if x < 0 {
-        return -1
-    } else if x > 0 {
-        return 1
-    }
-    return 0
-}
+// ============================================================================
+// Standalone Functions (multi-argument or conceptually independent)
+// ============================================================================
 
-// Clamp value to range
-fn clamp(x: float, min_val: float, max_val: float) -> float {
-    if x < min_val {
-        return min_val
-    }
-    if x > max_val {
-        return max_val
-    }
-    return x
-}
-
-// Clamp integer to range
-fn clamp_int(x: int, min_val: int, max_val: int) -> int {
-    if x < min_val {
-        return min_val
-    }
-    if x > max_val {
-        return max_val
-    }
-    return x
-}
-
-// Linear interpolation
+/// Linear interpolation between a and b
 fn lerp(a: float, b: float, t: float) -> float {
     return a + (b - a) * t
 }
 
-// Inverse linear interpolation (find t given value)
+/// Inverse linear interpolation (find t given value)
 fn inverse_lerp(a: float, b: float, value: float) -> float {
     if a == b {
         return 0.0
@@ -148,33 +342,29 @@ fn inverse_lerp(a: float, b: float, value: float) -> float {
     return (value - a) / (b - a)
 }
 
-// Smooth step (Hermite interpolation)
+/// Smooth step (Hermite interpolation)
 fn smoothstep(edge0: float, edge1: float, x: float) -> float {
-    let t = clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0)
+    var t = (x - edge0) / (edge1 - edge0)
+    if t < 0.0 {
+        t = 0.0
+    }
+    if t > 1.0 {
+        t = 1.0
+    }
     return t * t * (3.0 - 2.0 * t)
 }
 
-// Degrees to radians
-fn radians(degrees: float) -> float {
-    return degrees * 3.141592653589793 / 180.0
-}
-
-// Radians to degrees
-fn degrees(rad: float) -> float {
-    return rad * 180.0 / 3.141592653589793
-}
-
-// Hypotenuse (sqrt(x^2 + y^2))
+/// Hypotenuse: sqrt(x^2 + y^2)
 fn hypot(x: float, y: float) -> float {
     return sqrt(x * x + y * y)
 }
 
-// Distance between two 2D points
+/// 2D distance between two points
 fn distance(x1: float, y1: float, x2: float, y2: float) -> float {
     return hypot(x2 - x1, y2 - y1)
 }
 
-// Distance between two 3D points
+/// 3D distance between two points
 fn distance3d(x1: float, y1: float, z1: float, x2: float, y2: float, z2: float) -> float {
     let dx = x2 - x1
     let dy = y2 - y1
@@ -182,7 +372,7 @@ fn distance3d(x1: float, y1: float, z1: float, x2: float, y2: float, z2: float) 
     return sqrt(dx * dx + dy * dy + dz * dz)
 }
 
-// Minimum of two floats
+/// Minimum of two floats
 fn min_float(a: float, b: float) -> float {
     if a < b {
         return a
@@ -190,7 +380,7 @@ fn min_float(a: float, b: float) -> float {
     return b
 }
 
-// Maximum of two floats
+/// Maximum of two floats
 fn max_float(a: float, b: float) -> float {
     if a > b {
         return a
@@ -198,61 +388,37 @@ fn max_float(a: float, b: float) -> float {
     return b
 }
 
-// Minimum of two integers
-fn min_int(a: int, b: int) -> int {
-    if a < b {
-        return a
+/// Greatest common divisor
+fn gcd(a: int, b: int) -> int {
+    var x = a
+    if x < 0 {
+        x = -x
     }
-    return b
+    var y = b
+    if y < 0 {
+        y = -y
+    }
+    while y != 0 {
+        let temp = y
+        y = x % y
+        x = temp
+    }
+    return x
 }
 
-// Maximum of two integers
-fn max_int(a: int, b: int) -> int {
-    if a > b {
-        return a
+/// Least common multiple
+fn lcm(a: int, b: int) -> int {
+    if a == 0 || b == 0 {
+        return 0
     }
-    return b
-}
-
-// Wrap angle to [0, 2*PI)
-fn wrap_angle(angle: float) -> float {
-    let tau = 6.283185307179586
-    var result = angle
-    while result < 0.0 {
-        result = result + tau
-    }
-    while result >= tau {
-        result = result - tau
+    var result = (a / gcd(a, b)) * b
+    if result < 0 {
+        result = -result
     }
     return result
 }
 
-// Normalize angle to [-PI, PI]
-fn normalize_angle(angle: float) -> float {
-    let pi = 3.141592653589793
-    let tau = 6.283185307179586
-    var result = wrap_angle(angle)
-    if result > pi {
-        result = result - tau
-    }
-    return result
-}
-
-// Factorial (non-recursive for safety)
-fn factorial(n: int) -> int {
-    if n <= 1 {
-        return 1
-    }
-    var result = 1
-    var i = 2
-    while i <= n {
-        result = result * i
-        i = i + 1
-    }
-    return result
-}
-
-// Binomial coefficient (n choose k)
+/// Binomial coefficient (n choose k)
 fn binomial(n: int, k: int) -> int {
     if k < 0 || k > n {
         return 0
@@ -260,7 +426,6 @@ fn binomial(n: int, k: int) -> int {
     if k == 0 || k == n {
         return 1
     }
-    // Use symmetry to optimize
     var k2 = k
     if k2 > n - k2 {
         k2 = n - k2
@@ -275,243 +440,63 @@ fn binomial(n: int, k: int) -> int {
     return result
 }
 
-// Power function for integers
-fn pow_int(base: int, exp: int) -> int {
-    if exp == 0 {
-        return 1
-    }
-    if exp < 0 {
-        return 0  // Integer division truncates
-    }
-    var result = 1
-    var b = base
-    var e = exp
-    while e > 0 {
-        if e % 2 == 1 {
-            result = result * b
-        }
-        b = b * b
-        e = e / 2
-    }
-    return result
-}
-
-// Greatest common divisor
-fn gcd(a: int, b: int) -> int {
-    var x = abs_int(a)
-    var y = abs_int(b)
-    while y != 0 {
-        let temp = y
-        y = x % y
-        x = temp
-    }
-    return x
-}
-
-// Least common multiple
-fn lcm(a: int, b: int) -> int {
-    if a == 0 || b == 0 {
-        return 0
-    }
-    return abs_int((a / gcd(a, b)) * b)
-}
-
-// Check if number is prime
-fn is_prime(n: int) -> bool {
-    if n < 2 {
-        return false
-    }
-    if n == 2 {
-        return true
-    }
-    if n % 2 == 0 {
-        return false
-    }
-    var i = 3
-    while i * i <= n {
-        if n % i == 0 {
-            return false
-        }
-        i = i + 2
-    }
-    return true
-}
-
-// Check if number is even
-fn is_even(n: int) -> bool {
-    return n % 2 == 0
-}
-
-// Check if number is odd
-fn is_odd(n: int) -> bool {
-    return n % 2 != 0
-}
-
-// Floor modulo (handles negative numbers correctly)
-fn mod_floor(a: int, b: int) -> int {
-    return ((a % b) + b) % b
-}
-
-// Square of a number
-fn square(x: float) -> float {
-    return x * x
-}
-
-// Square of an integer
-fn square_int(x: int) -> int {
-    return x * x
-}
-
-// Cube of a number
-fn cube(x: float) -> float {
-    return x * x * x
-}
-
-// Cube of an integer
-fn cube_int(x: int) -> int {
-    return x * x * x
-}
-
-// Cube root
-fn cbrt(x: float) -> float {
-    if x >= 0.0 {
-        return pow(x, 1.0 / 3.0)
-    }
-    return -pow(-x, 1.0 / 3.0)
-}
-
-// Nth root
+/// Nth root of x
 fn nthroot(x: float, n: float) -> float {
     if x >= 0.0 {
         return pow(x, 1.0 / n)
     }
-    // For negative x, n must be odd integer
     return -pow(-x, 1.0 / n)
 }
 
-// Logarithm with arbitrary base
+/// Logarithm with arbitrary base
 fn log(x: float, base: float) -> float {
     return ln(x) / ln(base)
 }
 
-// Secant
+/// Secant
 fn sec(x: float) -> float {
     return 1.0 / cos(x)
 }
 
-// Cosecant
+/// Cosecant
 fn csc(x: float) -> float {
     return 1.0 / sin(x)
 }
 
-// Cotangent
+/// Cotangent
 fn cot(x: float) -> float {
     return 1.0 / tan(x)
 }
 
-// Hyperbolic arcsine
+/// Hyperbolic arcsine
 fn asinh(x: float) -> float {
     return ln(x + sqrt(x * x + 1.0))
 }
 
-// Hyperbolic arccosine
+/// Hyperbolic arccosine
 fn acosh(x: float) -> float {
     return ln(x + sqrt(x * x - 1.0))
 }
 
-// Hyperbolic arctangent
+/// Hyperbolic arctangent
 fn atanh(x: float) -> float {
     return 0.5 * ln((1.0 + x) / (1.0 - x))
 }
 
-// Fibonacci number (iterative)
-fn fibonacci(n: int) -> int {
-    if n <= 0 {
-        return 0
-    }
-    if n == 1 {
-        return 1
-    }
-    var a = 0
-    var b = 1
-    var i = 2
-    while i <= n {
-        let temp = a + b
-        a = b
-        b = temp
-        i = i + 1
-    }
-    return b
-}
-
-// Check if number is a power of 2
-fn is_power_of_two(n: int) -> bool {
-    return n > 0 && (n & (n - 1)) == 0
-}
-
-// Next power of 2 greater than or equal to n
-fn next_power_of_two(n: int) -> int {
-    if n <= 0 {
-        return 1
-    }
-    var v = n - 1
-    v = v | (v >> 1)
-    v = v | (v >> 2)
-    v = v | (v >> 4)
-    v = v | (v >> 8)
-    v = v | (v >> 16)
-    v = v | (v >> 32)
-    return v + 1
-}
-
-// Count set bits (population count)
-fn popcount(n: int) -> int {
-    var count = 0
-    var x = n
-    while x != 0 {
-        count = count + 1
-        x = x & (x - 1)
-    }
-    return count
-}
-
-// Check if two floats are approximately equal
+/// Check if two floats are approximately equal
 fn approx_equal(a: float, b: float, epsilon: float) -> bool {
     return abs(a - b) < epsilon
 }
 
-// Map a value from one range to another
+/// Map a value from one range to another
 fn map_range(value: float, in_min: float, in_max: float, out_min: float, out_max: float) -> float {
     return (value - in_min) * (out_max - out_min) / (in_max - in_min) + out_min
 }
 
-// Sigmoid function (logistic function)
-fn sigmoid(x: float) -> float {
-    return 1.0 / (1.0 + exp(-x))
-}
-
-// ReLU (Rectified Linear Unit)
-fn relu(x: float) -> float {
-    if x > 0.0 {
-        return x
-    }
-    return 0.0
-}
-
-// Leaky ReLU
+/// Leaky ReLU with configurable alpha
 fn leaky_relu(x: float, alpha: float) -> float {
     if x > 0.0 {
         return x
     }
     return alpha * x
-}
-
-// Sum of integers from 1 to n
-fn sum_to(n: int) -> int {
-    return n * (n + 1) / 2
-}
-
-// Sum of squares from 1 to n
-fn sum_squares_to(n: int) -> int {
-    return n * (n + 1) * (2 * n + 1) / 6
 }

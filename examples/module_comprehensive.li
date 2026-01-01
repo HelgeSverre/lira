@@ -10,10 +10,9 @@ println("\n--- Test 1: Basic stdlib imports ---")
 
 import std.core
 
-println("abs(-42): " + abs(-42))         // 42
-println("min(10, 5): " + min(10, 5))     // 5
-println("max(10, 5): " + max(10, 5))     // 10
-println("clamp(15, 0, 10): " + clamp(15, 0, 10)) // 10
+// min/max are standalone functions
+println("min(10, 5): " + min(10, 5))
+println("max(10, 5): " + max(10, 5))
 
 // ============================================================
 // Test 2: Multiple imports
@@ -46,15 +45,27 @@ println("now_ms returned a value: " + (t1 > 0))
 println("\n--- Test 4: Mixed local and imported code ---")
 
 fn calculate_distance(x1: int, y1: int, x2: int, y2: int) -> int {
-    let dx = abs(x2 - x1)
-    let dy = abs(y2 - y1)
+    var dx = x2 - x1
+    if dx < 0 {
+        dx = -dx
+    }
+    var dy = y2 - y1
+    if dy < 0 {
+        dy = -dy
+    }
     return dx + dy  // Manhattan distance
 }
 
 println("Manhattan distance (0,0) to (3,4): " + calculate_distance(0, 0, 3, 4)) // 7
 
 fn bounded_value(val: int, low: int, high: int) -> int {
-    return clamp(val, low, high)
+    if val < low {
+        return low
+    }
+    if val > high {
+        return high
+    }
+    return val
 }
 
 println("bounded_value(50, 0, 100): " + bounded_value(50, 0, 100))   // 50
@@ -81,8 +92,11 @@ println("\n--- Test 6: Core math operations ---")
 
 fn complex_calc(n: int) -> int {
     let a = n * n                 // n^2
-    let b = abs(a - 100)          // |n^2 - 100|
-    let c = min(b, 50)            // cap at 50
+    var diff = a - 100
+    if diff < 0 {
+        diff = -diff
+    }
+    let c = min(diff, 50)         // cap at 50
     return c
 }
 
@@ -100,7 +114,11 @@ fn outer_fn(x: int) -> int {
 }
 
 fn inner_fn(x: int) -> int {
-    return abs(x) * 2
+    var val = x
+    if val < 0 {
+        val = -val
+    }
+    return val * 2
 }
 
 println("outer_fn(-5): " + outer_fn(-5)) // abs(-5)*2 + 10 = 20
