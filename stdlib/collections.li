@@ -420,6 +420,323 @@ impl [[int]] {
 }
 
 // ============================================================================
+// Float Array Operations
+// ============================================================================
+
+impl [float] {
+    // ------------------------------------------------------------------------
+    // Transformation
+    // ------------------------------------------------------------------------
+
+    /// Double each element
+    fn map_double(self) -> [float] {
+        let result = [0.0]
+        pop(result)
+        var i = 0
+        while i < len(self) {
+            push(result, self[i] * 2.0)
+            i = i + 1
+        }
+        return result
+    }
+
+    /// Square each element
+    fn map_square(self) -> [float] {
+        let result = [0.0]
+        pop(result)
+        var i = 0
+        while i < len(self) {
+            push(result, self[i] * self[i])
+            i = i + 1
+        }
+        return result
+    }
+
+    // ------------------------------------------------------------------------
+    // Filtering
+    // ------------------------------------------------------------------------
+
+    /// Filter positive numbers
+    fn filter_positive(self) -> [float] {
+        let result = [0.0]
+        pop(result)
+        var i = 0
+        while i < len(self) {
+            if self[i] > 0.0 {
+                push(result, self[i])
+            }
+            i = i + 1
+        }
+        return result
+    }
+
+    /// Filter negative numbers
+    fn filter_negative(self) -> [float] {
+        let result = [0.0]
+        pop(result)
+        var i = 0
+        while i < len(self) {
+            if self[i] < 0.0 {
+                push(result, self[i])
+            }
+            i = i + 1
+        }
+        return result
+    }
+
+    // ------------------------------------------------------------------------
+    // Reduction
+    // ------------------------------------------------------------------------
+
+    /// Sum all elements
+    fn sum(self) -> float {
+        var total = 0.0
+        var i = 0
+        while i < len(self) {
+            total = total + self[i]
+            i = i + 1
+        }
+        return total
+    }
+
+    /// Product of all elements
+    fn product(self) -> float {
+        var result = 1.0
+        var i = 0
+        while i < len(self) {
+            result = result * self[i]
+            i = i + 1
+        }
+        return result
+    }
+
+    /// Find minimum value
+    fn min(self) -> float {
+        if len(self) == 0 {
+            return 0.0
+        }
+        var m = self[0]
+        var i = 1
+        while i < len(self) {
+            if self[i] < m {
+                m = self[i]
+            }
+            i = i + 1
+        }
+        return m
+    }
+
+    /// Find maximum value
+    fn max(self) -> float {
+        if len(self) == 0 {
+            return 0.0
+        }
+        var m = self[0]
+        var i = 1
+        while i < len(self) {
+            if self[i] > m {
+                m = self[i]
+            }
+            i = i + 1
+        }
+        return m
+    }
+
+    /// Calculate average
+    fn average(self) -> float {
+        if len(self) == 0 {
+            return 0.0
+        }
+        return self.sum() / len(self)
+    }
+
+    // ------------------------------------------------------------------------
+    // Search
+    // ------------------------------------------------------------------------
+
+    /// Check if array contains value (exact match)
+    fn contains(self, value: float) -> bool {
+        var i = 0
+        while i < len(self) {
+            if self[i] == value {
+                return true
+            }
+            i = i + 1
+        }
+        return false
+    }
+
+    /// Find index of value (-1 if not found)
+    fn index_of(self, value: float) -> int {
+        var i = 0
+        while i < len(self) {
+            if self[i] == value {
+                return i
+            }
+            i = i + 1
+        }
+        return -1
+    }
+
+    /// Count occurrences of value
+    fn count(self, value: float) -> int {
+        var c = 0
+        var i = 0
+        while i < len(self) {
+            if self[i] == value {
+                c = c + 1
+            }
+            i = i + 1
+        }
+        return c
+    }
+
+    // ------------------------------------------------------------------------
+    // Manipulation
+    // ------------------------------------------------------------------------
+
+    /// Reverse array
+    fn reverse(self) -> [float] {
+        let result = [0.0]
+        pop(result)
+        var i = len(self) - 1
+        while i >= 0 {
+            push(result, self[i])
+            i = i - 1
+        }
+        return result
+    }
+
+    /// Take first n elements
+    fn take(self, n: int) -> [float] {
+        let result = [0.0]
+        pop(result)
+        var i = 0
+        var cnt = n
+        if cnt > len(self) {
+            cnt = len(self)
+        }
+        while i < cnt {
+            push(result, self[i])
+            i = i + 1
+        }
+        return result
+    }
+
+    /// Skip first n elements
+    fn skip(self, n: int) -> [float] {
+        let result = [0.0]
+        pop(result)
+        var i = n
+        while i < len(self) {
+            push(result, self[i])
+            i = i + 1
+        }
+        return result
+    }
+
+    /// Slice from start to end (exclusive)
+    fn slice(self, start: int, end: int) -> [float] {
+        let result = [0.0]
+        pop(result)
+        var i = start
+        while i < end && i < len(self) {
+            push(result, self[i])
+            i = i + 1
+        }
+        return result
+    }
+
+    /// Concatenate with another array
+    fn concat(self, other: [float]) -> [float] {
+        let result = [0.0]
+        pop(result)
+        var i = 0
+        while i < len(self) {
+            push(result, self[i])
+            i = i + 1
+        }
+        i = 0
+        while i < len(other) {
+            push(result, other[i])
+            i = i + 1
+        }
+        return result
+    }
+
+    // ------------------------------------------------------------------------
+    // Sorting
+    // ------------------------------------------------------------------------
+
+    /// Sort in ascending order (selection sort)
+    fn sort(self) -> [float] {
+        let result = [0.0]
+        pop(result)
+
+        if len(self) == 0 {
+            return result
+        }
+
+        // Create tracking array for used indices
+        let used = [0]
+        pop(used)
+        var k = 0
+        while k < len(self) {
+            push(used, 0)
+            k = k + 1
+        }
+
+        // Selection sort: find min element not yet used
+        var count = 0
+        while count < len(self) {
+            var min_idx = -1
+            var min_val = 0.0
+            var j = 0
+            while j < len(self) {
+                if used[j] == 0 {
+                    if min_idx == -1 || self[j] < min_val {
+                        min_idx = j
+                        min_val = self[j]
+                    }
+                }
+                j = j + 1
+            }
+
+            // Mark as used
+            let new_used = [0]
+            pop(new_used)
+            j = 0
+            while j < len(used) {
+                if j == min_idx {
+                    push(new_used, 1)
+                } else {
+                    push(new_used, used[j])
+                }
+                j = j + 1
+            }
+            while len(used) > 0 {
+                pop(used)
+            }
+            j = 0
+            while j < len(new_used) {
+                push(used, new_used[j])
+                j = j + 1
+            }
+
+            push(result, min_val)
+            count = count + 1
+        }
+
+        return result
+    }
+
+    /// Sort in descending order
+    fn sort_desc(self) -> [float] {
+        return self.sort().reverse()
+    }
+}
+
+// ============================================================================
 // String Array Operations
 // ============================================================================
 

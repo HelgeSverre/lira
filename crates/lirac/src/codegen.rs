@@ -1342,13 +1342,19 @@ impl CodeGenerator {
 
                         // Push scope for method body
                         let prev_locals = std::mem::take(&mut self.locals);
+                        let prev_local_types = std::mem::take(&mut self.local_types);
                         let prev_next_local = self.next_local;
                         self.locals = vec![HashMap::new()];
+                        self.local_types = vec![HashMap::new()];
                         self.next_local = 0;
 
                         // Add parameters as locals (self is first parameter if present)
                         for param in params {
                             self.define_local(&param.name);
+                            // Track self parameter's type for method dispatch within impl methods
+                            if param.name == "self" {
+                                self.define_local_type("self", type_name);
+                            }
                         }
 
                         // Generate method body
@@ -1363,8 +1369,9 @@ impl CodeGenerator {
                         // Record local count
                         self.functions[func_idx].local_count = self.next_local;
 
-                        // Restore locals
+                        // Restore locals and local_types
                         self.locals = prev_locals;
+                        self.local_types = prev_local_types;
                         self.next_local = prev_next_local;
                     }
                 }
