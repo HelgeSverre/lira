@@ -61,7 +61,12 @@ fn extract_comments(source: &str) -> HashMap<usize, CommentBlock> {
                     .collect::<Vec<_>>();
 
                 if !clean_content.is_empty() {
-                    comments.insert(line_num, CommentBlock { lines: clean_content });
+                    comments.insert(
+                        line_num,
+                        CommentBlock {
+                            lines: clean_content,
+                        },
+                    );
                 }
                 block_comment_content.clear();
             } else {
@@ -96,12 +101,16 @@ fn extract_comments(source: &str) -> HashMap<usize, CommentBlock> {
 
         // Handle line comments
         if let Some(comment_text) = trimmed.strip_prefix("//").map(|s| s.trim()) {
-
             // Skip section headers (lines with === or ---)
             if comment_text.contains("====") || comment_text.contains("----") {
                 // Flush current block if any
                 if !current_block.is_empty() {
-                    comments.insert(block_end_line, CommentBlock { lines: current_block.clone() });
+                    comments.insert(
+                        block_end_line,
+                        CommentBlock {
+                            lines: current_block.clone(),
+                        },
+                    );
                     current_block.clear();
                 }
                 continue;
@@ -112,13 +121,23 @@ fn extract_comments(source: &str) -> HashMap<usize, CommentBlock> {
         } else if trimmed.is_empty() {
             // Empty line - flush current block
             if !current_block.is_empty() {
-                comments.insert(block_end_line, CommentBlock { lines: current_block.clone() });
+                comments.insert(
+                    block_end_line,
+                    CommentBlock {
+                        lines: current_block.clone(),
+                    },
+                );
                 current_block.clear();
             }
         } else {
             // Non-comment, non-empty line - flush current block
             if !current_block.is_empty() {
-                comments.insert(block_end_line, CommentBlock { lines: current_block.clone() });
+                comments.insert(
+                    block_end_line,
+                    CommentBlock {
+                        lines: current_block.clone(),
+                    },
+                );
                 current_block.clear();
             }
         }
@@ -126,7 +145,12 @@ fn extract_comments(source: &str) -> HashMap<usize, CommentBlock> {
 
     // Flush any remaining block
     if !current_block.is_empty() {
-        comments.insert(block_end_line, CommentBlock { lines: current_block });
+        comments.insert(
+            block_end_line,
+            CommentBlock {
+                lines: current_block,
+            },
+        );
     }
 
     comments
@@ -692,18 +716,18 @@ fn format_type(type_expr: &TypeExpr) -> String {
         TypeExprKind::Tuple(types) => {
             format!(
                 "({})",
-                types
-                    .iter()
-                    .map(format_type)
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                types.iter().map(format_type).collect::<Vec<_>>().join(", ")
             )
         }
         TypeExprKind::Array(inner) => {
             format!("[{}]", format_type(inner))
         }
         TypeExprKind::Result { ok_type, err_type } => {
-            format!("Result<{}, {}>", format_type(ok_type), format_type(err_type))
+            format!(
+                "Result<{}, {}>",
+                format_type(ok_type),
+                format_type(err_type)
+            )
         }
         TypeExprKind::Path(segments) => segments.join("::"),
     }

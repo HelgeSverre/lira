@@ -59,10 +59,8 @@ fn main() {
             println!("Generating Lira documentation book -> {}", output);
 
             // Define sections: (directory, section_name)
-            let inputs: Vec<(&str, &str)> = vec![
-                ("stdlib", "Standard Library"),
-                ("examples", "Examples"),
-            ];
+            let inputs: Vec<(&str, &str)> =
+                vec![("stdlib", "Standard Library"), ("examples", "Examples")];
 
             match lira_doc::generate_mdbook_multi(&inputs, &output, &title) {
                 Ok(count) => {
@@ -140,10 +138,14 @@ fn main() {
                     .and_then(|s| s.to_str())
                     .unwrap_or("Documentation");
 
-                let book_title = title.unwrap_or_else(|| format!("Lira {} Documentation", dir_name));
+                let book_title =
+                    title.unwrap_or_else(|| format!("Lira {} Documentation", dir_name));
 
                 if mdbook {
-                    println!("Generating mdBook documentation for {} -> {}", input, output_dir);
+                    println!(
+                        "Generating mdBook documentation for {} -> {}",
+                        input, output_dir
+                    );
 
                     match lira_doc::generate_mdbook(input, &output_dir, &book_title) {
                         Ok(count) => {

@@ -61,9 +61,8 @@ impl Decoder for LspCodec {
         let body = src.split_to(content_length);
 
         // Parse JSON
-        let value: Value = serde_json::from_slice(&body).map_err(|e| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string())
-        })?;
+        let value: Value = serde_json::from_slice(&body)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
         Ok(Some(value))
     }
@@ -114,7 +113,10 @@ impl TestClient {
             "method": method,
             "params": params
         });
-        self.stream.send(request).await.expect("Failed to send request");
+        self.stream
+            .send(request)
+            .await
+            .expect("Failed to send request");
         id
     }
 
@@ -187,7 +189,8 @@ impl TestClient {
         // Send initialized notification
         self.send_notification("initialized", json!({})).await;
 
-        serde_json::from_value(response["result"].clone()).expect("Failed to parse InitializeResult")
+        serde_json::from_value(response["result"].clone())
+            .expect("Failed to parse InitializeResult")
     }
 
     /// Open a document
@@ -234,7 +237,8 @@ impl TestClient {
             .await;
 
         let response = self.wait_for_response(id).await;
-        serde_json::from_value(response["result"].clone()).expect("Failed to parse CompletionResponse")
+        serde_json::from_value(response["result"].clone())
+            .expect("Failed to parse CompletionResponse")
     }
 
     /// Request hover information
@@ -274,7 +278,10 @@ impl TestClient {
 
     /// Wait for diagnostics for a specific URI
     async fn wait_for_diagnostics(&mut self, uri: &str, timeout_ms: u64) -> Vec<Diagnostic> {
-        if let Some(msg) = self.wait_for_notification("textDocument/publishDiagnostics", timeout_ms).await {
+        if let Some(msg) = self
+            .wait_for_notification("textDocument/publishDiagnostics", timeout_ms)
+            .await
+        {
             let params = &msg["params"];
             if params["uri"].as_str() == Some(uri) {
                 return serde_json::from_value(params["diagnostics"].clone()).unwrap_or_default();
@@ -337,7 +344,9 @@ async fn test_completion_after_dot() {
 
     let uri = "file:///test.li";
     // Lira syntax: no semicolons
-    client.did_open(uri, "fn main() {\n    let s = \"hello\"\n    s.\n}").await;
+    client
+        .did_open(uri, "fn main() {\n    let s = \"hello\"\n    s.\n}")
+        .await;
 
     // Request completion after the dot
     let completions = client.completion(uri, 2, 6).await;
@@ -374,7 +383,9 @@ async fn test_diagnostics_valid_code() {
 
     let uri = "file:///test.li";
     // Lira syntax: no semicolons
-    client.did_open(uri, "fn main() {\n    println(\"hello\")\n}").await;
+    client
+        .did_open(uri, "fn main() {\n    println(\"hello\")\n}")
+        .await;
 
     // Wait for diagnostics
     let diagnostics = client.wait_for_diagnostics(uri, 2000).await;
@@ -384,7 +395,10 @@ async fn test_diagnostics_valid_code() {
         eprintln!("Diagnostic: {:?} - {}", d.severity, d.message);
     }
 
-    assert!(diagnostics.is_empty(), "Valid code should have no diagnostics");
+    assert!(
+        diagnostics.is_empty(),
+        "Valid code should have no diagnostics"
+    );
 }
 
 #[tokio::test]
@@ -450,7 +464,9 @@ async fn test_did_change_updates_diagnostics() {
     assert!(!diags1.is_empty(), "Should have errors initially");
 
     // Fix the code - Lira syntax: no semicolons
-    client.did_change(uri, 2, "fn main() {\n    println(\"fixed\")\n}").await;
+    client
+        .did_change(uri, 2, "fn main() {\n    println(\"fixed\")\n}")
+        .await;
     let diags2 = client.wait_for_diagnostics(uri, 2000).await;
     assert!(diags2.is_empty(), "Should have no errors after fix");
 }

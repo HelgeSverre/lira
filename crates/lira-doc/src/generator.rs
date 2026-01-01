@@ -235,7 +235,10 @@ fn generate_structs_section(structs: &[StructDoc]) -> String {
             } else {
                 format!("{} ", modifiers.join(" "))
             };
-            output.push_str(&format!("    {}{}: {},\n", prefix, field.name, field.type_name));
+            output.push_str(&format!(
+                "    {}{}: {},\n",
+                prefix, field.name, field.type_name
+            ));
         }
         output.push_str("}\n```\n\n");
 
