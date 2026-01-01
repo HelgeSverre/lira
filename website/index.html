@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lira - Systems Programming with Harmony</title>
+    <meta name="description" content="Lira is a systems programming language with Go-like fiber concurrency, pattern matching, and strong typing.">
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="style.css">
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+</head>
+<body>
+    <!-- Constellation background -->
+    <div class="constellation" aria-hidden="true"></div>
+
+    <!-- Navigation -->
+    <nav class="nav">
+        <div class="nav-container">
+            <a href="/" class="nav-logo">
+                <svg class="logo-icon" viewBox="0 0 40 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M4 8C4 4 8 2 12 4L20 8L28 4C32 2 36 4 36 8V36C36 40 32 44 28 44L20 40L12 44C8 44 4 40 4 36V8Z" stroke="currentColor" stroke-width="2.5" fill="none"/>
+                    <line x1="14" y1="12" x2="14" y2="36" stroke="#E8A924" stroke-width="2" stroke-linecap="round"/>
+                    <line x1="20" y1="10" x2="20" y2="38" stroke="#E8A924" stroke-width="2" stroke-linecap="round"/>
+                    <line x1="26" y1="12" x2="26" y2="36" stroke="#E8A924" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <span class="logo-text">Lira</span>
+            </a>
+            <div class="nav-links">
+                <a href="#features">Features</a>
+                <a href="#examples">Examples</a>
+                <a href="#getting-started">Get Started</a>
+                <a href="https://github.com/HelgeSverre/lira" class="nav-github" aria-label="GitHub">
+                    <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
+                        <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+                    </svg>
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <header class="hero">
+        <div class="hero-content">
+            <h1 class="hero-title">
+                Systems Programming<br>
+                <span class="hero-highlight">in Harmony</span>
+            </h1>
+            <p class="hero-subtitle">
+                Lira combines Go-like fiber concurrency with pattern matching and strong typing.
+                Write concurrent code that's as elegant as it is fast.
+            </p>
+            <div class="hero-actions">
+                <a href="#getting-started" class="btn btn-primary">Get Started</a>
+                <a href="#examples" class="btn btn-secondary">See Examples</a>
+            </div>
+            <div class="hero-code">
+                <div class="code-header">
+                    <span class="code-dot"></span>
+                    <span class="code-dot"></span>
+                    <span class="code-dot"></span>
+                    <span class="code-filename">hello.li</span>
+                </div>
+<pre class="code-block"><code><span class="kw">fn</span> <span class="fn">main</span>() {
+    <span class="kw">let</span> fibers = [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>].<span class="fn">map</span>(<span class="kw">fn</span>(n) {
+        <span class="fn">spawn</span> {
+            <span class="fn">sleep</span>(<span class="num">100</span>)
+            <span class="kw">return</span> n * n
+        }
+    })
+
+    <span class="kw">let</span> results = fibers.<span class="fn">map</span>(<span class="kw">fn</span>(f) { <span class="fn">await</span>(f) })
+    <span class="fn">println</span>(<span class="str">"Squares: {results}"</span>)
+}</code></pre>
+            </div>
+        </div>
+    </header>
+
+    <!-- Features Section -->
+    <section id="features" class="features">
+        <div class="container">
+            <h2 class="section-title">Why Lira?</h2>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M13 10V3L4 14h7v7l9-11h-7z" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </div>
+                    <h3>Fiber Concurrency</h3>
+                    <p>Lightweight green threads with simple spawn/await semantics. Write concurrent code without callback hell.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2v-4M9 21H5a2 2 0 01-2-2v-4m0-6v6" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </div>
+                    <h3>Pattern Matching</h3>
+                    <p>Expressive match expressions for control flow. Destructure data and handle variants elegantly.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </div>
+                    <h3>Strong Typing</h3>
+                    <p>Catch errors at compile time with a powerful type system and full type inference.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </div>
+                    <h3>Bytecode VM</h3>
+                    <p>Compiles to efficient bytecode. Fast startup, small binaries, and predictable performance.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </div>
+                    <h3>Modern Tooling</h3>
+                    <p>LSP support, VS Code extension, syntax highlighting. Everything you need to be productive.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </div>
+                    <h3>Clear Documentation</h3>
+                    <p>85+ examples, comprehensive language spec, and a standard library that's easy to learn.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Examples Section -->
+    <section id="examples" class="examples">
+        <div class="container">
+            <h2 class="section-title">See Lira in Action</h2>
+            <div class="examples-tabs">
+                <button class="tab-btn active" data-tab="concurrency">Concurrency</button>
+                <button class="tab-btn" data-tab="patterns">Pattern Matching</button>
+                <button class="tab-btn" data-tab="types">Types</button>
+            </div>
+            <div class="examples-content">
+                <div class="example-panel active" id="concurrency">
+                    <div class="example-code">
+                        <div class="code-header">
+                            <span class="code-dot"></span>
+                            <span class="code-dot"></span>
+                            <span class="code-dot"></span>
+                            <span class="code-filename">fibers.li</span>
+                        </div>
+<pre class="code-block"><code><span class="cm">// Spawn concurrent fibers</span>
+<span class="kw">fn</span> <span class="fn">fetch_all</span>(urls: [<span class="ty">String</span>]) -> [<span class="ty">Response</span>] {
+    <span class="kw">let</span> fibers = urls.<span class="fn">map</span>(<span class="kw">fn</span>(url) {
+        <span class="fn">spawn</span> { <span class="fn">http_get</span>(url) }
+    })
+
+    <span class="cm">// Wait for all to complete</span>
+    <span class="kw">return</span> fibers.<span class="fn">map</span>(<span class="kw">fn</span>(f) { <span class="fn">await</span>(f) })
+}
+
+<span class="kw">fn</span> <span class="fn">main</span>() {
+    <span class="kw">let</span> responses = <span class="fn">fetch_all</span>([
+        <span class="str">"https://api.example.com/users"</span>,
+        <span class="str">"https://api.example.com/posts"</span>,
+    ])
+
+    <span class="kw">for</span> resp <span class="kw">in</span> responses {
+        <span class="fn">println</span>(resp.body)
+    }
+}</code></pre>
+                    </div>
+                    <div class="example-description">
+                        <h3>Lightweight Fibers</h3>
+                        <p>Spawn thousands of concurrent fibers without the overhead of OS threads. Lira's fiber scheduler handles the complexity while you write straightforward sequential code.</p>
+                        <ul>
+                            <li>Simple <code>spawn</code> / <code>await</code> syntax</li>
+                            <li>Automatic load balancing</li>
+                            <li>No callback pyramids</li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="example-panel" id="patterns">
+                    <div class="example-code">
+                        <div class="code-header">
+                            <span class="code-dot"></span>
+                            <span class="code-dot"></span>
+                            <span class="code-dot"></span>
+                            <span class="code-filename">match.li</span>
+                        </div>
+<pre class="code-block"><code><span class="kw">enum</span> <span class="ty">Result</span>&lt;<span class="ty">T</span>, <span class="ty">E</span>&gt; {
+    <span class="fn">Ok</span>(<span class="ty">T</span>),
+    <span class="fn">Err</span>(<span class="ty">E</span>),
+}
+
+<span class="kw">fn</span> <span class="fn">parse_config</span>(path: <span class="ty">String</span>) -> <span class="ty">Result</span>&lt;<span class="ty">Config</span>, <span class="ty">String</span>&gt; {
+    <span class="kw">match</span> <span class="fn">read_file</span>(path) {
+        <span class="fn">Ok</span>(content) => {
+            <span class="kw">match</span> <span class="fn">parse_json</span>(content) {
+                <span class="fn">Ok</span>(config) => <span class="fn">Ok</span>(config),
+                <span class="fn">Err</span>(e) => <span class="fn">Err</span>(<span class="str">"Invalid JSON: {e}"</span>),
+            }
+        }
+        <span class="fn">Err</span>(e) => <span class="fn">Err</span>(<span class="str">"Cannot read file: {e}"</span>),
+    }
+}
+
+<span class="kw">fn</span> <span class="fn">main</span>() {
+    <span class="kw">match</span> <span class="fn">parse_config</span>(<span class="str">"app.json"</span>) {
+        <span class="fn">Ok</span>(cfg) => <span class="fn">println</span>(<span class="str">"Loaded: {cfg.name}"</span>),
+        <span class="fn">Err</span>(msg) => <span class="fn">eprintln</span>(<span class="str">"Error: {msg}"</span>),
+    }
+}</code></pre>
+                    </div>
+                    <div class="example-description">
+                        <h3>Exhaustive Matching</h3>
+                        <p>Pattern matching ensures you handle every case. The compiler catches missing branches before your code runs.</p>
+                        <ul>
+                            <li>Destructure enums and structs</li>
+                            <li>Guard clauses for complex conditions</li>
+                            <li>Compile-time exhaustiveness checking</li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="example-panel" id="types">
+                    <div class="example-code">
+                        <div class="code-header">
+                            <span class="code-dot"></span>
+                            <span class="code-dot"></span>
+                            <span class="code-dot"></span>
+                            <span class="code-filename">types.li</span>
+                        </div>
+<pre class="code-block"><code><span class="kw">struct</span> <span class="ty">Point</span> {
+    x: <span class="ty">Float</span>,
+    y: <span class="ty">Float</span>,
+}
+
+<span class="kw">impl</span> <span class="ty">Point</span> {
+    <span class="kw">fn</span> <span class="fn">distance</span>(self, other: <span class="ty">Point</span>) -> <span class="ty">Float</span> {
+        <span class="kw">let</span> dx = self.x - other.x
+        <span class="kw">let</span> dy = self.y - other.y
+        <span class="kw">return</span> (dx * dx + dy * dy).<span class="fn">sqrt</span>()
+    }
+
+    <span class="kw">fn</span> <span class="fn">origin</span>() -> <span class="ty">Point</span> {
+        <span class="kw">return</span> <span class="ty">Point</span> { x: <span class="num">0.0</span>, y: <span class="num">0.0</span> }
+    }
+}
+
+<span class="kw">fn</span> <span class="fn">main</span>() {
+    <span class="kw">let</span> p = <span class="ty">Point</span> { x: <span class="num">3.0</span>, y: <span class="num">4.0</span> }
+    <span class="kw">let</span> dist = p.<span class="fn">distance</span>(<span class="ty">Point</span>::<span class="fn">origin</span>())
+    <span class="fn">println</span>(<span class="str">"Distance from origin: {dist}"</span>)
+}</code></pre>
+                    </div>
+                    <div class="example-description">
+                        <h3>Structs & Methods</h3>
+                        <p>Define custom types with associated methods. Type inference means you rarely need to annotate, but the compiler always knows.</p>
+                        <ul>
+                            <li>Struct definitions with typed fields</li>
+                            <li>Methods via <code>impl</code> blocks</li>
+                            <li>Full type inference</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Getting Started Section -->
+    <section id="getting-started" class="getting-started">
+        <div class="container">
+            <h2 class="section-title">Get Started</h2>
+            <div class="steps">
+                <div class="step">
+                    <div class="step-number">1</div>
+                    <div class="step-content">
+                        <h3>Install Lira</h3>
+                        <div class="code-inline">
+                            <code>cargo install lirac liravm</code>
+                            <button class="copy-btn" data-copy="cargo install lirac liravm" aria-label="Copy to clipboard">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                    <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"></path>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-number">2</div>
+                    <div class="step-content">
+                        <h3>Write Your First Program</h3>
+                        <div class="code-header compact">
+                            <span class="code-filename">hello.li</span>
+                        </div>
+<pre class="code-block compact"><code><span class="kw">fn</span> <span class="fn">main</span>() {
+    <span class="fn">println</span>(<span class="str">"Hello, Lira!"</span>)
+}</code></pre>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-number">3</div>
+                    <div class="step-content">
+                        <h3>Run It</h3>
+                        <div class="code-inline">
+                            <code>lira run hello.li</code>
+                            <button class="copy-btn" data-copy="lira run hello.li" aria-label="Copy to clipboard">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                    <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"></path>
+                                </svg>
+                            </button>
+                        </div>
+                        <p class="step-output">Hello, Lira!</p>
+                    </div>
+                </div>
+            </div>
+            <div class="cta-box">
+                <h3>Ready to dive deeper?</h3>
+                <p>Explore 85+ examples, read the language guide, or join the community.</p>
+                <div class="cta-buttons">
+                    <a href="https://github.com/HelgeSverre/lira/tree/main/examples" class="btn btn-primary">Browse Examples</a>
+                    <a href="https://github.com/HelgeSverre/lira/tree/main/docs" class="btn btn-secondary">Read the Docs</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-brand">
+                    <svg class="footer-logo" viewBox="0 0 40 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M4 8C4 4 8 2 12 4L20 8L28 4C32 2 36 4 36 8V36C36 40 32 44 28 44L20 40L12 44C8 44 4 40 4 36V8Z" stroke="currentColor" stroke-width="2.5" fill="none"/>
+                        <line x1="14" y1="12" x2="14" y2="36" stroke="#E8A924" stroke-width="2" stroke-linecap="round"/>
+                        <line x1="20" y1="10" x2="20" y2="38" stroke="#E8A924" stroke-width="2" stroke-linecap="round"/>
+                        <line x1="26" y1="12" x2="26" y2="36" stroke="#E8A924" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <p>A systems programming language<br>crafted for harmony.</p>
+                </div>
+                <div class="footer-links">
+                    <div class="footer-column">
+                        <h4>Resources</h4>
+                        <a href="https://github.com/HelgeSverre/lira/tree/main/docs">Documentation</a>
+                        <a href="https://github.com/HelgeSverre/lira/tree/main/examples">Examples</a>
+                        <a href="https://github.com/HelgeSverre/lira/tree/main/stdlib">Standard Library</a>
+                    </div>
+                    <div class="footer-column">
+                        <h4>Community</h4>
+                        <a href="https://github.com/HelgeSverre/lira">GitHub</a>
+                        <a href="https://github.com/HelgeSverre/lira/issues">Issues</a>
+                        <a href="https://github.com/HelgeSverre/lira/discussions">Discussions</a>
+                    </div>
+                    <div class="footer-column">
+                        <h4>Editors</h4>
+                        <a href="https://github.com/HelgeSverre/lira/tree/main/editors/vscode">VS Code</a>
+                        <a href="https://github.com/HelgeSverre/lira/tree/main/editors/vim">Vim</a>
+                        <a href="https://github.com/HelgeSverre/lira/tree/main/editors/zed">Zed</a>
+                    </div>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>Made with care. Open source under MIT.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
