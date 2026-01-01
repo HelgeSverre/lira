@@ -8,6 +8,7 @@ It uses host primitives (syscalls 110-111) for URL encoding/decoding
 and pure Lira for URL parsing.
 
 Built-in functions (from host):
+
 - url_encode(str) -> str: Percent-encode string
 - url_decode(str) -> str: Decode percent-encoded string
 
@@ -15,7 +16,6 @@ Built-in functions (from host):
 
 - [Structs](#structs)
 - [Functions](#functions)
-
 
 ## Structs
 
@@ -36,14 +36,14 @@ URL components
 
 #### Fields
 
-| Field | Type | Visibility |
-|-------|------|------------|
-| `scheme` | `string` | private |
-| `host` | `string` | private |
-| `port` | `int` | private |
-| `path` | `string` | private |
-| `query` | `string` | private |
-| `fragment` | `string` | private |
+| Field      | Type     | Visibility |
+| ---------- | -------- | ---------- |
+| `scheme`   | `string` | private    |
+| `host`     | `string` | private    |
+| `port`     | `int`    | private    |
+| `path`     | `string` | private    |
+| `query`    | `string` | private    |
+| `fragment` | `string` | private    |
 
 ---
 
@@ -59,9 +59,9 @@ Parse integer from string (simple implementation)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
+| Name | Type     |
+| ---- | -------- |
+| `s`  | `string` |
 
 **Returns:** `int`
 
@@ -77,9 +77,9 @@ Find first occurrence of substring (wrapper for str_index_of)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
+| Name     | Type     |
+| -------- | -------- |
+| `s`      | `string` |
 | `substr` | `string` |
 
 **Returns:** `int`
@@ -96,11 +96,11 @@ Get substring from start to end (wrapper for str_substring)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
-| `start` | `int` |
-| `end` | `int` |
+| Name    | Type     |
+| ------- | -------- |
+| `s`     | `string` |
+| `start` | `int`    |
+| `end`   | `int`    |
 
 **Returns:** `string`
 
@@ -116,8 +116,8 @@ Parse URL string into components
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name      | Type     |
+| --------- | -------- |
 | `url_str` | `string` |
 
 **Returns:** `URL`
@@ -134,8 +134,8 @@ Build URL string from components
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type  |
+| ----- | ----- |
 | `url` | `URL` |
 
 **Returns:** `string`
@@ -152,8 +152,8 @@ Parse query string into array of key=value pairs
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name    | Type     |
+| ------- | -------- |
 | `query` | `string` |
 
 **Returns:** `[string]`
@@ -170,10 +170,10 @@ Get query parameter value by key
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name    | Type     |
+| ------- | -------- |
 | `query` | `string` |
-| `key` | `string` |
+| `key`   | `string` |
 
 **Returns:** `string`
 
@@ -189,10 +189,10 @@ Check if query has a parameter
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name    | Type     |
+| ------- | -------- |
 | `query` | `string` |
-| `key` | `string` |
+| `key`   | `string` |
 
 **Returns:** `bool`
 
@@ -209,8 +209,8 @@ pairs should be [key1, value1, key2, value2, ...]
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name    | Type       |
+| ------- | ---------- |
 | `pairs` | `[string]` |
 
 **Returns:** `string`
@@ -227,8 +227,8 @@ Get just the origin (scheme + host + port)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type  |
+| ----- | ----- |
 | `url` | `URL` |
 
 **Returns:** `string`
@@ -245,8 +245,8 @@ Get path with query and fragment
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type  |
+| ----- | ----- |
 | `url` | `URL` |
 
 **Returns:** `string`
@@ -263,8 +263,8 @@ Check if URL is absolute (has scheme)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name      | Type     |
+| --------- | -------- |
 | `url_str` | `string` |
 
 **Returns:** `bool`
@@ -281,8 +281,8 @@ Check if URL is relative (no scheme)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name      | Type     |
+| --------- | -------- |
 | `url_str` | `string` |
 
 **Returns:** `bool`
@@ -299,8 +299,8 @@ Check if URL uses HTTP
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type  |
+| ----- | ----- |
 | `url` | `URL` |
 
 **Returns:** `bool`
@@ -317,8 +317,8 @@ Check if URL uses HTTPS
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type  |
+| ----- | ----- |
 | `url` | `URL` |
 
 **Returns:** `bool`
@@ -335,11 +335,10 @@ Check if URL is secure (HTTPS)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type  |
+| ----- | ----- |
 | `url` | `URL` |
 
 **Returns:** `bool`
 
 ---
-

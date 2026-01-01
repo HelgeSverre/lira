@@ -7,7 +7,6 @@ UUID generation and validation
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `uuid`
@@ -62,8 +61,8 @@ Check if UUID is nil
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type     |
+| ------ | -------- |
 | `uuid` | `string` |
 
 **Returns:** `bool`
@@ -80,11 +79,10 @@ Get version from UUID string (simple extraction)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type     |
+| ------ | -------- |
 | `uuid` | `string` |
 
 **Returns:** `int`
 
 ---
-

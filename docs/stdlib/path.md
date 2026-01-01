@@ -8,7 +8,6 @@ Currently uses Unix-style paths (forward slashes)
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `find_last_char`
@@ -22,10 +21,10 @@ Returns -1 if not found
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
-| `c` | `string` |
+| Name | Type     |
+| ---- | -------- |
+| `s`  | `string` |
+| `c`  | `string` |
 
 **Returns:** `int`
 
@@ -42,11 +41,11 @@ Returns -1 if not found
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
-| `c` | `string` |
-| `start` | `int` |
+| Name    | Type     |
+| ------- | -------- |
+| `s`     | `string` |
+| `c`     | `string` |
+| `start` | `int`    |
 
 **Returns:** `int`
 
@@ -62,11 +61,11 @@ Get substring from start to end (exclusive)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
-| `start` | `int` |
-| `end` | `int` |
+| Name    | Type     |
+| ------- | -------- |
+| `s`     | `string` |
+| `start` | `int`    |
+| `end`   | `int`    |
 
 **Returns:** `string`
 
@@ -82,9 +81,9 @@ Check if string starts with a prefix
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
+| Name     | Type     |
+| -------- | -------- |
+| `s`      | `string` |
 | `prefix` | `string` |
 
 **Returns:** `bool`
@@ -101,9 +100,9 @@ Check if string ends with a suffix
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
+| Name     | Type     |
+| -------- | -------- |
+| `s`      | `string` |
 | `suffix` | `string` |
 
 **Returns:** `bool`
@@ -125,8 +124,8 @@ Get directory name (parent path)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type     |
+| ------ | -------- |
 | `path` | `string` |
 
 **Returns:** `string`
@@ -146,8 +145,8 @@ Get base name (file name)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type     |
+| ------ | -------- |
 | `path` | `string` |
 
 **Returns:** `string`
@@ -168,8 +167,8 @@ Get file extension (including dot)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type     |
+| ------ | -------- |
 | `path` | `string` |
 
 **Returns:** `string`
@@ -189,8 +188,8 @@ Get file name without extension (stem)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type     |
+| ------ | -------- |
 | `path` | `string` |
 
 **Returns:** `string`
@@ -207,8 +206,8 @@ Check if path is absolute (starts with /)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type     |
+| ------ | -------- |
 | `path` | `string` |
 
 **Returns:** `bool`
@@ -225,8 +224,8 @@ Check if path is relative (does not start with /)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type     |
+| ------ | -------- |
 | `path` | `string` |
 
 **Returns:** `bool`
@@ -243,8 +242,8 @@ Get parent directory (alias for dirname)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type     |
+| ------ | -------- |
 | `path` | `string` |
 
 **Returns:** `string`
@@ -261,8 +260,8 @@ Check if path has an extension
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type     |
+| ------ | -------- |
 | `path` | `string` |
 
 **Returns:** `bool`
@@ -280,8 +279,8 @@ Handles leading/trailing slashes appropriately
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name    | Type       |
+| ------- | ---------- |
 | `parts` | `[string]` |
 
 **Returns:** `string`
@@ -298,8 +297,8 @@ Join two path components
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name    | Type     |
+| ------- | -------- |
 | `path1` | `string` |
 | `path2` | `string` |
 
@@ -319,8 +318,8 @@ Normalize a path (remove . and .., collapse multiple slashes)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type     |
+| ------ | -------- |
 | `path` | `string` |
 
 **Returns:** `string`
@@ -339,10 +338,10 @@ with_extension("/foo/bar", ".txt") -> "/foo/bar.txt"
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type     |
+| ------ | -------- |
 | `path` | `string` |
-| `ext` | `string` |
+| `ext`  | `string` |
 
 **Returns:** `string`
 
@@ -360,11 +359,10 @@ Split path into array of components
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type     |
+| ------ | -------- |
 | `path` | `string` |
 
 **Returns:** `[string]`
 
 ---
-

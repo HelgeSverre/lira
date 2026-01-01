@@ -7,7 +7,6 @@ Random number generation utilities
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `random_bool`
@@ -32,8 +31,8 @@ Generate random float in range [min, max)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type    |
+| ----- | ------- |
 | `min` | `float` |
 | `max` | `float` |
 
@@ -51,8 +50,8 @@ Generate random index for an array of given length
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name     | Type  |
+| -------- | ----- |
 | `length` | `int` |
 
 **Returns:** `int`
@@ -70,8 +69,8 @@ Returns the same array for convenience
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type    |
+| ----- | ------- |
 | `arr` | `[int]` |
 
 **Returns:** `[int]`
@@ -88,8 +87,8 @@ Generate a random integer with specified number of digits
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name         | Type  |
+| ------------ | ----- |
 | `num_digits` | `int` |
 
 **Returns:** `int`
@@ -130,11 +129,10 @@ Generate random dice roll with custom number of sides
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name    | Type  |
+| ------- | ----- |
 | `sides` | `int` |
 
 **Returns:** `int`
 
 ---
-

@@ -10,12 +10,11 @@ passed explicitly or tracked at the call site.
 Usage:
 import std.test
 test("my test", assert_eq(2 + 2, 4))
-summary(1, 1, 0)  // total, passed, failed
+summary(1, 1, 0) // total, passed, failed
 
 ## Contents
 
 - [Functions](#functions)
-
 
 ## Functions
 
@@ -29,8 +28,8 @@ Print a test suite header
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type     |
+| ------ | -------- |
 | `name` | `string` |
 
 ---
@@ -46,10 +45,10 @@ Returns true if passed, false if failed
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `name` | `string` |
-| `passed` | `bool` |
+| Name     | Type     |
+| -------- | -------- |
+| `name`   | `string` |
+| `passed` | `bool`   |
 
 **Returns:** `bool`
 
@@ -65,10 +64,10 @@ Run a test and increment counters (returns 1 if passed, 0 if failed)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `name` | `string` |
-| `passed` | `bool` |
+| Name     | Type     |
+| -------- | -------- |
+| `name`   | `string` |
+| `passed` | `bool`   |
 
 **Returns:** `int`
 
@@ -84,9 +83,9 @@ Print test summary
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `total` | `int` |
+| Name     | Type  |
+| -------- | ----- |
+| `total`  | `int` |
 | `passed` | `int` |
 | `failed` | `int` |
 
@@ -102,8 +101,8 @@ Assert a condition is true
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name        | Type   |
+| ----------- | ------ |
 | `condition` | `bool` |
 
 **Returns:** `bool`
@@ -120,9 +119,9 @@ Assert two integers are equal
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `actual` | `int` |
+| Name       | Type  |
+| ---------- | ----- |
+| `actual`   | `int` |
 | `expected` | `int` |
 
 **Returns:** `bool`
@@ -139,9 +138,9 @@ Assert two strings are equal
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `actual` | `string` |
+| Name       | Type     |
+| ---------- | -------- |
+| `actual`   | `string` |
 | `expected` | `string` |
 
 **Returns:** `bool`
@@ -158,11 +157,11 @@ Assert two floats are approximately equal (within epsilon)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `actual` | `float` |
+| Name       | Type    |
+| ---------- | ------- |
+| `actual`   | `float` |
 | `expected` | `float` |
-| `epsilon` | `float` |
+| `epsilon`  | `float` |
 
 **Returns:** `bool`
 
@@ -178,9 +177,9 @@ Assert two integers are not equal
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `actual` | `int` |
+| Name       | Type  |
+| ---------- | ----- |
+| `actual`   | `int` |
 | `expected` | `int` |
 
 **Returns:** `bool`
@@ -197,9 +196,9 @@ Assert two strings are not equal
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `actual` | `string` |
+| Name       | Type     |
+| ---------- | -------- |
+| `actual`   | `string` |
 | `expected` | `string` |
 
 **Returns:** `bool`
@@ -216,8 +215,8 @@ Assert a value is true
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name    | Type   |
+| ------- | ------ |
 | `value` | `bool` |
 
 **Returns:** `bool`
@@ -234,8 +233,8 @@ Assert a value is false
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name    | Type   |
+| ------- | ------ |
 | `value` | `bool` |
 
 **Returns:** `bool`
@@ -252,9 +251,9 @@ Assert actual > expected
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `actual` | `int` |
+| Name       | Type  |
+| ---------- | ----- |
+| `actual`   | `int` |
 | `expected` | `int` |
 
 **Returns:** `bool`
@@ -271,9 +270,9 @@ Assert actual >= expected
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `actual` | `int` |
+| Name       | Type  |
+| ---------- | ----- |
+| `actual`   | `int` |
 | `expected` | `int` |
 
 **Returns:** `bool`
@@ -290,9 +289,9 @@ Assert actual < expected
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `actual` | `int` |
+| Name       | Type  |
+| ---------- | ----- |
+| `actual`   | `int` |
 | `expected` | `int` |
 
 **Returns:** `bool`
@@ -309,9 +308,9 @@ Assert actual <= expected
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `actual` | `int` |
+| Name       | Type  |
+| ---------- | ----- |
+| `actual`   | `int` |
 | `expected` | `int` |
 
 **Returns:** `bool`
@@ -328,9 +327,9 @@ Assert value is between min_val and max_val (inclusive)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `value` | `int` |
+| Name      | Type  |
+| --------- | ----- |
+| `value`   | `int` |
 | `min_val` | `int` |
 | `max_val` | `int` |
 
@@ -348,9 +347,9 @@ Assert actual > expected (float)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `actual` | `float` |
+| Name       | Type    |
+| ---------- | ------- |
+| `actual`   | `float` |
 | `expected` | `float` |
 
 **Returns:** `bool`
@@ -367,9 +366,9 @@ Assert actual >= expected (float)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `actual` | `float` |
+| Name       | Type    |
+| ---------- | ------- |
+| `actual`   | `float` |
 | `expected` | `float` |
 
 **Returns:** `bool`
@@ -386,9 +385,9 @@ Assert actual < expected (float)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `actual` | `float` |
+| Name       | Type    |
+| ---------- | ------- |
+| `actual`   | `float` |
 | `expected` | `float` |
 
 **Returns:** `bool`
@@ -405,9 +404,9 @@ Assert actual <= expected (float)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `actual` | `float` |
+| Name       | Type    |
+| ---------- | ------- |
+| `actual`   | `float` |
 | `expected` | `float` |
 
 **Returns:** `bool`
@@ -424,10 +423,10 @@ Assert string contains substring
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name       | Type     |
+| ---------- | -------- |
 | `haystack` | `string` |
-| `needle` | `string` |
+| `needle`   | `string` |
 
 **Returns:** `bool`
 
@@ -443,9 +442,9 @@ Assert string starts with prefix
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `str` | `string` |
+| Name     | Type     |
+| -------- | -------- |
+| `str`    | `string` |
 | `prefix` | `string` |
 
 **Returns:** `bool`
@@ -462,9 +461,9 @@ Assert string ends with suffix
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `str` | `string` |
+| Name     | Type     |
+| -------- | -------- |
+| `str`    | `string` |
 | `suffix` | `string` |
 
 **Returns:** `bool`
@@ -481,10 +480,10 @@ Assert string does not contain substring
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name       | Type     |
+| ---------- | -------- |
 | `haystack` | `string` |
-| `needle` | `string` |
+| `needle`   | `string` |
 
 **Returns:** `bool`
 
@@ -500,10 +499,10 @@ Assert string matches expected length
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `str` | `string` |
-| `expected_len` | `int` |
+| Name           | Type     |
+| -------------- | -------- |
+| `str`          | `string` |
+| `expected_len` | `int`    |
 
 **Returns:** `bool`
 
@@ -519,8 +518,8 @@ Assert string is empty
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type     |
+| ----- | -------- |
 | `str` | `string` |
 
 **Returns:** `bool`
@@ -537,8 +536,8 @@ Assert string is not empty
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type     |
+| ----- | -------- |
 | `str` | `string` |
 
 **Returns:** `bool`
@@ -555,10 +554,10 @@ Assert array has expected length
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `arr` | `[int]` |
-| `expected` | `int` |
+| Name       | Type    |
+| ---------- | ------- |
+| `arr`      | `[int]` |
+| `expected` | `int`   |
 
 **Returns:** `bool`
 
@@ -574,8 +573,8 @@ Assert array is empty
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type    |
+| ----- | ------- |
 | `arr` | `[int]` |
 
 **Returns:** `bool`
@@ -592,8 +591,8 @@ Assert array is not empty
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type    |
+| ----- | ------- |
 | `arr` | `[int]` |
 
 **Returns:** `bool`
@@ -610,10 +609,10 @@ Assert array contains a value
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `arr` | `[int]` |
-| `value` | `int` |
+| Name    | Type    |
+| ------- | ------- |
+| `arr`   | `[int]` |
+| `value` | `int`   |
 
 **Returns:** `bool`
 
@@ -629,8 +628,8 @@ Assert value is null
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name    | Type   |
+| ------- | ------ |
 | `value` | `int?` |
 
 **Returns:** `bool`
@@ -647,8 +646,8 @@ Assert value is not null
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name    | Type   |
+| ------- | ------ |
 | `value` | `int?` |
 
 **Returns:** `bool`
@@ -665,8 +664,8 @@ Print a section header for organizing tests
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type     |
+| ------ | -------- |
 | `name` | `string` |
 
 ---
@@ -681,9 +680,9 @@ Skip a test with a reason
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `name` | `string` |
+| Name     | Type     |
+| -------- | -------- |
+| `name`   | `string` |
 | `reason` | `string` |
 
 ---
@@ -698,8 +697,8 @@ Print a debug message during testing
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type     |
+| ----- | -------- |
 | `msg` | `string` |
 
 ---
@@ -714,10 +713,10 @@ Mark a test as expected to fail (for documenting known issues)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `name` | `string` |
-| `passed` | `bool` |
+| Name     | Type     |
+| -------- | -------- |
+| `name`   | `string` |
+| `passed` | `bool`   |
 
 **Returns:** `bool`
 
@@ -734,8 +733,8 @@ Returns: 1 if passed, 0 if failed (for summing)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name     | Type   |
+| -------- | ------ |
 | `result` | `bool` |
 
 **Returns:** `int`
@@ -752,8 +751,8 @@ Returns: 0 if passed, 1 if failed (for summing)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name     | Type   |
+| -------- | ------ |
 | `result` | `bool` |
 
 **Returns:** `int`
@@ -770,11 +769,10 @@ Check if all tests passed (no failures)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name     | Type  |
+| -------- | ----- |
 | `failed` | `int` |
 
 **Returns:** `bool`
 
 ---
-

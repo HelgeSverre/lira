@@ -7,7 +7,6 @@ High-level file operations built on host primitives
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `read_file`
@@ -20,8 +19,8 @@ Read entire file as string
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type     |
+| ------ | -------- |
 | `path` | `string` |
 
 **Returns:** `string`
@@ -38,9 +37,9 @@ Write string to file (overwrites existing)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `path` | `string` |
+| Name      | Type     |
+| --------- | -------- |
+| `path`    | `string` |
 | `content` | `string` |
 
 **Returns:** `bool`
@@ -57,9 +56,9 @@ Append string to file
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `path` | `string` |
+| Name      | Type     |
+| --------- | -------- |
+| `path`    | `string` |
 | `content` | `string` |
 
 **Returns:** `bool`
@@ -76,8 +75,8 @@ Check if path exists (file or directory)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type     |
+| ------ | -------- |
 | `path` | `string` |
 
 **Returns:** `bool`
@@ -94,11 +93,10 @@ Get file size in bytes (-1 if doesn't exist)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type     |
+| ------ | -------- |
 | `path` | `string` |
 
 **Returns:** `int`
 
 ---
-

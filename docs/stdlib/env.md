@@ -7,7 +7,6 @@ Environment variable operations
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `get_or`
@@ -20,9 +19,9 @@ Get env var with default value
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `name` | `string` |
+| Name            | Type     |
+| --------------- | -------- |
+| `name`          | `string` |
 | `default_value` | `string` |
 
 **Returns:** `string`
@@ -39,8 +38,8 @@ Get env var as bool
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type     |
+| ------ | -------- |
 | `name` | `string` |
 
 **Returns:** `bool`
@@ -94,4 +93,3 @@ Get shell
 **Returns:** `string`
 
 ---
-

@@ -7,7 +7,6 @@ Cryptographic hash functions
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `verify_md5`
@@ -20,9 +19,9 @@ Helper: Verify hash matches expected
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `input` | `string` |
+| Name            | Type     |
+| --------------- | -------- |
+| `input`         | `string` |
 | `expected_hash` | `string` |
 
 **Returns:** `bool`
@@ -37,9 +36,9 @@ fn verify_sha1(input: string, expected_hash: string) -> bool
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `input` | `string` |
+| Name            | Type     |
+| --------------- | -------- |
+| `input`         | `string` |
 | `expected_hash` | `string` |
 
 **Returns:** `bool`
@@ -54,9 +53,9 @@ fn verify_sha256(input: string, expected_hash: string) -> bool
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `input` | `string` |
+| Name            | Type     |
+| --------------- | -------- |
+| `input`         | `string` |
 | `expected_hash` | `string` |
 
 **Returns:** `bool`
@@ -71,9 +70,9 @@ fn verify_sha512(input: string, expected_hash: string) -> bool
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `input` | `string` |
+| Name            | Type     |
+| --------------- | -------- |
+| `input`         | `string` |
 | `expected_hash` | `string` |
 
 **Returns:** `bool`
@@ -90,10 +89,10 @@ Hash with salt (simple concatenation)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name    | Type     |
+| ------- | -------- |
 | `input` | `string` |
-| `salt` | `string` |
+| `salt`  | `string` |
 
 **Returns:** `string`
 
@@ -107,12 +106,11 @@ fn sha256_salted(input: string, salt: string) -> string
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name    | Type     |
+| ------- | -------- |
 | `input` | `string` |
-| `salt` | `string` |
+| `salt`  | `string` |
 
 **Returns:** `string`
 
 ---
-

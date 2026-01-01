@@ -12,7 +12,6 @@ It uses a combination of pure Lira implementations and host primitives
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `to_upper`
@@ -25,9 +24,9 @@ Convert string to uppercase
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
+| Name | Type     |
+| ---- | -------- |
+| `s`  | `string` |
 
 **Returns:** `string`
 
@@ -43,9 +42,9 @@ Convert string to lowercase
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
+| Name | Type     |
+| ---- | -------- |
+| `s`  | `string` |
 
 **Returns:** `string`
 
@@ -62,10 +61,10 @@ Returns empty string if index is out of bounds
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
-| `index` | `int` |
+| Name    | Type     |
+| ------- | -------- |
+| `s`     | `string` |
+| `index` | `int`    |
 
 **Returns:** `string`
 
@@ -81,11 +80,11 @@ Get substring from start (inclusive) to end (exclusive)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
-| `start` | `int` |
-| `end` | `int` |
+| Name    | Type     |
+| ------- | -------- |
+| `s`     | `string` |
+| `start` | `int`    |
+| `end`   | `int`    |
 
 **Returns:** `string`
 
@@ -102,10 +101,10 @@ Returns -1 if index is out of bounds
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
-| `index` | `int` |
+| Name    | Type     |
+| ------- | -------- |
+| `s`     | `string` |
+| `index` | `int`    |
 
 **Returns:** `int`
 
@@ -121,8 +120,8 @@ Create a single-character string from a character code
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type  |
+| ------ | ----- |
 | `code` | `int` |
 
 **Returns:** `string`
@@ -140,9 +139,9 @@ Returns -1 if not found
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
+| Name     | Type     |
+| -------- | -------- |
+| `s`      | `string` |
 | `substr` | `string` |
 
 **Returns:** `int`
@@ -160,9 +159,9 @@ Returns -1 if not found
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
+| Name     | Type     |
+| -------- | -------- |
+| `s`      | `string` |
 | `substr` | `string` |
 
 **Returns:** `int`
@@ -179,9 +178,9 @@ Check if string contains substring
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
+| Name     | Type     |
+| -------- | -------- |
+| `s`      | `string` |
 | `substr` | `string` |
 
 **Returns:** `bool`
@@ -198,9 +197,9 @@ Check if string starts with prefix
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
+| Name     | Type     |
+| -------- | -------- |
+| `s`      | `string` |
 | `prefix` | `string` |
 
 **Returns:** `bool`
@@ -217,9 +216,9 @@ Check if string ends with suffix
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
+| Name     | Type     |
+| -------- | -------- |
+| `s`      | `string` |
 | `suffix` | `string` |
 
 **Returns:** `bool`
@@ -236,9 +235,9 @@ Trim whitespace from both ends
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
+| Name | Type     |
+| ---- | -------- |
+| `s`  | `string` |
 
 **Returns:** `string`
 
@@ -254,9 +253,9 @@ Trim whitespace from start
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
+| Name | Type     |
+| ---- | -------- |
+| `s`  | `string` |
 
 **Returns:** `string`
 
@@ -272,9 +271,9 @@ Trim whitespace from end
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
+| Name | Type     |
+| ---- | -------- |
+| `s`  | `string` |
 
 **Returns:** `string`
 
@@ -290,9 +289,9 @@ Split string by delimiter
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
+| Name        | Type     |
+| ----------- | -------- |
+| `s`         | `string` |
 | `delimiter` | `string` |
 
 **Returns:** `[string]`
@@ -309,10 +308,10 @@ Join array of strings with delimiter
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `arr` | `[string]` |
-| `delimiter` | `string` |
+| Name        | Type       |
+| ----------- | ---------- |
+| `arr`       | `[string]` |
+| `delimiter` | `string`   |
 
 **Returns:** `string`
 
@@ -328,9 +327,9 @@ Replace all occurrences of old_str with new_str
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
+| Name      | Type     |
+| --------- | -------- |
+| `s`       | `string` |
 | `old_str` | `string` |
 | `new_str` | `string` |
 
@@ -348,9 +347,9 @@ Replace first occurrence of old_str with new_str
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
+| Name      | Type     |
+| --------- | -------- |
+| `s`       | `string` |
 | `old_str` | `string` |
 | `new_str` | `string` |
 
@@ -368,10 +367,10 @@ Repeat string n times
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
-| `count` | `int` |
+| Name    | Type     |
+| ------- | -------- |
+| `s`     | `string` |
+| `count` | `int`    |
 
 **Returns:** `string`
 
@@ -387,9 +386,9 @@ Reverse a string
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
+| Name | Type     |
+| ---- | -------- |
+| `s`  | `string` |
 
 **Returns:** `string`
 
@@ -405,11 +404,11 @@ Pad start of string to reach target length
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
-| `length` | `int` |
-| `pad` | `string` |
+| Name     | Type     |
+| -------- | -------- |
+| `s`      | `string` |
+| `length` | `int`    |
+| `pad`    | `string` |
 
 **Returns:** `string`
 
@@ -425,11 +424,11 @@ Pad end of string to reach target length
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
-| `length` | `int` |
-| `pad` | `string` |
+| Name     | Type     |
+| -------- | -------- |
+| `s`      | `string` |
+| `length` | `int`    |
+| `pad`    | `string` |
 
 **Returns:** `string`
 
@@ -445,9 +444,9 @@ Check if string is empty
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
+| Name | Type     |
+| ---- | -------- |
+| `s`  | `string` |
 
 **Returns:** `bool`
 
@@ -463,9 +462,9 @@ Check if string is empty or contains only whitespace
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
+| Name | Type     |
+| ---- | -------- |
+| `s`  | `string` |
 
 **Returns:** `bool`
 
@@ -481,9 +480,9 @@ Check if string consists only of digits
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
+| Name | Type     |
+| ---- | -------- |
+| `s`  | `string` |
 
 **Returns:** `bool`
 
@@ -499,9 +498,9 @@ Check if string consists only of letters (a-z, A-Z)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
+| Name | Type     |
+| ---- | -------- |
+| `s`  | `string` |
 
 **Returns:** `bool`
 
@@ -517,9 +516,9 @@ Check if string consists only of letters and digits
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
+| Name | Type     |
+| ---- | -------- |
+| `s`  | `string` |
 
 **Returns:** `bool`
 
@@ -535,9 +534,9 @@ Capitalize first character
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
+| Name | Type     |
+| ---- | -------- |
+| `s`  | `string` |
 
 **Returns:** `string`
 
@@ -553,9 +552,9 @@ Convert to title case (capitalize each word)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
+| Name | Type     |
+| ---- | -------- |
+| `s`  | `string` |
 
 **Returns:** `string`
 
@@ -571,9 +570,9 @@ Count occurrences of substring
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
+| Name     | Type     |
+| -------- | -------- |
+| `s`      | `string` |
 | `substr` | `string` |
 
 **Returns:** `int`
@@ -590,11 +589,10 @@ Count number of words (space-separated)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
+| Name | Type     |
+| ---- | -------- |
+| `s`  | `string` |
 
 **Returns:** `int`
 
 ---
-

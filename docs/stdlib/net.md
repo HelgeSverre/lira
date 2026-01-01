@@ -7,7 +7,6 @@ TCP networking primitives
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `is_connected`
@@ -20,8 +19,8 @@ Check if socket is valid (connected successfully)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name        | Type  |
+| ----------- | ----- |
 | `socket_id` | `int` |
 
 **Returns:** `bool`
@@ -38,10 +37,10 @@ Send line with CRLF (for text protocols like HTTP, SMTP, etc.)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `socket_id` | `int` |
-| `line` | `string` |
+| Name        | Type     |
+| ----------- | -------- |
+| `socket_id` | `int`    |
+| `line`      | `string` |
 
 **Returns:** `int`
 
@@ -57,10 +56,10 @@ Send multiple lines at once
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `socket_id` | `int` |
-| `lines` | `[string]` |
+| Name        | Type       |
+| ----------- | ---------- |
+| `socket_id` | `int`      |
+| `lines`     | `[string]` |
 
 **Returns:** `int`
 
@@ -76,10 +75,10 @@ Read until we have at least n bytes
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name        | Type  |
+| ----------- | ----- |
 | `socket_id` | `int` |
-| `n` | `int` |
+| `n`         | `int` |
 
 **Returns:** `string`
 
@@ -95,10 +94,10 @@ Connect with timeout check (non-blocking attempt)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type     |
+| ------ | -------- |
 | `host` | `string` |
-| `port` | `int` |
+| `port` | `int`    |
 
 **Returns:** `int`
 
@@ -114,11 +113,10 @@ Close socket safely (no error if already closed)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name        | Type  |
+| ----------- | ----- |
 | `socket_id` | `int` |
 
 **Returns:** `bool`
 
 ---
-

@@ -4,22 +4,21 @@ Lira Standard Library - Time Module
 Time manipulation and formatting
 
 Built-in functions (direct syscalls):
-time_ms() -> int              - Current time in milliseconds since epoch (syscall 4)
-sleep(ms: int)                - Sleep for milliseconds (syscall 5)
-time_secs() -> int            - Current time in seconds since epoch (syscall 6)
-time_micros() -> int          - Current time in microseconds since epoch (syscall 7)
-time_nanos() -> int           - Current time in nanoseconds since epoch (syscall 8)
+time_ms() -> int - Current time in milliseconds since epoch (syscall 4)
+sleep(ms: int) - Sleep for milliseconds (syscall 5)
+time_secs() -> int - Current time in seconds since epoch (syscall 6)
+time_micros() -> int - Current time in microseconds since epoch (syscall 7)
+time_nanos() -> int - Current time in nanoseconds since epoch (syscall 8)
 time_format_iso(ms) -> string - Format timestamp as ISO 8601 string (syscall 130)
 time_format(ms, fmt) -> string- Format timestamp with custom format (syscall 131)
-time_parse_iso(str) -> int    - Parse ISO 8601 string to timestamp (syscall 132)
+time_parse_iso(str) -> int - Parse ISO 8601 string to timestamp (syscall 132)
 time_timezone_offset() -> int - Get local timezone offset in minutes (syscall 133)
-time_components(ms) -> [int]  - Get [year, month, day, hour, min, sec] (syscall 134)
+time_components(ms) -> [int] - Get [year, month, day, hour, min, sec] (syscall 134)
 time_from_components(y, m, d, h, m, s) -> int - Create timestamp from components (syscall 135)
 
 ## Contents
 
 - [Functions](#functions)
-
 
 ## Functions
 
@@ -33,9 +32,9 @@ Convert seconds to milliseconds
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `int`
 
@@ -51,9 +50,9 @@ Convert minutes to milliseconds
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `int`
 
@@ -69,9 +68,9 @@ Convert hours to milliseconds
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `int`
 
@@ -87,9 +86,9 @@ Convert days to milliseconds
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `int`
 
@@ -105,9 +104,9 @@ Convert weeks to milliseconds
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `int`
 
@@ -159,8 +158,8 @@ Get current datetime with custom format
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type     |
+| ----- | -------- |
 | `fmt` | `string` |
 
 **Returns:** `string`
@@ -177,8 +176,8 @@ Measure elapsed time from a start timestamp
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name       | Type  |
+| ---------- | ----- |
 | `start_ms` | `int` |
 
 **Returns:** `int`
@@ -195,8 +194,8 @@ Measure elapsed time in seconds from a start timestamp
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name       | Type  |
+| ---------- | ----- |
 | `start_ms` | `int` |
 
 **Returns:** `int`
@@ -213,10 +212,10 @@ Add duration to timestamp
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name           | Type  |
+| -------------- | ----- |
 | `timestamp_ms` | `int` |
-| `duration_ms` | `int` |
+| `duration_ms`  | `int` |
 
 **Returns:** `int`
 
@@ -232,9 +231,9 @@ Subtract timestamps to get duration in milliseconds
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `end_ms` | `int` |
+| Name       | Type  |
+| ---------- | ----- |
+| `end_ms`   | `int` |
 | `start_ms` | `int` |
 
 **Returns:** `int`
@@ -251,10 +250,10 @@ Add seconds to timestamp
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name           | Type  |
+| -------------- | ----- |
 | `timestamp_ms` | `int` |
-| `secs` | `int` |
+| `secs`         | `int` |
 
 **Returns:** `int`
 
@@ -270,10 +269,10 @@ Add minutes to timestamp
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name           | Type  |
+| -------------- | ----- |
 | `timestamp_ms` | `int` |
-| `mins` | `int` |
+| `mins`         | `int` |
 
 **Returns:** `int`
 
@@ -289,10 +288,10 @@ Add hours to timestamp
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name           | Type  |
+| -------------- | ----- |
 | `timestamp_ms` | `int` |
-| `hrs` | `int` |
+| `hrs`          | `int` |
 
 **Returns:** `int`
 
@@ -308,10 +307,10 @@ Add days to timestamp
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name           | Type  |
+| -------------- | ----- |
 | `timestamp_ms` | `int` |
-| `d` | `int` |
+| `d`            | `int` |
 
 **Returns:** `int`
 
@@ -327,8 +326,8 @@ Check if timestamp is today
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name           | Type  |
+| -------------- | ----- |
 | `timestamp_ms` | `int` |
 
 **Returns:** `bool`
@@ -345,10 +344,10 @@ Check if timestamp is before another
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name           | Type  |
+| -------------- | ----- |
 | `timestamp_ms` | `int` |
-| `other_ms` | `int` |
+| `other_ms`     | `int` |
 
 **Returns:** `bool`
 
@@ -364,10 +363,10 @@ Check if timestamp is after another
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name           | Type  |
+| -------------- | ----- |
 | `timestamp_ms` | `int` |
-| `other_ms` | `int` |
+| `other_ms`     | `int` |
 
 **Returns:** `bool`
 
@@ -383,8 +382,8 @@ Check if timestamp is in the past
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name           | Type  |
+| -------------- | ----- |
 | `timestamp_ms` | `int` |
 
 **Returns:** `bool`
@@ -401,8 +400,8 @@ Check if timestamp is in the future
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name           | Type  |
+| -------------- | ----- |
 | `timestamp_ms` | `int` |
 
 **Returns:** `bool`
@@ -419,8 +418,8 @@ Get year from timestamp
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name           | Type  |
+| -------------- | ----- |
 | `timestamp_ms` | `int` |
 
 **Returns:** `int`
@@ -437,8 +436,8 @@ Get month from timestamp (1-12)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name           | Type  |
+| -------------- | ----- |
 | `timestamp_ms` | `int` |
 
 **Returns:** `int`
@@ -455,8 +454,8 @@ Get day from timestamp (1-31)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name           | Type  |
+| -------------- | ----- |
 | `timestamp_ms` | `int` |
 
 **Returns:** `int`
@@ -473,8 +472,8 @@ Get hour from timestamp (0-23)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name           | Type  |
+| -------------- | ----- |
 | `timestamp_ms` | `int` |
 
 **Returns:** `int`
@@ -491,8 +490,8 @@ Get minute from timestamp (0-59)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name           | Type  |
+| -------------- | ----- |
 | `timestamp_ms` | `int` |
 
 **Returns:** `int`
@@ -509,8 +508,8 @@ Get second from timestamp (0-59)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name           | Type  |
+| -------------- | ----- |
 | `timestamp_ms` | `int` |
 
 **Returns:** `int`
@@ -527,8 +526,8 @@ Format as date only (YYYY-MM-DD)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name           | Type  |
+| -------------- | ----- |
 | `timestamp_ms` | `int` |
 
 **Returns:** `string`
@@ -545,8 +544,8 @@ Format as time only (HH:MM:SS)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name           | Type  |
+| -------------- | ----- |
 | `timestamp_ms` | `int` |
 
 **Returns:** `string`
@@ -563,8 +562,8 @@ Format as datetime (YYYY-MM-DD HH:MM:SS)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name           | Type  |
+| -------------- | ----- |
 | `timestamp_ms` | `int` |
 
 **Returns:** `string`
@@ -581,11 +580,10 @@ Format as human-readable date (e.g., "January 1, 2024")
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name           | Type  |
+| -------------- | ----- |
 | `timestamp_ms` | `int` |
 
 **Returns:** `string`
 
 ---
-

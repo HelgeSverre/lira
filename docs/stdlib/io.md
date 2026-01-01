@@ -7,7 +7,6 @@ Input/output utilities
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `print_str`
@@ -20,9 +19,9 @@ Print without newline
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
+| Name | Type     |
+| ---- | -------- |
+| `s`  | `string` |
 
 ---
 
@@ -36,9 +35,9 @@ Print with newline
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
+| Name | Type     |
+| ---- | -------- |
+| `s`  | `string` |
 
 ---
 
@@ -52,10 +51,10 @@ Print formatted message with values
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `template` | `string` |
-| `values` | `[string]` |
+| Name       | Type       |
+| ---------- | ---------- |
+| `template` | `string`   |
+| `values`   | `[string]` |
 
 ---
 
@@ -69,10 +68,10 @@ Debug print with label
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name    | Type     |
+| ------- | -------- |
 | `label` | `string` |
-| `value` | `int` |
+| `value` | `int`    |
 
 ---
 
@@ -86,10 +85,10 @@ Assert condition
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `condition` | `bool` |
-| `message` | `string` |
+| Name        | Type     |
+| ----------- | -------- |
+| `condition` | `bool`   |
+| `message`   | `string` |
 
 ---
 
@@ -115,8 +114,8 @@ Sleep for specified milliseconds
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name | Type  |
+| ---- | ----- |
 | `ms` | `int` |
 
 ---
@@ -132,4 +131,3 @@ Measure execution time of a block
 **Returns:** `int`
 
 ---
-
