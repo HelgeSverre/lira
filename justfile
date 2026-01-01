@@ -13,10 +13,10 @@ default:
 build:
     cargo build --package lirac --package liravm
 
-# Build all including LSP and doc generator
+# Build all including LSP, doc generator, and spec validator
 [group('dev')]
 build-all:
-    cargo build --package lirac --package liravm --package lira-lsp --package lira-doc
+    cargo build --package lirac --package liravm --package lira-lsp --package lira-doc --package lira-spec
 
 # Build in release mode
 [group('dev')]
@@ -26,12 +26,12 @@ release:
 # Build all in release mode
 [group('dev')]
 release-all:
-    cargo build --package lirac --package liravm --package lira-lsp --package lira-doc --release
+    cargo build --package lirac --package liravm --package lira-lsp --package lira-doc --package lira-spec --release
 
 # Run all tests
 [group('dev')]
 test:
-    cargo test --package lirac --package liravm --package lira-core
+    cargo test --package lirac --package liravm --package lira-core --package lira-spec
     cargo test --package lirac --test integration
 
 # Run all tests with output
@@ -43,7 +43,7 @@ test-verbose:
 # Type check without building
 [group('dev')]
 check:
-    cargo check --package lirac --package liravm --package lira-core
+    cargo check --package lirac --package liravm --package lira-core --package lira-spec
 
 # Compile and run a Lira file
 [group('dev')]
@@ -55,7 +55,7 @@ run file:
 # Run clippy lints
 [group('dev')]
 clippy:
-    cargo clippy --package lirac --package liravm --package lira-core -- -D warnings
+    cargo clippy --package lirac --package liravm --package lira-core --package lira-spec -- -D warnings
 
 # Format code
 [group('dev')]
@@ -103,6 +103,35 @@ doc-stdlib:
     cargo run --package lira-doc -- generate stdlib/ --mdbook --title "Lira Standard Library" -o docs/stdlib-book/
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Specification
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Validate implementation against formal specification
+[group('spec')]
+spec-validate:
+    cargo run --package lira-spec -- validate docs/FORMAL_SPECIFICATION.md
+
+# Compare EBNF spec with tree-sitter grammar
+[group('spec')]
+spec-compare:
+    cargo run --package lira-spec -- compare docs/FORMAL_SPECIFICATION.md editors/tree-sitter-lira/grammar.js
+
+# Run specification conformance tests
+[group('spec')]
+spec-test:
+    cargo test --package lira-spec
+
+# Run specification conformance tests with output
+[group('spec')]
+spec-test-verbose:
+    cargo test --package lira-spec -- --nocapture
+
+# Check spec crate compiles
+[group('spec')]
+spec-check:
+    cargo check --package lira-spec
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Installation
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -114,6 +143,7 @@ install: release-all
     cp target/release/liravm ~/.local/bin/
     cp target/release/lira-lsp ~/.local/bin/
     cp target/release/lira-doc ~/.local/bin/
+    cp target/release/lira-spec ~/.local/bin/
 
 # Install Vim/Neovim syntax highlighting
 [group('install')]
