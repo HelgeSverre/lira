@@ -34,7 +34,7 @@ cargo test --package liravm -- <test_name>
 
 ## Architecture
 
-The project is organized as a Cargo workspace with four crates:
+The project is organized as a Cargo workspace with five crates:
 
 ### `lira-core` - Shared types
 - `opcode.rs` - VM instruction definitions
@@ -66,6 +66,12 @@ Entry points:
 ### `lira-lsp` - Language Server Protocol
 LSP implementation using tower-lsp for IDE features.
 
+### `lira-doc` - Documentation Generator
+Generates Markdown documentation from Lira source files.
+- `extractor.rs` - Extracts doc comments and declarations
+- `generator.rs` - Produces Markdown output
+- `types.rs` - Documentation model types
+
 ## Testing
 
 Integration tests use directive comments in `.li` source files:
@@ -79,7 +85,7 @@ Example files in `examples/` serve as both documentation and test cases.
 ## Key Directories
 
 - `stdlib/` - Standard library modules (`.li` files)
-- `examples/` - 85+ example programs
+- `examples/` - 87 example programs
 - `docs/` - Language specifications
 - `editors/` - IDE/editor integrations (VS Code, Vim, Zed, Helix, IntelliJ)
 

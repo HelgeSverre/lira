@@ -96,6 +96,12 @@ liravm --version           # Show version
 lira-lsp                   # Start LSP server (stdio)
 ```
 
+**lira-doc** — The Lira documentation generator
+```bash
+lira-doc <file.li>         # Generate Markdown docs for a file
+lira-doc stdlib/           # Generate docs for a directory
+```
+
 ## Editor Support
 
 | Editor | Extension | Features |
@@ -117,7 +123,8 @@ lira/
 │   ├── lirac/          # Compiler (lexer, parser, checker, codegen)
 │   ├── liravm/         # Virtual machine (interpreter, fibers, runtime)
 │   ├── lira-core/      # Shared types & opcodes
-│   └── lira-lsp/       # Language server (LSP)
+│   ├── lira-lsp/       # Language server (LSP)
+│   └── lira-doc/       # Documentation generator
 ├── editors/            # Editor extensions
 │   ├── tree-sitter-lira/   # Tree-sitter grammar
 │   ├── vscode-lira/        # VS Code extension
@@ -125,7 +132,7 @@ lira/
 │   ├── zed-lira/           # Zed extension
 │   ├── helix-lira/         # Helix config
 │   └── intellij-lira/      # IntelliJ plugin
-├── stdlib/             # Standard library (21 modules)
+├── stdlib/             # Standard library (20 modules)
 ├── examples/           # 87 example programs
 ├── docs/               # Language specifications
 └── justfile            # Build commands
@@ -190,8 +197,9 @@ import std.fs.{read_file, write_file}
 | Bytecode Compiler | Complete |
 | VM Core | Complete |
 | Fiber Runtime | Complete |
-| Standard Library | Complete (21 modules) |
+| Standard Library | Complete (20 modules) |
 | Language Server | Complete |
+| Documentation Generator | Complete |
 | Editor Extensions | Complete |
 
 ## Contributing

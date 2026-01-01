@@ -1,0 +1,18 @@
+[package]
+name = "lira-doc"
+version = "0.1.0"
+edition = "2021"
+description = "Lira documentation generator - generates Markdown docs from .li source files"
+license = "MIT"
+
+[[bin]]
+name = "lira-doc"
+path = "src/main.rs"
+
+[lib]
+name = "lira_doc"
+path = "src/lib.rs"
+
+[dependencies]
+lirac = { path = "../lirac" }
+lira-core = { path = "../lira-core" }

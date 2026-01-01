@@ -13,10 +13,10 @@ default:
 build:
     cargo build --package lirac --package liravm
 
-# Build all including LSP
+# Build all including LSP and doc generator
 [group('dev')]
 build-all:
-    cargo build --package lirac --package liravm --package lira-lsp
+    cargo build --package lirac --package liravm --package lira-lsp --package lira-doc
 
 # Build in release mode
 [group('dev')]
@@ -26,7 +26,7 @@ release:
 # Build all in release mode
 [group('dev')]
 release-all:
-    cargo build --package lirac --package liravm --package lira-lsp --release
+    cargo build --package lirac --package liravm --package lira-lsp --package lira-doc --release
 
 # Run all tests
 [group('dev')]
@@ -72,6 +72,36 @@ clean:
 lsp:
     cargo run --package lira-lsp
 
+# Generate documentation for stdlib
+[group('dev')]
+doc:
+    cargo run --package lira-doc -- generate stdlib/ -o docs/stdlib/
+
+# Generate documentation for a specific file
+[group('dev')]
+doc-file file:
+    cargo run --package lira-doc -- generate {{file}}
+
+# Generate combined mdBook (stdlib + examples)
+[group('dev')]
+doc-book:
+    cargo run --package lira-doc -- book -o docs/book/
+
+# Build mdBook documentation (requires mdbook)
+[group('dev')]
+doc-build: doc-book
+    cd docs/book && mdbook build
+
+# Serve mdBook documentation locally (requires mdbook)
+[group('dev')]
+doc-serve: doc-book
+    cd docs/book && mdbook serve
+
+# Generate stdlib-only mdBook
+[group('dev')]
+doc-stdlib:
+    cargo run --package lira-doc -- generate stdlib/ --mdbook --title "Lira Standard Library" -o docs/stdlib-book/
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Installation
 # ─────────────────────────────────────────────────────────────────────────────
@@ -83,6 +113,7 @@ install: release-all
     cp target/release/lirac ~/.local/bin/
     cp target/release/liravm ~/.local/bin/
     cp target/release/lira-lsp ~/.local/bin/
+    cp target/release/lira-doc ~/.local/bin/
 
 # Install Vim/Neovim syntax highlighting
 [group('install')]
