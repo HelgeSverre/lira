@@ -2,6 +2,31 @@
 // Provides fundamental types and utilities
 
 // ============================================================================
+// Integer Methods
+// ============================================================================
+
+impl int {
+    /// Absolute value
+    fn abs(self) -> int {
+        if self < 0 {
+            return -self
+        }
+        return self
+    }
+
+    /// Clamp value to range [min_val, max_val]
+    fn clamp(self, min_val: int, max_val: int) -> int {
+        if self < min_val {
+            return min_val
+        }
+        if self > max_val {
+            return max_val
+        }
+        return self
+    }
+}
+
+// ============================================================================
 // Constants
 // ============================================================================
 

@@ -45,6 +45,8 @@ pub struct CodeGenerator {
     function_defaults: FunctionDefaults,
     /// Module-level constants: name -> constant pool index
     module_consts: HashMap<String, u16>,
+    /// Impl methods for primitive types: type_name -> {method_name -> mangled_function_name}
+    primitive_impl_methods: HashMap<String, HashMap<String, String>>,
 }
 
 /// Key for constant deduplication
@@ -96,6 +98,7 @@ impl CodeGenerator {
             captures: Vec::new(),
             function_defaults: HashMap::new(),
             module_consts: HashMap::new(),
+            primitive_impl_methods: HashMap::new(),
         }
     }
 
@@ -139,15 +142,23 @@ impl CodeGenerator {
                     type_name, methods, ..
                 } => {
                     // Collect impl methods with mangled names
+                    let is_primitive = matches!(type_name.as_str(), "int" | "float" | "string");
                     for method in methods {
                         if let StatementKind::FnDecl { name, params, .. } = &method.kind {
                             let mangled_name = format!("{}_{}", type_name, name);
                             self.functions.push(FunctionInfo {
-                                name: mangled_name,
+                                name: mangled_name.clone(),
                                 code_offset: 0,
                                 param_count: params.len() as u8,
                                 local_count: 0,
                             });
+                            // Track primitive impl methods for method call dispatch
+                            if is_primitive {
+                                self.primitive_impl_methods
+                                    .entry(type_name.clone())
+                                    .or_default()
+                                    .insert(name.clone(), mangled_name);
+                            }
                         }
                     }
                 }
@@ -441,7 +452,9 @@ impl CodeGenerator {
         match &pattern.kind {
             PatternKind::Variable(name) => {
                 // Try to infer type from initializer for method dispatch
-                if let ExpressionKind::Call { callee, .. } = &init.kind {
+                if let Some(inferred_type) = self.infer_primitive_type(init) {
+                    self.define_local_type(name, &inferred_type);
+                } else if let ExpressionKind::Call { callee, .. } = &init.kind {
                     if let ExpressionKind::FieldAccess { object, .. } = &callee.kind {
                         if let ExpressionKind::Identifier(type_name) = &object.kind {
                             self.define_local_type(name, type_name);
@@ -2997,6 +3010,37 @@ impl CodeGenerator {
                                             .push(format!("Method not found: {}", mangled_name));
                                     }
                                 } else {
+                                    // Check for primitive impl methods
+                                    if let Some(methods) = self.primitive_impl_methods.get(obj_type)
+                                    {
+                                        if let Some(mangled_name) = methods.get(field).cloned() {
+                                            // Get function offset before mutable borrow
+                                            let func_offset = self
+                                                .functions
+                                                .iter()
+                                                .find(|f| f.name == mangled_name)
+                                                .map(|f| f.code_offset);
+                                            if let Some(offset) = func_offset {
+                                                // Push self first
+                                                self.generate_expression(object);
+                                                // Push arguments
+                                                for arg in args {
+                                                    self.generate_expression(&arg.value);
+                                                }
+                                                // Then load function and call
+                                                let idx =
+                                                    self.add_constant_internal(Constant::Function(offset));
+                                                if offset == 0 {
+                                                    self.pending_func_patches.push((idx, mangled_name));
+                                                }
+                                                self.emit_opcode(Opcode::LoadConst);
+                                                self.emit_u16(idx);
+                                                self.emit_opcode(Opcode::Call);
+                                                self.emit_u8((args.len() + 1) as u8);
+                                                return;
+                                            }
+                                        }
+                                    }
                                     // No matching method, fall back to field access
                                     self.generate_expression(object);
                                     for arg in args {
@@ -3010,7 +3054,41 @@ impl CodeGenerator {
                                     self.emit_u8((args.len() + 1) as u8);
                                 }
                             } else {
-                                // No type info, fall back to field access approach
+                                // No type info - check for primitive impl methods
+                                let receiver_type = self.infer_primitive_type(object);
+                                if let Some(ref type_name) = receiver_type {
+                                    if let Some(methods) = self.primitive_impl_methods.get(type_name)
+                                    {
+                                        if let Some(mangled_name) = methods.get(field).cloned() {
+                                            // Get function offset before mutable borrow
+                                            let func_offset = self
+                                                .functions
+                                                .iter()
+                                                .find(|f| f.name == mangled_name)
+                                                .map(|f| f.code_offset);
+                                            if let Some(offset) = func_offset {
+                                                // Push self first
+                                                self.generate_expression(object);
+                                                // Push arguments
+                                                for arg in args {
+                                                    self.generate_expression(&arg.value);
+                                                }
+                                                // Then load function and call
+                                                let idx =
+                                                    self.add_constant_internal(Constant::Function(offset));
+                                                if offset == 0 {
+                                                    self.pending_func_patches.push((idx, mangled_name));
+                                                }
+                                                self.emit_opcode(Opcode::LoadConst);
+                                                self.emit_u16(idx);
+                                                self.emit_opcode(Opcode::Call);
+                                                self.emit_u8((args.len() + 1) as u8);
+                                                return;
+                                            }
+                                        }
+                                    }
+                                }
+                                // Fall back to field access approach
                                 self.generate_expression(object);
                                 for arg in args {
                                     self.generate_expression(&arg.value);
@@ -3024,7 +3102,45 @@ impl CodeGenerator {
                             }
                         }
                     } else {
-                        // Object is not an identifier, regular method call
+                        // Object is not an identifier - check for primitive type method
+                        let receiver_type = self.infer_primitive_type(object);
+
+                        if let Some(ref type_name) = receiver_type {
+                            // Check if this is a primitive impl method
+                            if let Some(methods) = self.primitive_impl_methods.get(type_name) {
+                                if let Some(mangled_name) = methods.get(field).cloned() {
+                                    // Get function offset before mutable borrow
+                                    let func_offset = self
+                                        .functions
+                                        .iter()
+                                        .find(|f| f.name == mangled_name)
+                                        .map(|f| f.code_offset);
+                                    if let Some(offset) = func_offset {
+                                        // Push self first
+                                        self.generate_expression(object);
+
+                                        // Push arguments
+                                        for arg in args {
+                                            self.generate_expression(&arg.value);
+                                        }
+
+                                        // Then load function and call
+                                        let idx =
+                                            self.add_constant_internal(Constant::Function(offset));
+                                        if offset == 0 {
+                                            self.pending_func_patches.push((idx, mangled_name));
+                                        }
+                                        self.emit_opcode(Opcode::LoadConst);
+                                        self.emit_u16(idx);
+                                        self.emit_opcode(Opcode::Call);
+                                        self.emit_u8((args.len() + 1) as u8);
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Fall back to field access approach for non-primitive objects
                         self.generate_expression(object);
 
                         for arg in args {
@@ -3870,24 +3986,101 @@ impl CodeGenerator {
                 args,
                 type_args: _, // TODO: Handle explicit type args for monomorphization
             } => {
-                // Generate receiver - keep on stack for method lookup
+                // Check if this is a method call on a primitive type
+                let receiver_type = self.infer_primitive_type(receiver);
+
+                if let Some(type_name) = receiver_type {
+                    // Check if this is a primitive impl method
+                    if let Some(methods) = self.primitive_impl_methods.get(&type_name) {
+                        if let Some(mangled_name) = methods.get(method).cloned() {
+                            // Get function offset before mutable borrow
+                            let func_offset = self
+                                .functions
+                                .iter()
+                                .find(|f| f.name == mangled_name)
+                                .map(|f| f.code_offset);
+                            if let Some(offset) = func_offset {
+                                // Push self first
+                                self.generate_expression(receiver);
+
+                                // Push arguments
+                                for arg in args {
+                                    self.generate_expression(&arg.value);
+                                }
+
+                                // Then load function and call
+                                let idx = self.add_constant_internal(Constant::Function(offset));
+                                if offset == 0 {
+                                    self.pending_func_patches.push((idx, mangled_name));
+                                }
+                                self.emit_opcode(Opcode::LoadConst);
+                                self.emit_u16(idx);
+                                self.emit_opcode(Opcode::Call);
+                                self.emit_u8((args.len() + 1) as u8);
+                                return;
+                            }
+                        }
+                    }
+                }
+
+                // Object method call - use GetField approach
                 self.generate_expression(receiver);
-                // Duplicate receiver for both GetField and as first arg
                 self.emit_opcode(Opcode::Dup);
-                // Get method from receiver object
                 let method_idx = self.add_constant(Constant::String(method.clone()));
                 self.emit_opcode(Opcode::GetField);
                 self.emit_u16(method_idx);
-                // Now stack is: [receiver, method_fn]
-                // Swap so we have [method_fn, receiver]
-                // Then generate other args
                 for arg in args {
                     self.generate_expression(&arg.value);
                 }
-                // Call with receiver + args (args.len() + 1 for self)
                 self.emit_opcode(Opcode::Call);
                 self.emit_u8((args.len() + 1) as u8);
             }
+        }
+    }
+
+    /// Infer if an expression is a primitive type (int, float, string)
+    /// Returns the type name if it's a primitive, None otherwise
+    fn infer_primitive_type(&self, expr: &Expression) -> Option<String> {
+        match &expr.kind {
+            ExpressionKind::IntLiteral(_) => Some("int".to_string()),
+            ExpressionKind::FloatLiteral(_) => Some("float".to_string()),
+            ExpressionKind::StringLiteral(_) => Some("string".to_string()),
+            ExpressionKind::Identifier(name) => {
+                // Check local variable types
+                for scope in self.local_types.iter().rev() {
+                    if let Some(type_name) = scope.get(name) {
+                        if matches!(type_name.as_str(), "int" | "float" | "string") {
+                            return Some(type_name.clone());
+                        }
+                    }
+                }
+                None
+            }
+            ExpressionKind::Unary { operand, op } => {
+                // Unary minus on int/float returns same type
+                if matches!(op, UnaryOp::Neg) {
+                    self.infer_primitive_type(operand)
+                } else {
+                    None
+                }
+            }
+            ExpressionKind::Binary { left, right, op } => {
+                // Arithmetic operations on primitives return primitives
+                match op {
+                    BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
+                        let left_type = self.infer_primitive_type(left);
+                        let right_type = self.infer_primitive_type(right);
+                        // If both are int, result is int; if either is float, result is float
+                        match (left_type.as_deref(), right_type.as_deref()) {
+                            (Some("float"), _) | (_, Some("float")) => Some("float".to_string()),
+                            (Some("int"), Some("int")) => Some("int".to_string()),
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
         }
     }
 }
