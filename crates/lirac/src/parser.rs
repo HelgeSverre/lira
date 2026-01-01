@@ -888,31 +888,30 @@ impl Parser {
             Vec::new()
         };
 
-        // Parse first identifier - could be trait name or type name
-        let first_name = self.expect_type_name("Expected type or trait name")?;
+        // Parse type name - could be identifier, array type [T], or nested [[T]]
+        let first_name = self.parse_impl_type_name()?;
+
+        // Helper to skip generic args like <T> after a type name
+        fn skip_generic_args(parser: &mut Parser) -> Result<(), String> {
+            if parser.match_token(&TokenKind::Lt) {
+                while !parser.check(&TokenKind::Gt) && !parser.is_at_end() {
+                    parser.advance();
+                }
+                parser.consume(&TokenKind::Gt, "Expected '>' after type parameters")?;
+            }
+            Ok(())
+        }
 
         // Check if this is "impl Trait for Type" or just "impl Type"
         let (trait_name, type_name) = if self.match_token(&TokenKind::For) {
             // This is "impl Trait for Type"
-            let target_type = self.expect_type_name("Expected type name after 'for'")?;
-            // Skip generic args if present (List<T>)
-            if self.match_token(&TokenKind::Lt) {
-                while !self.check(&TokenKind::Gt) && !self.is_at_end() {
-                    self.advance();
-                }
-                self.consume(&TokenKind::Gt, "Expected '>' after type parameters")?;
-            }
+            let target_type = self.parse_impl_type_name()?;
+            // Skip generic args on target type (e.g., List<T>)
+            skip_generic_args(self)?;
             (Some(first_name), target_type)
         } else {
             // This is just "impl Type" - check for generic args like List<T>
-            // For now, just use the identifier
-            if self.match_token(&TokenKind::Lt) {
-                // Skip generic args for now (List<T>)
-                while !self.check(&TokenKind::Gt) && !self.is_at_end() {
-                    self.advance();
-                }
-                self.consume(&TokenKind::Gt, "Expected '>' after type parameters")?;
-            }
+            skip_generic_args(self)?;
             (None, first_name)
         };
 
@@ -949,6 +948,21 @@ impl Parser {
             },
             span,
         })
+    }
+
+    /// Parse a type name for impl blocks. Supports:
+    /// - Simple identifiers: `int`, `string`, `MyStruct`
+    /// - Array types: `[int]`, `[string]`, `[[int]]`
+    fn parse_impl_type_name(&mut self) -> Result<String, String> {
+        if self.match_token(&TokenKind::LBracket) {
+            // Array type: [T] or [[T]]
+            let inner = self.parse_impl_type_name()?;
+            self.consume(&TokenKind::RBracket, "Expected ']' after array element type")?;
+            Ok(format!("[{}]", inner))
+        } else {
+            // Regular identifier
+            self.expect_type_name("Expected type or trait name")
+        }
     }
 
     fn type_alias(&mut self, span: Span) -> Result<Statement, String> {

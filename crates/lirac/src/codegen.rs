@@ -4071,20 +4071,27 @@ impl CodeGenerator {
         }
     }
 
-    /// Infer if an expression is a primitive type (int, float, string)
-    /// Returns the type name if it's a primitive, None otherwise
+    /// Infer the type of an expression for method dispatch
+    /// Returns the type name (e.g., "int", "float", "string", "[int]", "[string]")
     fn infer_primitive_type(&self, expr: &Expression) -> Option<String> {
         match &expr.kind {
             ExpressionKind::IntLiteral(_) => Some("int".to_string()),
             ExpressionKind::FloatLiteral(_) => Some("float".to_string()),
             ExpressionKind::StringLiteral(_) => Some("string".to_string()),
+            ExpressionKind::Array(elements) => {
+                // Infer array element type from first element
+                if let Some(first) = elements.first() {
+                    if let Some(elem_type) = self.infer_primitive_type(first) {
+                        return Some(format!("[{}]", elem_type));
+                    }
+                }
+                None
+            }
             ExpressionKind::Identifier(name) => {
-                // Check local variable types
+                // Check local variable types (includes primitives, arrays, structs)
                 for scope in self.local_types.iter().rev() {
                     if let Some(type_name) = scope.get(name) {
-                        if matches!(type_name.as_str(), "int" | "float" | "string") {
-                            return Some(type_name.clone());
-                        }
+                        return Some(type_name.clone());
                     }
                 }
                 None

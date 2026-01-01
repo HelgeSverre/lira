@@ -1,383 +1,468 @@
 // Lira Standard Library - Collections Module
-// Array operations as standalone functions.
+// Array operations using impl blocks for method syntax.
 //
-// Note: Lira's parser doesn't currently support impl blocks on array types,
-// so these remain as standalone functions.
+// Usage:
+//   let arr = [1, 2, 3, 4, 5]
+//   println(arr.sum())           // 15
+//   println(arr.contains(3))     // true
+//   println(arr.reverse())       // [5, 4, 3, 2, 1]
 
 // ============================================================================
-// Transformation
+// Integer Array Operations
 // ============================================================================
 
-/// Double each element
-fn map_double(arr: [int]) -> [int] {
-    let result = [0]
-    pop(result)
-    var i = 0
-    while i < len(arr) {
-        push(result, arr[i] * 2)
-        i = i + 1
-    }
-    return result
-}
+impl [int] {
+    // ------------------------------------------------------------------------
+    // Transformation
+    // ------------------------------------------------------------------------
 
-/// Square each element
-fn map_square(arr: [int]) -> [int] {
-    let result = [0]
-    pop(result)
-    var i = 0
-    while i < len(arr) {
-        push(result, arr[i] * arr[i])
-        i = i + 1
-    }
-    return result
-}
-
-// ============================================================================
-// Filtering
-// ============================================================================
-
-/// Filter positive numbers
-fn filter_positive(arr: [int]) -> [int] {
-    let result = [0]
-    pop(result)
-    var i = 0
-    while i < len(arr) {
-        if arr[i] > 0 {
-            push(result, arr[i])
+    /// Double each element
+    fn map_double(self) -> [int] {
+        let result = [0]
+        pop(result)
+        var i = 0
+        while i < len(self) {
+            push(result, self[i] * 2)
+            i = i + 1
         }
-        i = i + 1
-    }
-    return result
-}
-
-/// Filter even numbers
-fn filter_even(arr: [int]) -> [int] {
-    let result = [0]
-    pop(result)
-    var i = 0
-    while i < len(arr) {
-        if arr[i] % 2 == 0 {
-            push(result, arr[i])
-        }
-        i = i + 1
-    }
-    return result
-}
-
-/// Filter odd numbers
-fn filter_odd(arr: [int]) -> [int] {
-    let result = [0]
-    pop(result)
-    var i = 0
-    while i < len(arr) {
-        if arr[i] % 2 != 0 {
-            push(result, arr[i])
-        }
-        i = i + 1
-    }
-    return result
-}
-
-// ============================================================================
-// Reduction
-// ============================================================================
-
-/// Sum all elements
-fn sum(arr: [int]) -> int {
-    var total = 0
-    var i = 0
-    while i < len(arr) {
-        total = total + arr[i]
-        i = i + 1
-    }
-    return total
-}
-
-/// Product of all elements
-fn product(arr: [int]) -> int {
-    var result = 1
-    var i = 0
-    while i < len(arr) {
-        result = result * arr[i]
-        i = i + 1
-    }
-    return result
-}
-
-/// Find minimum value
-fn min_of(arr: [int]) -> int {
-    if len(arr) == 0 {
-        return 0
-    }
-    var m = arr[0]
-    var i = 1
-    while i < len(arr) {
-        if arr[i] < m {
-            m = arr[i]
-        }
-        i = i + 1
-    }
-    return m
-}
-
-/// Find maximum value
-fn max_of(arr: [int]) -> int {
-    if len(arr) == 0 {
-        return 0
-    }
-    var m = arr[0]
-    var i = 1
-    while i < len(arr) {
-        if arr[i] > m {
-            m = arr[i]
-        }
-        i = i + 1
-    }
-    return m
-}
-
-/// Calculate average
-fn average(arr: [int]) -> float {
-    if len(arr) == 0 {
-        return 0.0
-    }
-    return sum(arr) / len(arr)
-}
-
-// ============================================================================
-// Search
-// ============================================================================
-
-/// Check if array contains value
-fn contains_int(arr: [int], value: int) -> bool {
-    var i = 0
-    while i < len(arr) {
-        if arr[i] == value {
-            return true
-        }
-        i = i + 1
-    }
-    return false
-}
-
-/// Find index of value (-1 if not found)
-fn index_of_int(arr: [int], value: int) -> int {
-    var i = 0
-    while i < len(arr) {
-        if arr[i] == value {
-            return i
-        }
-        i = i + 1
-    }
-    return -1
-}
-
-/// Count occurrences of value
-fn count(arr: [int], value: int) -> int {
-    var c = 0
-    var i = 0
-    while i < len(arr) {
-        if arr[i] == value {
-            c = c + 1
-        }
-        i = i + 1
-    }
-    return c
-}
-
-// ============================================================================
-// Manipulation
-// ============================================================================
-
-/// Reverse array
-fn reverse_int(arr: [int]) -> [int] {
-    let result = [0]
-    pop(result)
-    var i = len(arr) - 1
-    while i >= 0 {
-        push(result, arr[i])
-        i = i - 1
-    }
-    return result
-}
-
-/// Take first n elements
-fn take(arr: [int], n: int) -> [int] {
-    let result = [0]
-    pop(result)
-    var i = 0
-    var cnt = n
-    if cnt > len(arr) {
-        cnt = len(arr)
-    }
-    while i < cnt {
-        push(result, arr[i])
-        i = i + 1
-    }
-    return result
-}
-
-/// Skip first n elements
-fn skip(arr: [int], n: int) -> [int] {
-    let result = [0]
-    pop(result)
-    var i = n
-    while i < len(arr) {
-        push(result, arr[i])
-        i = i + 1
-    }
-    return result
-}
-
-/// Slice from start to end (exclusive)
-fn slice(arr: [int], start: int, end: int) -> [int] {
-    let result = [0]
-    pop(result)
-    var i = start
-    while i < end && i < len(arr) {
-        push(result, arr[i])
-        i = i + 1
-    }
-    return result
-}
-
-/// Remove duplicates (keep first occurrence)
-fn unique(arr: [int]) -> [int] {
-    let result = [0]
-    pop(result)
-    var i = 0
-    while i < len(arr) {
-        if !contains_int(result, arr[i]) {
-            push(result, arr[i])
-        }
-        i = i + 1
-    }
-    return result
-}
-
-/// Concatenate two arrays
-fn concat(arr1: [int], arr2: [int]) -> [int] {
-    let result = [0]
-    pop(result)
-    var i = 0
-    while i < len(arr1) {
-        push(result, arr1[i])
-        i = i + 1
-    }
-    i = 0
-    while i < len(arr2) {
-        push(result, arr2[i])
-        i = i + 1
-    }
-    return result
-}
-
-// ============================================================================
-// Sorting
-// ============================================================================
-
-/// Sort in ascending order (selection sort)
-fn sort(arr: [int]) -> [int] {
-    let result = [0]
-    pop(result)
-
-    if len(arr) == 0 {
         return result
     }
 
-    // Create tracking array for used indices
-    let used = [0]
-    pop(used)
-    var k = 0
-    while k < len(arr) {
-        push(used, 0)
-        k = k + 1
+    /// Square each element
+    fn map_square(self) -> [int] {
+        let result = [0]
+        pop(result)
+        var i = 0
+        while i < len(self) {
+            push(result, self[i] * self[i])
+            i = i + 1
+        }
+        return result
     }
 
-    // Selection sort: find min element not yet used
-    var count = 0
-    while count < len(arr) {
-        var min_idx = -1
-        var min_val = 0
-        var j = 0
-        while j < len(arr) {
-            if used[j] == 0 {
-                if min_idx == -1 || arr[j] < min_val {
-                    min_idx = j
-                    min_val = arr[j]
+    // ------------------------------------------------------------------------
+    // Filtering
+    // ------------------------------------------------------------------------
+
+    /// Filter positive numbers
+    fn filter_positive(self) -> [int] {
+        let result = [0]
+        pop(result)
+        var i = 0
+        while i < len(self) {
+            if self[i] > 0 {
+                push(result, self[i])
+            }
+            i = i + 1
+        }
+        return result
+    }
+
+    /// Filter even numbers
+    fn filter_even(self) -> [int] {
+        let result = [0]
+        pop(result)
+        var i = 0
+        while i < len(self) {
+            if self[i] % 2 == 0 {
+                push(result, self[i])
+            }
+            i = i + 1
+        }
+        return result
+    }
+
+    /// Filter odd numbers
+    fn filter_odd(self) -> [int] {
+        let result = [0]
+        pop(result)
+        var i = 0
+        while i < len(self) {
+            if self[i] % 2 != 0 {
+                push(result, self[i])
+            }
+            i = i + 1
+        }
+        return result
+    }
+
+    // ------------------------------------------------------------------------
+    // Reduction
+    // ------------------------------------------------------------------------
+
+    /// Sum all elements
+    fn sum(self) -> int {
+        var total = 0
+        var i = 0
+        while i < len(self) {
+            total = total + self[i]
+            i = i + 1
+        }
+        return total
+    }
+
+    /// Product of all elements
+    fn product(self) -> int {
+        var result = 1
+        var i = 0
+        while i < len(self) {
+            result = result * self[i]
+            i = i + 1
+        }
+        return result
+    }
+
+    /// Find minimum value
+    fn min(self) -> int {
+        if len(self) == 0 {
+            return 0
+        }
+        var m = self[0]
+        var i = 1
+        while i < len(self) {
+            if self[i] < m {
+                m = self[i]
+            }
+            i = i + 1
+        }
+        return m
+    }
+
+    /// Find maximum value
+    fn max(self) -> int {
+        if len(self) == 0 {
+            return 0
+        }
+        var m = self[0]
+        var i = 1
+        while i < len(self) {
+            if self[i] > m {
+                m = self[i]
+            }
+            i = i + 1
+        }
+        return m
+    }
+
+    /// Calculate average
+    fn average(self) -> float {
+        if len(self) == 0 {
+            return 0.0
+        }
+        return self.sum() / len(self)
+    }
+
+    // ------------------------------------------------------------------------
+    // Search
+    // ------------------------------------------------------------------------
+
+    /// Check if array contains value
+    fn contains(self, value: int) -> bool {
+        var i = 0
+        while i < len(self) {
+            if self[i] == value {
+                return true
+            }
+            i = i + 1
+        }
+        return false
+    }
+
+    /// Find index of value (-1 if not found)
+    fn index_of(self, value: int) -> int {
+        var i = 0
+        while i < len(self) {
+            if self[i] == value {
+                return i
+            }
+            i = i + 1
+        }
+        return -1
+    }
+
+    /// Count occurrences of value
+    fn count(self, value: int) -> int {
+        var c = 0
+        var i = 0
+        while i < len(self) {
+            if self[i] == value {
+                c = c + 1
+            }
+            i = i + 1
+        }
+        return c
+    }
+
+    // ------------------------------------------------------------------------
+    // Manipulation
+    // ------------------------------------------------------------------------
+
+    /// Reverse array
+    fn reverse(self) -> [int] {
+        let result = [0]
+        pop(result)
+        var i = len(self) - 1
+        while i >= 0 {
+            push(result, self[i])
+            i = i - 1
+        }
+        return result
+    }
+
+    /// Take first n elements
+    fn take(self, n: int) -> [int] {
+        let result = [0]
+        pop(result)
+        var i = 0
+        var cnt = n
+        if cnt > len(self) {
+            cnt = len(self)
+        }
+        while i < cnt {
+            push(result, self[i])
+            i = i + 1
+        }
+        return result
+    }
+
+    /// Skip first n elements
+    fn skip(self, n: int) -> [int] {
+        let result = [0]
+        pop(result)
+        var i = n
+        while i < len(self) {
+            push(result, self[i])
+            i = i + 1
+        }
+        return result
+    }
+
+    /// Slice from start to end (exclusive)
+    fn slice(self, start: int, end: int) -> [int] {
+        let result = [0]
+        pop(result)
+        var i = start
+        while i < end && i < len(self) {
+            push(result, self[i])
+            i = i + 1
+        }
+        return result
+    }
+
+    /// Remove duplicates (keep first occurrence)
+    fn unique(self) -> [int] {
+        let result = [0]
+        pop(result)
+        var i = 0
+        while i < len(self) {
+            if !result.contains(self[i]) {
+                push(result, self[i])
+            }
+            i = i + 1
+        }
+        return result
+    }
+
+    /// Concatenate with another array
+    fn concat(self, other: [int]) -> [int] {
+        let result = [0]
+        pop(result)
+        var i = 0
+        while i < len(self) {
+            push(result, self[i])
+            i = i + 1
+        }
+        i = 0
+        while i < len(other) {
+            push(result, other[i])
+            i = i + 1
+        }
+        return result
+    }
+
+    // ------------------------------------------------------------------------
+    // Sorting
+    // ------------------------------------------------------------------------
+
+    /// Sort in ascending order (selection sort)
+    fn sort(self) -> [int] {
+        let result = [0]
+        pop(result)
+
+        if len(self) == 0 {
+            return result
+        }
+
+        // Create tracking array for used indices
+        let used = [0]
+        pop(used)
+        var k = 0
+        while k < len(self) {
+            push(used, 0)
+            k = k + 1
+        }
+
+        // Selection sort: find min element not yet used
+        var count = 0
+        while count < len(self) {
+            var min_idx = -1
+            var min_val = 0
+            var j = 0
+            while j < len(self) {
+                if used[j] == 0 {
+                    if min_idx == -1 || self[j] < min_val {
+                        min_idx = j
+                        min_val = self[j]
+                    }
                 }
+                j = j + 1
             }
-            j = j + 1
-        }
 
-        // Mark as used
-        let new_used = [0]
-        pop(new_used)
-        j = 0
-        while j < len(used) {
-            if j == min_idx {
-                push(new_used, 1)
-            } else {
-                push(new_used, used[j])
+            // Mark as used
+            let new_used = [0]
+            pop(new_used)
+            j = 0
+            while j < len(used) {
+                if j == min_idx {
+                    push(new_used, 1)
+                } else {
+                    push(new_used, used[j])
+                }
+                j = j + 1
             }
-            j = j + 1
-        }
-        while len(used) > 0 {
-            pop(used)
-        }
-        j = 0
-        while j < len(new_used) {
-            push(used, new_used[j])
-            j = j + 1
+            while len(used) > 0 {
+                pop(used)
+            }
+            j = 0
+            while j < len(new_used) {
+                push(used, new_used[j])
+                j = j + 1
+            }
+
+            push(result, min_val)
+            count = count + 1
         }
 
-        push(result, min_val)
-        count = count + 1
+        return result
     }
 
-    return result
-}
+    /// Sort in descending order
+    fn sort_desc(self) -> [int] {
+        return self.sort().reverse()
+    }
 
-/// Sort in descending order
-fn sort_desc(arr: [int]) -> [int] {
-    return reverse_int(sort(arr))
+    // ------------------------------------------------------------------------
+    // Boolean Operations
+    // ------------------------------------------------------------------------
+
+    /// Check if all elements are non-zero
+    fn all_truthy(self) -> bool {
+        var i = 0
+        while i < len(self) {
+            if self[i] == 0 {
+                return false
+            }
+            i = i + 1
+        }
+        return true
+    }
+
+    /// Check if any element is non-zero
+    fn any_truthy(self) -> bool {
+        var i = 0
+        while i < len(self) {
+            if self[i] != 0 {
+                return true
+            }
+            i = i + 1
+        }
+        return false
+    }
+
+    /// Check if no elements are non-zero
+    fn none_truthy(self) -> bool {
+        return !self.any_truthy()
+    }
+
+    /// Create array with value repeated n times
+    fn repeat(value: int, n: int) -> [int] {
+        let result = [0]
+        pop(result)
+        var i = 0
+        while i < n {
+            push(result, value)
+            i = i + 1
+        }
+        return result
+    }
 }
 
 // ============================================================================
-// Boolean Operations
+// Nested Integer Array Operations
 // ============================================================================
 
-/// Check if all elements are non-zero
-fn all_truthy(arr: [int]) -> bool {
-    var i = 0
-    while i < len(arr) {
-        if arr[i] == 0 {
-            return false
+impl [[int]] {
+    /// Flatten nested arrays into single array
+    fn flatten(self) -> [int] {
+        let result = [0]
+        pop(result)
+        var i = 0
+        while i < len(self) {
+            var j = 0
+            while j < len(self[i]) {
+                push(result, self[i][j])
+                j = j + 1
+            }
+            i = i + 1
         }
-        i = i + 1
+        return result
     }
-    return true
-}
-
-/// Check if any element is non-zero
-fn any_truthy(arr: [int]) -> bool {
-    var i = 0
-    while i < len(arr) {
-        if arr[i] != 0 {
-            return true
-        }
-        i = i + 1
-    }
-    return false
-}
-
-/// Check if no elements are non-zero
-fn none_truthy(arr: [int]) -> bool {
-    return !any_truthy(arr)
 }
 
 // ============================================================================
-// Generation
+// String Array Operations
+// ============================================================================
+
+impl [string] {
+    /// Check if string array contains value
+    fn contains(self, value: string) -> bool {
+        var i = 0
+        while i < len(self) {
+            if self[i] == value {
+                return true
+            }
+            i = i + 1
+        }
+        return false
+    }
+
+    /// Find index of value (-1 if not found)
+    fn index_of(self, value: string) -> int {
+        var i = 0
+        while i < len(self) {
+            if self[i] == value {
+                return i
+            }
+            i = i + 1
+        }
+        return -1
+    }
+
+    /// Reverse string array
+    fn reverse(self) -> [string] {
+        let result = [""]
+        pop(result)
+        var i = len(self) - 1
+        while i >= 0 {
+            push(result, self[i])
+            i = i - 1
+        }
+        return result
+    }
+}
+
+// ============================================================================
+// Standalone Generation Functions
 // ============================================================================
 
 /// Generate range [start, end)
@@ -407,74 +492,6 @@ fn range_step(start: int, end: int, step: int) -> [int] {
             push(result, i)
             i = i + step
         }
-    }
-    return result
-}
-
-/// Create array with value repeated n times
-fn repeat_int(value: int, n: int) -> [int] {
-    let result = [0]
-    pop(result)
-    var i = 0
-    while i < n {
-        push(result, value)
-        i = i + 1
-    }
-    return result
-}
-
-/// Flatten nested arrays into single array
-fn flatten(arrays: [[int]]) -> [int] {
-    let result = [0]
-    pop(result)
-    var i = 0
-    while i < len(arrays) {
-        var j = 0
-        while j < len(arrays[i]) {
-            push(result, arrays[i][j])
-            j = j + 1
-        }
-        i = i + 1
-    }
-    return result
-}
-
-// ============================================================================
-// String Array Functions
-// ============================================================================
-
-/// Check if string array contains value
-fn contains_str(arr: [string], value: string) -> bool {
-    var i = 0
-    while i < len(arr) {
-        if arr[i] == value {
-            return true
-        }
-        i = i + 1
-    }
-    return false
-}
-
-/// Find index of value in string array (-1 if not found)
-fn index_of_str(arr: [string], value: string) -> int {
-    var i = 0
-    while i < len(arr) {
-        if arr[i] == value {
-            return i
-        }
-        i = i + 1
-    }
-    return -1
-}
-
-/// Reverse string array
-fn reverse_str(arr: [string]) -> [string] {
-    let result = [""]
-    pop(result)
-    var i = len(arr) - 1
-    while i >= 0 {
-        push(result, arr[i])
-        i = i - 1
     }
     return result
 }
