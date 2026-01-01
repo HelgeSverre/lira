@@ -10,7 +10,6 @@ Test random module functionality
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `test_random_float`
@@ -72,4 +71,3 @@ fn test_coin_flip()
 Test coin_flip
 
 ---
-

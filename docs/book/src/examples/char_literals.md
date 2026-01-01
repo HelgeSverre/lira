@@ -9,7 +9,6 @@ Test char literals and operations
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `main`
@@ -24,4 +23,3 @@ Test char literals and operations
 @expect: newline test
 
 ---
-

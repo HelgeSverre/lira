@@ -7,7 +7,6 @@ Tests conditional guards on match arms
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `classify_number`
@@ -21,9 +20,9 @@ Tests conditional guards on match arms
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `string`
 
@@ -39,8 +38,8 @@ Test with multiple conditions
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name    | Type  |
+| ------- | ----- |
 | `score` | `int` |
 
 **Returns:** `string`
@@ -57,11 +56,10 @@ Test guard with variable binding and computation
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `string`
 
 ---
-

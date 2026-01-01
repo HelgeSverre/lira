@@ -10,7 +10,6 @@ Currently 'class' works similarly to 'struct' but has type-checking issues
 - [Classes](#classes)
 - [Functions](#functions)
 
-
 ## Structs
 
 ### `PointS`
@@ -26,10 +25,10 @@ Using struct (works)
 
 #### Fields
 
-| Field | Type | Visibility |
-|-------|------|------------|
-| `x` | `int` | private |
-| `y` | `int` | private |
+| Field | Type  | Visibility |
+| ----- | ----- | ---------- |
+| `x`   | `int` | private    |
+| `y`   | `int` | private    |
 
 ---
 
@@ -44,10 +43,10 @@ struct Rectangle {
 
 #### Fields
 
-| Field | Type | Visibility |
-|-------|------|------------|
-| `width` | `int` | private |
-| `height` | `int` | private |
+| Field    | Type  | Visibility |
+| -------- | ----- | ---------- |
+| `width`  | `int` | private    |
+| `height` | `int` | private    |
 
 ---
 
@@ -62,10 +61,10 @@ struct Address {
 
 #### Fields
 
-| Field | Type | Visibility |
-|-------|------|------------|
-| `street` | `string` | private |
-| `city` | `string` | private |
+| Field    | Type     | Visibility |
+| -------- | -------- | ---------- |
+| `street` | `string` | private    |
+| `city`   | `string` | private    |
 
 ---
 
@@ -80,10 +79,10 @@ struct Person {
 
 #### Fields
 
-| Field | Type | Visibility |
-|-------|------|------------|
-| `name` | `string` | private |
-| `age` | `int` | private |
+| Field  | Type     | Visibility |
+| ------ | -------- | ---------- |
+| `name` | `string` | private    |
+| `age`  | `int`    | private    |
 
 ---
 
@@ -95,10 +94,10 @@ Using class (works for literals but type checking differs)
 
 #### Fields
 
-| Field | Type | Visibility |
-|-------|------|------------|
-| `x` | `int` | private |
-| `y` | `int` | private |
+| Field | Type  | Visibility |
+| ----- | ----- | ---------- |
+| `x`   | `int` | private    |
+| `y`   | `int` | private    |
 
 ---
 
@@ -112,11 +111,10 @@ fn rect_area(r: Rectangle) -> int
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `r` | `Rectangle` |
+| Name | Type        |
+| ---- | ----------- |
+| `r`  | `Rectangle` |
 
 **Returns:** `int`
 
 ---
-

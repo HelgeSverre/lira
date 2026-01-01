@@ -7,7 +7,6 @@ Tests if/else, while loops, break, continue, and nested structures
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `sign`
@@ -20,11 +19,10 @@ If as expression
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `string`
 
 ---
-

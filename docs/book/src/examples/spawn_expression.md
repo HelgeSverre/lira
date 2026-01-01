@@ -10,7 +10,6 @@ Note: Actual fiber execution requires fiber mode in VM
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `worker`
@@ -27,8 +26,8 @@ Note: Actual fiber execution requires fiber mode in VM
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name | Type  |
+| ---- | ----- |
 | `id` | `int` |
 
 ---
@@ -41,10 +40,10 @@ fn compute(a: int, b: int) -> int
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `a` | `int` |
-| `b` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `a`  | `int` |
+| `b`  | `int` |
 
 **Returns:** `int`
 
@@ -57,4 +56,3 @@ fn main()
 ```
 
 ---
-

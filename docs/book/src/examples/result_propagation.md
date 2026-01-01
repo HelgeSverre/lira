@@ -8,7 +8,6 @@ Test Result type with ? operator
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `divide`
@@ -23,10 +22,10 @@ Test Result type with ? operator
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `a` | `int` |
-| `b` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `a`  | `int` |
+| `b`  | `int` |
 
 **Returns:** `Result<int, string>`
 
@@ -40,10 +39,10 @@ fn calculate(x: int, y: int) -> Result<int, string>
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `x` | `int` |
-| `y` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `x`  | `int` |
+| `y`  | `int` |
 
 **Returns:** `Result<int, string>`
 
@@ -56,4 +55,3 @@ fn main()
 ```
 
 ---
-

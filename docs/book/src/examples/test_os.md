@@ -7,5 +7,3 @@ Tests for the std.os module
 @expect-contains: is_dir passed
 @expect-contains: listdir passed
 @expect-contains: cleanup passed
-
-

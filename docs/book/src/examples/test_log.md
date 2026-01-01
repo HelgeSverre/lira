@@ -8,5 +8,3 @@ Log Module Tests
 @expect-contains: assertion test passed
 @expect-contains: structured logging test passed
 @expect-contains: level filtering test passed
-
-

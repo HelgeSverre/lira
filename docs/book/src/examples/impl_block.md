@@ -11,7 +11,6 @@ Test impl blocks and method dispatch
 - [Implementations](#implementations)
 - [Functions](#functions)
 
-
 ## Structs
 
 ### `Counter`
@@ -29,9 +28,9 @@ Test impl blocks and method dispatch
 
 #### Fields
 
-| Field | Type | Visibility |
-|-------|------|------------|
-| `value` | `int` | private |
+| Field   | Type  | Visibility |
+| ------- | ----- | ---------- |
+| `value` | `int` | private    |
 
 ---
 
@@ -70,4 +69,3 @@ fn main()
 ```
 
 ---
-

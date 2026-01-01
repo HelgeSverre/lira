@@ -8,5 +8,3 @@ Tests type checking (is) and type casting (as)
 @expect-contains: cast float to int: 3
 @expect-contains: cast int to string: 123
 @expect-contains: cast string to int: 456
-
-

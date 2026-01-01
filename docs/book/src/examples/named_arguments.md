@@ -9,7 +9,6 @@ Test named arguments in function calls
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `greet`
@@ -25,10 +24,10 @@ Test named arguments in function calls
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type     |
+| ------ | -------- |
 | `name` | `string` |
-| `age` | `int` |
+| `age`  | `int`    |
 
 ---
 
@@ -40,11 +39,11 @@ fn add(a: int, b: int, c: int) -> int
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `a` | `int` |
-| `b` | `int` |
-| `c` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `a`  | `int` |
+| `b`  | `int` |
+| `c`  | `int` |
 
 **Returns:** `int`
 
@@ -57,4 +56,3 @@ fn main()
 ```
 
 ---
-

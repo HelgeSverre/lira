@@ -7,7 +7,6 @@ Tests deep recursion and various recursive patterns
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `factorial`
@@ -18,9 +17,9 @@ fn factorial(n: int) -> int
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `int`
 
@@ -34,9 +33,9 @@ fn fib(n: int) -> int
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `int`
 
@@ -52,9 +51,9 @@ Mutual recursion now works with forward references!
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `bool`
 
@@ -68,9 +67,9 @@ fn is_odd(n: int) -> bool
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `bool`
 
@@ -84,10 +83,10 @@ fn gcd(a: int, b: int) -> int
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `a` | `int` |
-| `b` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `a`  | `int` |
+| `b`  | `int` |
 
 **Returns:** `int`
 
@@ -101,10 +100,10 @@ fn power(base: int, exp: int) -> int
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type  |
+| ------ | ----- |
 | `base` | `int` |
-| `exp` | `int` |
+| `exp`  | `int` |
 
 **Returns:** `int`
 
@@ -118,11 +117,10 @@ fn countdown(n: int) -> int
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `int`
 
 ---
-

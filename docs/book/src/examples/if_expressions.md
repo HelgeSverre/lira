@@ -10,7 +10,6 @@ Test if expressions (if used as expression, not statement)
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `main`
@@ -26,4 +25,3 @@ Test if expressions (if used as expression, not statement)
 @expect: large
 
 ---
-

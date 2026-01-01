@@ -9,7 +9,6 @@ Test type alias declarations
 - [Type Aliases](#type-aliases)
 - [Functions](#functions)
 
-
 ## Type Aliases
 
 ### `Integer`
@@ -84,9 +83,9 @@ Type alias for function types
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `x` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `x`  | `int` |
 
 **Returns:** `int`
 
@@ -99,4 +98,3 @@ fn main()
 ```
 
 ---
-

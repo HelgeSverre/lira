@@ -2,5 +2,3 @@
 
 Integer Types Example
 Demonstrates sized integer type annotations
-
-

@@ -10,7 +10,6 @@ Test enums with data
 - [Enums](#enums)
 - [Functions](#functions)
 
-
 ## Enums
 
 ### `Option`
@@ -30,9 +29,9 @@ Test enums with data
 #### Variants
 
 | Variant | Fields |
-|---------|--------|
-| `None` | - |
-| `Some` | `int` |
+| ------- | ------ |
+| `None`  | -      |
+| `Some`  | `int`  |
 
 ---
 
@@ -45,4 +44,3 @@ fn main()
 ```
 
 ---
-

@@ -7,7 +7,6 @@ Tests enum definitions and variant access
 
 - [Enums](#enums)
 
-
 ## Enums
 
 ### `Color`
@@ -25,10 +24,10 @@ Simple enum (C-style, no data)
 #### Variants
 
 | Variant | Fields |
-|---------|--------|
-| `Red` | - |
-| `Green` | - |
-| `Blue` | - |
+| ------- | ------ |
+| `Red`   | -      |
+| `Green` | -      |
+| `Blue`  | -      |
 
 ---
 
@@ -44,11 +43,10 @@ enum Status {
 
 #### Variants
 
-| Variant | Fields |
-|---------|--------|
-| `Active` | - |
-| `Inactive` | - |
-| `Pending` | - |
+| Variant    | Fields |
+| ---------- | ------ |
+| `Active`   | -      |
+| `Inactive` | -      |
+| `Pending`  | -      |
 
 ---
-

@@ -10,7 +10,6 @@ Note: const is parsed but codegen uses let for now
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `main`
@@ -26,4 +25,3 @@ Note: const is parsed but codegen uses let for now
 @expect: Hello, World!
 
 ---
-

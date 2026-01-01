@@ -2,5 +2,3 @@
 
 Simple tuple pattern test
 @expect: a is 1
-
-

@@ -7,7 +7,6 @@ Demonstrates both recursive and iterative approaches
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `factorial_recursive`
@@ -20,9 +19,9 @@ Recursive factorial
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `int`
 
@@ -38,11 +37,10 @@ Iterative factorial
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `int`
 
 ---
-

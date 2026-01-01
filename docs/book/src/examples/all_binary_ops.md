@@ -31,7 +31,6 @@ Test all binary operators
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `main`
@@ -68,4 +67,3 @@ Test all binary operators
 @expect: 0
 
 ---
-

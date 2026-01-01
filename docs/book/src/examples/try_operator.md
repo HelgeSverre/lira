@@ -8,7 +8,6 @@ Test ? operator with Optional types
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `get_some`
@@ -62,4 +61,3 @@ fn main()
 ```
 
 ---
-

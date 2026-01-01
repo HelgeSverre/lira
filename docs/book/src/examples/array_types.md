@@ -7,7 +7,6 @@ Tests [T] syntax in function parameters
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `sum_array`
@@ -18,8 +17,8 @@ fn sum_array(arr: [int]) -> int
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type    |
+| ----- | ------- |
 | `arr` | `[int]` |
 
 **Returns:** `int`
@@ -34,11 +33,10 @@ fn count_items(arr: [string]) -> int
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type       |
+| ----- | ---------- |
 | `arr` | `[string]` |
 
 **Returns:** `int`
 
 ---
-

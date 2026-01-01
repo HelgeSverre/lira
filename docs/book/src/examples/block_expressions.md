@@ -9,7 +9,6 @@ Test block expressions (blocks that evaluate to a value)
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `main`
@@ -24,4 +23,3 @@ Test block expressions (blocks that evaluate to a value)
 @expect: result: 100
 
 ---
-

@@ -12,7 +12,6 @@ Test unary operators
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `main`
@@ -30,4 +29,3 @@ Test unary operators
 @expect: 4
 
 ---
-

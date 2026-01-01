@@ -9,7 +9,6 @@ Tests null-safe field access with ?.
 
 - [Structs](#structs)
 
-
 ## Structs
 
 ### `Person`
@@ -23,10 +22,9 @@ struct Person {
 
 #### Fields
 
-| Field | Type | Visibility |
-|-------|------|------------|
-| `name` | `string` | private |
-| `age` | `int` | private |
+| Field  | Type     | Visibility |
+| ------ | -------- | ---------- |
+| `name` | `string` | private    |
+| `age`  | `int`    | private    |
 
 ---
-

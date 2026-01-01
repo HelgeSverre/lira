@@ -12,7 +12,6 @@ Test break and continue statements
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `main`
@@ -30,4 +29,3 @@ Test break and continue statements
 @expect: found 5
 
 ---
-

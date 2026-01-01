@@ -7,7 +7,6 @@ Tests all aspects of the import system
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `calculate_distance`
@@ -18,8 +17,8 @@ fn calculate_distance(x1: int, y1: int, x2: int, y2: int) -> int
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name | Type  |
+| ---- | ----- |
 | `x1` | `int` |
 | `y1` | `int` |
 | `x2` | `int` |
@@ -37,10 +36,10 @@ fn bounded_value(val: int, low: int, high: int) -> int
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `val` | `int` |
-| `low` | `int` |
+| Name   | Type  |
+| ------ | ----- |
+| `val`  | `int` |
+| `low`  | `int` |
 | `high` | `int` |
 
 **Returns:** `int`
@@ -55,10 +54,10 @@ fn save_and_load(filename: string, data: string) -> string
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name       | Type     |
+| ---------- | -------- |
 | `filename` | `string` |
-| `data` | `string` |
+| `data`     | `string` |
 
 **Returns:** `string`
 
@@ -72,9 +71,9 @@ fn complex_calc(n: int) -> int
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `int`
 
@@ -88,9 +87,9 @@ fn outer_fn(x: int) -> int
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `x` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `x`  | `int` |
 
 **Returns:** `int`
 
@@ -104,11 +103,10 @@ fn inner_fn(x: int) -> int
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `x` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `x`  | `int` |
 
 **Returns:** `int`
 
 ---
-

@@ -9,7 +9,6 @@ Test tuple types and expressions
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `get_first`
@@ -25,9 +24,9 @@ Test tuple types and expressions
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `t` | `(int, string)` |
+| Name | Type            |
+| ---- | --------------- |
+| `t`  | `(int, string)` |
 
 **Returns:** `int`
 
@@ -41,9 +40,9 @@ fn get_second(t: (int, string)) -> string
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `t` | `(int, string)` |
+| Name | Type            |
+| ---- | --------------- |
+| `t`  | `(int, string)` |
 
 **Returns:** `string`
 
@@ -57,9 +56,9 @@ fn sum_triple(t: (int, int, int)) -> int
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `t` | `(int, int, int)` |
+| Name | Type              |
+| ---- | ----------------- |
+| `t`  | `(int, int, int)` |
 
 **Returns:** `int`
 
@@ -72,4 +71,3 @@ fn main()
 ```
 
 ---
-

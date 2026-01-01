@@ -7,7 +7,6 @@ HTTP client functionality (inspired by Perl's LWP::UserAgent)
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `is_success`
@@ -20,8 +19,8 @@ Check if status code indicates success (2xx)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name     | Type  |
+| -------- | ----- |
 | `status` | `int` |
 
 **Returns:** `bool`
@@ -38,8 +37,8 @@ Check if status code indicates redirect (3xx)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name     | Type  |
+| -------- | ----- |
 | `status` | `int` |
 
 **Returns:** `bool`
@@ -56,8 +55,8 @@ Check if status code indicates client error (4xx)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name     | Type  |
+| -------- | ----- |
 | `status` | `int` |
 
 **Returns:** `bool`
@@ -74,8 +73,8 @@ Check if status code indicates server error (5xx)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name     | Type  |
+| -------- | ----- |
 | `status` | `int` |
 
 **Returns:** `bool`
@@ -92,8 +91,8 @@ Check if status code indicates any error (4xx or 5xx)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name     | Type  |
+| -------- | ----- |
 | `status` | `int` |
 
 **Returns:** `bool`
@@ -110,8 +109,8 @@ Simple GET request that returns just the body (or empty string on error)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type     |
+| ----- | -------- |
 | `url` | `string` |
 
 **Returns:** `string`
@@ -128,8 +127,8 @@ GET request that only returns body if status is 2xx, empty string otherwise
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type     |
+| ----- | -------- |
 | `url` | `string` |
 
 **Returns:** `string`
@@ -146,9 +145,9 @@ POST JSON data, returns response body
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `url` | `string` |
+| Name   | Type     |
+| ------ | -------- |
+| `url`  | `string` |
 | `data` | `string` |
 
 **Returns:** `string`
@@ -165,9 +164,9 @@ POST form data (application/x-www-form-urlencoded), returns response body
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `url` | `string` |
+| Name   | Type     |
+| ------ | -------- |
+| `url`  | `string` |
 | `data` | `string` |
 
 **Returns:** `string`
@@ -184,12 +183,11 @@ POST plain text, returns response body
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `url` | `string` |
+| Name   | Type     |
+| ------ | -------- |
+| `url`  | `string` |
 | `data` | `string` |
 
 **Returns:** `string`
 
 ---
-

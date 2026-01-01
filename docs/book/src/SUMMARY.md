@@ -113,4 +113,3 @@
 - [type_alias](examples/type_alias.md)
 - [type_expressions](examples/type_expressions.md)
 - [unary_operators](examples/unary_operators.md)
-

@@ -11,7 +11,6 @@ Test trait declarations and implementations
 - [Implementations](#implementations)
 - [Functions](#functions)
 
-
 ## Structs
 
 ### `Dog`
@@ -26,9 +25,9 @@ Struct that implements the trait
 
 #### Fields
 
-| Field | Type | Visibility |
-|-------|------|------------|
-| `name` | `string` | private |
+| Field  | Type     | Visibility |
+| ------ | -------- | ---------- |
+| `name` | `string` | private    |
 
 ---
 
@@ -42,9 +41,9 @@ struct Cat {
 
 #### Fields
 
-| Field | Type | Visibility |
-|-------|------|------------|
-| `name` | `string` | private |
+| Field  | Type     | Visibility |
+| ------ | -------- | ---------- |
+| `name` | `string` | private    |
 
 ---
 
@@ -56,9 +55,9 @@ Define a trait
 
 #### Required Methods
 
-| Method | Default |
-|--------|--------|
-| `fn speak(self) -> string` | No |
+| Method                     | Default |
+| -------------------------- | ------- |
+| `fn speak(self) -> string` | No      |
 
 ---
 
@@ -101,4 +100,3 @@ fn main()
 ```
 
 ---
-

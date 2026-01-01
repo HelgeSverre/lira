@@ -7,7 +7,6 @@ Demonstrates patterns from stdlib/ (import system pending Phase 7)
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `abs`
@@ -20,9 +19,9 @@ Inline implementations from stdlib/core.li
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `int`
 
@@ -36,10 +35,10 @@ fn min(a: int, b: int) -> int
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `a` | `int` |
-| `b` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `a`  | `int` |
+| `b`  | `int` |
 
 **Returns:** `int`
 
@@ -53,10 +52,10 @@ fn max(a: int, b: int) -> int
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `a` | `int` |
-| `b` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `a`  | `int` |
+| `b`  | `int` |
 
 **Returns:** `int`
 
@@ -70,9 +69,9 @@ fn clamp(value: int, min_val: int, max_val: int) -> int
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `value` | `int` |
+| Name      | Type  |
+| --------- | ----- |
+| `value`   | `int` |
 | `min_val` | `int` |
 | `max_val` | `int` |
 
@@ -90,8 +89,8 @@ Inline implementations from stdlib/fs.li
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type     |
+| ------ | -------- |
 | `path` | `string` |
 
 **Returns:** `string`
@@ -106,12 +105,11 @@ fn write_file(path: string, content: string) -> bool
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `path` | `string` |
+| Name      | Type     |
+| --------- | -------- |
+| `path`    | `string` |
 | `content` | `string` |
 
 **Returns:** `bool`
 
 ---
-

@@ -10,7 +10,6 @@ Tests destructuring tuples in match expressions
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `get_first`
@@ -27,9 +26,9 @@ Tests destructuring tuples in match expressions
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `t` | `(int, int)` |
+| Name | Type         |
+| ---- | ------------ |
+| `t`  | `(int, int)` |
 
 **Returns:** `int`
 
@@ -43,9 +42,9 @@ fn sum_tuple(t: (int, int, int)) -> int
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `t` | `(int, int, int)` |
+| Name | Type              |
+| ---- | ----------------- |
+| `t`  | `(int, int, int)` |
 
 **Returns:** `int`
 
@@ -61,11 +60,10 @@ Test nested tuple pattern
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `t` | `((int, int), int)` |
+| Name | Type                |
+| ---- | ------------------- |
+| `t`  | `((int, int), int)` |
 
 **Returns:** `int`
 
 ---
-

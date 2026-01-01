@@ -5,5 +5,3 @@ Base64 Encoding Tests
 @expect-contains: decode: Hello World!
 @expect-contains: roundtrip passed
 @expect-contains: url encode passed
-
-

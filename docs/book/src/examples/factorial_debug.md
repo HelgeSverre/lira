@@ -6,7 +6,6 @@ Factorial debug
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `factorial`
@@ -19,11 +18,10 @@ Factorial debug
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `int`
 
 ---
-

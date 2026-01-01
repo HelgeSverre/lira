@@ -8,7 +8,6 @@ Note: Actual fiber execution requires fiber mode enabled in VM
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `worker`
@@ -23,9 +22,8 @@ Note: Actual fiber execution requires fiber mode enabled in VM
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name | Type  |
+| ---- | ----- |
 | `id` | `int` |
 
 ---
-

@@ -7,7 +7,6 @@ Demonstrates functions, loops, and conditionals
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `is_prime`
@@ -21,11 +20,10 @@ Demonstrates functions, loops, and conditionals
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `bool`
 
 ---
-

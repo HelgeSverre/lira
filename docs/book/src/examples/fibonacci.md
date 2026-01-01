@@ -7,7 +7,6 @@ Demonstrates recursion and functions
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `fib`
@@ -21,11 +20,10 @@ Demonstrates recursion and functions
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `int`
 
 ---
-

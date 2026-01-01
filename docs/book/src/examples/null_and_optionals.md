@@ -7,7 +7,6 @@ Tests null values and null comparisons
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `describe_value`
@@ -20,9 +19,9 @@ Match with null-like patterns (using 0 as sentinel)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `x` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `x`  | `int` |
 
 **Returns:** `string`
 
@@ -38,12 +37,11 @@ The practical pattern - use 0 or empty as sentinel
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `a` | `int` |
-| `b` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `a`  | `int` |
+| `b`  | `int` |
 
 **Returns:** `int`
 
 ---
-

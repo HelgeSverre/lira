@@ -8,5 +8,3 @@ HTTP Module Tests
 @expect-contains: is_redirect test passed
 @expect-contains: is_error test passed
 @expect-contains: status check passed
-
-

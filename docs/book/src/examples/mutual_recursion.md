@@ -7,7 +7,6 @@ Tests forward references for functions
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `is_even`
@@ -20,9 +19,9 @@ is_even calls is_odd (defined later)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `bool`
 
@@ -38,9 +37,9 @@ is_odd calls is_even (defined earlier)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `bool`
 
@@ -67,4 +66,3 @@ fn callee() -> int
 **Returns:** `int`
 
 ---
-

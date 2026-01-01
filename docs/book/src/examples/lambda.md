@@ -7,7 +7,6 @@ Tests anonymous functions with closures
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `apply_twice`
@@ -20,10 +19,10 @@ Function that takes a lambda as parameter
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `f` | `fn(int) -> int` |
-| `x` | `int` |
+| Name | Type             |
+| ---- | ---------------- |
+| `f`  | `fn(int) -> int` |
+| `x`  | `int`            |
 
 **Returns:** `int`
 
@@ -39,9 +38,9 @@ Function that returns a closure capturing its parameter
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `fn(int) -> int`
 
@@ -57,10 +56,10 @@ Multiple captured variables
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `a` | `int` |
-| `b` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `a`  | `int` |
+| `b`  | `int` |
 
 **Returns:** `fn(int) -> int`
 
@@ -76,11 +75,10 @@ Nested closures
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `fn(int) -> int`
 
 ---
-

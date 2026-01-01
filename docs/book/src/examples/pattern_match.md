@@ -7,7 +7,6 @@ Demonstrates match expressions with literal and wildcard patterns
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `grade`
@@ -21,8 +20,8 @@ Demonstrates match expressions with literal and wildcard patterns
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name    | Type  |
+| ------- | ----- |
 | `score` | `int` |
 
 **Returns:** `string`
@@ -39,9 +38,9 @@ Test wildcard
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `x` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `x`  | `int` |
 
 **Returns:** `int`
 
@@ -57,11 +56,10 @@ Test variable binding in pattern
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `x` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `x`  | `int` |
 
 **Returns:** `int`
 
 ---
-

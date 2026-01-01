@@ -11,7 +11,6 @@ Tests generic function and struct syntax parsing
 - [Structs](#structs)
 - [Functions](#functions)
 
-
 ## Structs
 
 ### `Box`<T>
@@ -26,9 +25,9 @@ Generic Box struct
 
 #### Fields
 
-| Field | Type | Visibility |
-|-------|------|------------|
-| `value` | `T` | private |
+| Field   | Type | Visibility |
+| ------- | ---- | ---------- |
+| `value` | `T`  | private    |
 
 ---
 
@@ -45,10 +44,9 @@ Generic identity function
 **Parameters:**
 
 | Name | Type |
-|------|------|
-| `x` | `T` |
+| ---- | ---- |
+| `x`  | `T`  |
 
 **Returns:** `T`
 
 ---
-

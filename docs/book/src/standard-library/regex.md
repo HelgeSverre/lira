@@ -7,7 +7,6 @@ Regular expression matching
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `is_email`
@@ -20,8 +19,8 @@ Common patterns as helpers
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type     |
+| ------ | -------- |
 | `text` | `string` |
 
 **Returns:** `bool`
@@ -36,8 +35,8 @@ fn is_url(text: string) -> bool
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type     |
+| ------ | -------- |
 | `text` | `string` |
 
 **Returns:** `bool`
@@ -52,8 +51,8 @@ fn is_phone(text: string) -> bool
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type     |
+| ------ | -------- |
 | `text` | `string` |
 
 **Returns:** `bool`
@@ -68,8 +67,8 @@ fn is_digits(text: string) -> bool
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type     |
+| ------ | -------- |
 | `text` | `string` |
 
 **Returns:** `bool`
@@ -84,8 +83,8 @@ fn is_alpha(text: string) -> bool
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type     |
+| ------ | -------- |
 | `text` | `string` |
 
 **Returns:** `bool`
@@ -100,8 +99,8 @@ fn is_alphanumeric(text: string) -> bool
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type     |
+| ------ | -------- |
 | `text` | `string` |
 
 **Returns:** `bool`
@@ -116,8 +115,8 @@ fn extract_numbers(text: string) -> [string]
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type     |
+| ------ | -------- |
 | `text` | `string` |
 
 **Returns:** `[string]`
@@ -132,8 +131,8 @@ fn extract_words(text: string) -> [string]
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type     |
+| ------ | -------- |
 | `text` | `string` |
 
 **Returns:** `[string]`
@@ -148,8 +147,8 @@ fn remove_whitespace(text: string) -> string
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type     |
+| ------ | -------- |
 | `text` | `string` |
 
 **Returns:** `string`
@@ -164,11 +163,10 @@ fn normalize_whitespace(text: string) -> string
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type     |
+| ------ | -------- |
 | `text` | `string` |
 
 **Returns:** `string`
 
 ---
-

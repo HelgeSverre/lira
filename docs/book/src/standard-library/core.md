@@ -7,7 +7,6 @@ Provides fundamental types and utilities
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `abs`
@@ -20,9 +19,9 @@ Absolute value
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `int`
 
@@ -38,10 +37,10 @@ Minimum of two values
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `a` | `int` |
-| `b` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `a`  | `int` |
+| `b`  | `int` |
 
 **Returns:** `int`
 
@@ -57,10 +56,10 @@ Maximum of two values
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `a` | `int` |
-| `b` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `a`  | `int` |
+| `b`  | `int` |
 
 **Returns:** `int`
 
@@ -76,9 +75,9 @@ Clamp value to range
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `value` | `int` |
+| Name      | Type  |
+| --------- | ----- |
+| `value`   | `int` |
 | `min_val` | `int` |
 | `max_val` | `int` |
 
@@ -96,9 +95,9 @@ Check if string is empty
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
+| Name | Type     |
+| ---- | -------- |
+| `s`  | `string` |
 
 **Returns:** `bool`
 
@@ -114,10 +113,10 @@ Repeat string n times
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `string` |
-| `n` | `int` |
+| Name | Type     |
+| ---- | -------- |
+| `s`  | `string` |
+| `n`  | `int`    |
 
 **Returns:** `string`
 
@@ -133,10 +132,10 @@ Check if array contains a value
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `arr` | `[int]` |
-| `value` | `int` |
+| Name    | Type    |
+| ------- | ------- |
+| `arr`   | `[int]` |
+| `value` | `int`   |
 
 **Returns:** `bool`
 
@@ -152,8 +151,8 @@ Sum all elements in array
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type    |
+| ----- | ------- |
 | `arr` | `[int]` |
 
 **Returns:** `int`
@@ -170,12 +169,11 @@ Find index of value in array (-1 if not found)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `arr` | `[int]` |
-| `value` | `int` |
+| Name    | Type    |
+| ------- | ------- |
+| `arr`   | `[int]` |
+| `value` | `int`   |
 
 **Returns:** `int`
 
 ---
-

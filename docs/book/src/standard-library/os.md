@@ -7,7 +7,6 @@ Operating system operations
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `walk`
@@ -20,8 +19,8 @@ Walk directory tree recursively (returns all files and directories)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type     |
+| ------ | -------- |
 | `path` | `string` |
 
 **Returns:** `[string]`
@@ -38,8 +37,8 @@ Check if a path exists (file or directory)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type     |
+| ------ | -------- |
 | `path` | `string` |
 
 **Returns:** `bool`
@@ -70,4 +69,3 @@ Get a temporary directory path
 **Returns:** `string`
 
 ---
-

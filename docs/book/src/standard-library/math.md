@@ -7,7 +7,6 @@ Mathematical functions and constants
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `math_pi`
@@ -112,9 +111,9 @@ Absolute value for integers
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `x` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `x`  | `int` |
 
 **Returns:** `int`
 
@@ -130,9 +129,9 @@ Sign function: returns -1, 0, or 1
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `x` | `float` |
+| Name | Type    |
+| ---- | ------- |
+| `x`  | `float` |
 
 **Returns:** `int`
 
@@ -148,9 +147,9 @@ Sign function for integers
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `x` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `x`  | `int` |
 
 **Returns:** `int`
 
@@ -166,9 +165,9 @@ Clamp value to range
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `x` | `float` |
+| Name      | Type    |
+| --------- | ------- |
+| `x`       | `float` |
 | `min_val` | `float` |
 | `max_val` | `float` |
 
@@ -186,9 +185,9 @@ Clamp integer to range
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `x` | `int` |
+| Name      | Type  |
+| --------- | ----- |
+| `x`       | `int` |
 | `min_val` | `int` |
 | `max_val` | `int` |
 
@@ -206,11 +205,11 @@ Linear interpolation
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `a` | `float` |
-| `b` | `float` |
-| `t` | `float` |
+| Name | Type    |
+| ---- | ------- |
+| `a`  | `float` |
+| `b`  | `float` |
+| `t`  | `float` |
 
 **Returns:** `float`
 
@@ -226,10 +225,10 @@ Inverse linear interpolation (find t given value)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `a` | `float` |
-| `b` | `float` |
+| Name    | Type    |
+| ------- | ------- |
+| `a`     | `float` |
+| `b`     | `float` |
 | `value` | `float` |
 
 **Returns:** `float`
@@ -246,11 +245,11 @@ Smooth step (Hermite interpolation)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name    | Type    |
+| ------- | ------- |
 | `edge0` | `float` |
 | `edge1` | `float` |
-| `x` | `float` |
+| `x`     | `float` |
 
 **Returns:** `float`
 
@@ -266,8 +265,8 @@ Degrees to radians
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name      | Type    |
+| --------- | ------- |
 | `degrees` | `float` |
 
 **Returns:** `float`
@@ -284,8 +283,8 @@ Radians to degrees
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type    |
+| ----- | ------- |
 | `rad` | `float` |
 
 **Returns:** `float`
@@ -302,10 +301,10 @@ Hypotenuse (sqrt(x^2 + y^2))
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `x` | `float` |
-| `y` | `float` |
+| Name | Type    |
+| ---- | ------- |
+| `x`  | `float` |
+| `y`  | `float` |
 
 **Returns:** `float`
 
@@ -321,8 +320,8 @@ Distance between two 2D points
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name | Type    |
+| ---- | ------- |
 | `x1` | `float` |
 | `y1` | `float` |
 | `x2` | `float` |
@@ -342,8 +341,8 @@ Distance between two 3D points
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name | Type    |
+| ---- | ------- |
 | `x1` | `float` |
 | `y1` | `float` |
 | `z1` | `float` |
@@ -365,10 +364,10 @@ Minimum of two floats
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `a` | `float` |
-| `b` | `float` |
+| Name | Type    |
+| ---- | ------- |
+| `a`  | `float` |
+| `b`  | `float` |
 
 **Returns:** `float`
 
@@ -384,10 +383,10 @@ Maximum of two floats
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `a` | `float` |
-| `b` | `float` |
+| Name | Type    |
+| ---- | ------- |
+| `a`  | `float` |
+| `b`  | `float` |
 
 **Returns:** `float`
 
@@ -403,10 +402,10 @@ Minimum of two integers
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `a` | `int` |
-| `b` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `a`  | `int` |
+| `b`  | `int` |
 
 **Returns:** `int`
 
@@ -422,10 +421,10 @@ Maximum of two integers
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `a` | `int` |
-| `b` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `a`  | `int` |
+| `b`  | `int` |
 
 **Returns:** `int`
 
@@ -437,12 +436,12 @@ Maximum of two integers
 fn wrap_angle(angle: float) -> float
 ```
 
-Wrap angle to [0, 2*PI)
+Wrap angle to [0, 2\*PI)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name    | Type    |
+| ------- | ------- |
 | `angle` | `float` |
 
 **Returns:** `float`
@@ -459,8 +458,8 @@ Normalize angle to [-PI, PI]
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name    | Type    |
+| ------- | ------- |
 | `angle` | `float` |
 
 **Returns:** `float`
@@ -477,9 +476,9 @@ Factorial (non-recursive for safety)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `int`
 
@@ -495,10 +494,10 @@ Binomial coefficient (n choose k)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
-| `k` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
+| `k`  | `int` |
 
 **Returns:** `int`
 
@@ -514,10 +513,10 @@ Power function for integers
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type  |
+| ------ | ----- |
 | `base` | `int` |
-| `exp` | `int` |
+| `exp`  | `int` |
 
 **Returns:** `int`
 
@@ -533,10 +532,10 @@ Greatest common divisor
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `a` | `int` |
-| `b` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `a`  | `int` |
+| `b`  | `int` |
 
 **Returns:** `int`
 
@@ -552,10 +551,10 @@ Least common multiple
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `a` | `int` |
-| `b` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `a`  | `int` |
+| `b`  | `int` |
 
 **Returns:** `int`
 
@@ -571,9 +570,9 @@ Check if number is prime
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `bool`
 
@@ -589,9 +588,9 @@ Check if number is even
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `bool`
 
@@ -607,9 +606,9 @@ Check if number is odd
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `bool`
 
@@ -625,10 +624,10 @@ Floor modulo (handles negative numbers correctly)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `a` | `int` |
-| `b` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `a`  | `int` |
+| `b`  | `int` |
 
 **Returns:** `int`
 
@@ -644,9 +643,9 @@ Square of a number
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `x` | `float` |
+| Name | Type    |
+| ---- | ------- |
+| `x`  | `float` |
 
 **Returns:** `float`
 
@@ -662,9 +661,9 @@ Square of an integer
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `x` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `x`  | `int` |
 
 **Returns:** `int`
 
@@ -680,9 +679,9 @@ Cube of a number
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `x` | `float` |
+| Name | Type    |
+| ---- | ------- |
+| `x`  | `float` |
 
 **Returns:** `float`
 
@@ -698,9 +697,9 @@ Cube of an integer
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `x` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `x`  | `int` |
 
 **Returns:** `int`
 
@@ -716,9 +715,9 @@ Cube root
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `x` | `float` |
+| Name | Type    |
+| ---- | ------- |
+| `x`  | `float` |
 
 **Returns:** `float`
 
@@ -734,10 +733,10 @@ Nth root
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `x` | `float` |
-| `n` | `float` |
+| Name | Type    |
+| ---- | ------- |
+| `x`  | `float` |
+| `n`  | `float` |
 
 **Returns:** `float`
 
@@ -753,9 +752,9 @@ Logarithm with arbitrary base
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `x` | `float` |
+| Name   | Type    |
+| ------ | ------- |
+| `x`    | `float` |
 | `base` | `float` |
 
 **Returns:** `float`
@@ -772,9 +771,9 @@ Secant
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `x` | `float` |
+| Name | Type    |
+| ---- | ------- |
+| `x`  | `float` |
 
 **Returns:** `float`
 
@@ -790,9 +789,9 @@ Cosecant
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `x` | `float` |
+| Name | Type    |
+| ---- | ------- |
+| `x`  | `float` |
 
 **Returns:** `float`
 
@@ -808,9 +807,9 @@ Cotangent
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `x` | `float` |
+| Name | Type    |
+| ---- | ------- |
+| `x`  | `float` |
 
 **Returns:** `float`
 
@@ -826,9 +825,9 @@ Hyperbolic arcsine
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `x` | `float` |
+| Name | Type    |
+| ---- | ------- |
+| `x`  | `float` |
 
 **Returns:** `float`
 
@@ -844,9 +843,9 @@ Hyperbolic arccosine
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `x` | `float` |
+| Name | Type    |
+| ---- | ------- |
+| `x`  | `float` |
 
 **Returns:** `float`
 
@@ -862,9 +861,9 @@ Hyperbolic arctangent
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `x` | `float` |
+| Name | Type    |
+| ---- | ------- |
+| `x`  | `float` |
 
 **Returns:** `float`
 
@@ -880,9 +879,9 @@ Fibonacci number (iterative)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `int`
 
@@ -898,9 +897,9 @@ Check if number is a power of 2
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `bool`
 
@@ -916,9 +915,9 @@ Next power of 2 greater than or equal to n
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `int`
 
@@ -934,9 +933,9 @@ Count set bits (population count)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `int`
 
@@ -952,10 +951,10 @@ Check if two floats are approximately equal
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `a` | `float` |
-| `b` | `float` |
+| Name      | Type    |
+| --------- | ------- |
+| `a`       | `float` |
+| `b`       | `float` |
 | `epsilon` | `float` |
 
 **Returns:** `bool`
@@ -972,11 +971,11 @@ Map a value from one range to another
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `value` | `float` |
-| `in_min` | `float` |
-| `in_max` | `float` |
+| Name      | Type    |
+| --------- | ------- |
+| `value`   | `float` |
+| `in_min`  | `float` |
+| `in_max`  | `float` |
 | `out_min` | `float` |
 | `out_max` | `float` |
 
@@ -994,9 +993,9 @@ Sigmoid function (logistic function)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `x` | `float` |
+| Name | Type    |
+| ---- | ------- |
+| `x`  | `float` |
 
 **Returns:** `float`
 
@@ -1012,9 +1011,9 @@ ReLU (Rectified Linear Unit)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `x` | `float` |
+| Name | Type    |
+| ---- | ------- |
+| `x`  | `float` |
 
 **Returns:** `float`
 
@@ -1030,9 +1029,9 @@ Leaky ReLU
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `x` | `float` |
+| Name    | Type    |
+| ------- | ------- |
+| `x`     | `float` |
 | `alpha` | `float` |
 
 **Returns:** `float`
@@ -1049,9 +1048,9 @@ Sum of integers from 1 to n
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `int`
 
@@ -1067,11 +1066,10 @@ Sum of squares from 1 to n
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `int`
 
 ---
-

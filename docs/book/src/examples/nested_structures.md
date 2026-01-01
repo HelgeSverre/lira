@@ -8,7 +8,6 @@ Tests deeply nested arrays, objects, and mixed structures
 - [Structs](#structs)
 - [Functions](#functions)
 
-
 ## Structs
 
 ### `Address`
@@ -25,11 +24,11 @@ Define nested structures
 
 #### Fields
 
-| Field | Type | Visibility |
-|-------|------|------------|
-| `street` | `string` | private |
-| `city` | `string` | private |
-| `zip` | `int` | private |
+| Field    | Type     | Visibility |
+| -------- | -------- | ---------- |
+| `street` | `string` | private    |
+| `city`   | `string` | private    |
+| `zip`    | `int`    | private    |
 
 ---
 
@@ -44,10 +43,10 @@ struct Person {
 
 #### Fields
 
-| Field | Type | Visibility |
-|-------|------|------------|
-| `name` | `string` | private |
-| `age` | `int` | private |
+| Field  | Type     | Visibility |
+| ------ | -------- | ---------- |
+| `name` | `string` | private    |
+| `age`  | `int`    | private    |
 
 ---
 
@@ -61,10 +60,10 @@ fn add(a: int, b: int) -> int
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `a` | `int` |
-| `b` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `a`  | `int` |
+| `b`  | `int` |
 
 **Returns:** `int`
 
@@ -78,12 +77,11 @@ fn mul(a: int, b: int) -> int
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `a` | `int` |
-| `b` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `a`  | `int` |
+| `b`  | `int` |
 
 **Returns:** `int`
 
 ---
-

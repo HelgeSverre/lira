@@ -7,7 +7,6 @@ Demonstrates struct literals, field access, and methods
 
 - [Structs](#structs)
 
-
 ## Structs
 
 ### `Point`
@@ -23,10 +22,10 @@ Define structs
 
 #### Fields
 
-| Field | Type | Visibility |
-|-------|------|------------|
-| `x` | `int` | private |
-| `y` | `int` | private |
+| Field | Type  | Visibility |
+| ----- | ----- | ---------- |
+| `x`   | `int` | private    |
+| `y`   | `int` | private    |
 
 #### Methods
 
@@ -55,10 +54,10 @@ struct Person {
 
 #### Fields
 
-| Field | Type | Visibility |
-|-------|------|------------|
-| `name` | `string` | private |
-| `age` | `int` | private |
+| Field  | Type     | Visibility |
+| ------ | -------- | ---------- |
+| `name` | `string` | private    |
+| `age`  | `int`    | private    |
 
 #### Methods
 
@@ -81,10 +80,9 @@ struct Line {
 
 #### Fields
 
-| Field | Type | Visibility |
-|-------|------|------------|
-| `start` | `Point` | private |
-| `end` | `Point` | private |
+| Field   | Type    | Visibility |
+| ------- | ------- | ---------- |
+| `start` | `Point` | private    |
+| `end`   | `Point` | private    |
 
 ---
-

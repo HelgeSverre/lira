@@ -13,5 +13,3 @@ Tests for the std.path module
 @expect-contains: with_extension test passed
 @expect-contains: components test passed
 @expect-contains: All Path Tests Passed
-
-

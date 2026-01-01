@@ -10,7 +10,6 @@ Note: Default params are parsed but may require explicit args at call site
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `greet`
@@ -23,9 +22,9 @@ Function with default parameter (syntax test)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `name` | `string` |
+| Name       | Type     |
+| ---------- | -------- |
+| `name`     | `string` |
 | `greeting` | `string` |
 
 ---
@@ -37,4 +36,3 @@ fn main()
 ```
 
 ---
-

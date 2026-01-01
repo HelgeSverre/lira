@@ -8,5 +8,3 @@ URL Module Tests
 @expect-contains: parse port: 8080
 @expect-contains: query get: bar
 @expect-contains: roundtrip passed
-
-

@@ -11,7 +11,6 @@ Verify that constructor patterns actually match correctly
 - [Enums](#enums)
 - [Functions](#functions)
 
-
 ## Enums
 
 ### `Color`
@@ -33,10 +32,10 @@ Verify that constructor patterns actually match correctly
 #### Variants
 
 | Variant | Fields |
-|---------|--------|
-| `Red` | - |
-| `Green` | - |
-| `Blue` | - |
+| ------- | ------ |
+| `Red`   | -      |
+| `Green` | -      |
+| `Blue`  | -      |
 
 ---
 
@@ -50,11 +49,10 @@ fn describe_color(c: Color) -> string
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `c` | `Color` |
+| Name | Type    |
+| ---- | ------- |
+| `c`  | `Color` |
 
 **Returns:** `string`
 
 ---
-

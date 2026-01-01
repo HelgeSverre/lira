@@ -11,7 +11,6 @@ Test method chaining with impl blocks
 - [Implementations](#implementations)
 - [Functions](#functions)
 
-
 ## Structs
 
 ### `Counter`
@@ -29,9 +28,9 @@ Test method chaining with impl blocks
 
 #### Fields
 
-| Field | Type | Visibility |
-|-------|------|------------|
-| `value` | `int` | private |
+| Field   | Type  | Visibility |
+| ------- | ----- | ---------- |
+| `value` | `int` | private    |
 
 ---
 
@@ -45,9 +44,9 @@ struct Calculator {
 
 #### Fields
 
-| Field | Type | Visibility |
-|-------|------|------------|
-| `result` | `int` | private |
+| Field    | Type  | Visibility |
+| -------- | ----- | ---------- |
+| `result` | `int` | private    |
 
 ---
 
@@ -129,9 +128,9 @@ fn start_calc(n: int) -> Calculator
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `n` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `n`  | `int` |
 
 **Returns:** `Calculator`
 
@@ -144,4 +143,3 @@ fn main()
 ```
 
 ---
-

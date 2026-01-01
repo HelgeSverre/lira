@@ -1,7 +1,7 @@
 # string_escapes
 
 Test string escape sequences
-@expect: Hello	World
+@expect: Hello World
 @expect: Line 1
 @expect: Line 2
 @expect: She said "Hi"
@@ -10,7 +10,6 @@ Test string escape sequences
 ## Contents
 
 - [Functions](#functions)
-
 
 ## Functions
 
@@ -21,11 +20,10 @@ fn main()
 ```
 
 Test string escape sequences
-@expect: Hello	World
+@expect: Hello World
 @expect: Line 1
 @expect: Line 2
 @expect: She said "Hi"
 @expect: Path: C:\Users
 
 ---
-

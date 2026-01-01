@@ -12,7 +12,6 @@ Demonstrates extends, override, and super
 - [Classes](#classes)
 - [Functions](#functions)
 
-
 ## Classes
 
 ### `Animal`
@@ -26,9 +25,9 @@ Demonstrates extends, override, and super
 
 #### Fields
 
-| Field | Type | Visibility |
-|-------|------|------------|
-| `name` | `string` | private |
+| Field  | Type     | Visibility |
+| ------ | -------- | ---------- |
+| `name` | `string` | private    |
 
 ---
 
@@ -36,9 +35,9 @@ Demonstrates extends, override, and super
 
 #### Fields
 
-| Field | Type | Visibility |
-|-------|------|------------|
-| `breed` | `string` | private |
+| Field   | Type     | Visibility |
+| ------- | -------- | ---------- |
+| `breed` | `string` | private    |
 
 ---
 
@@ -46,9 +45,9 @@ Demonstrates extends, override, and super
 
 #### Fields
 
-| Field | Type | Visibility |
-|-------|------|------------|
-| `color` | `string` | private |
+| Field   | Type     | Visibility |
+| ------- | -------- | ---------- |
+| `color` | `string` | private    |
 
 ---
 
@@ -61,4 +60,3 @@ fn main()
 ```
 
 ---
-

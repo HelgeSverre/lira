@@ -10,7 +10,6 @@ Note: ** operator parses correctly, but codegen uses manual power
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `pow`
@@ -19,14 +18,14 @@ Note: ** operator parses correctly, but codegen uses manual power
 fn pow(base: int, exp: int) -> int
 ```
 
-Manual power function since ** codegen not yet implemented
+Manual power function since \*\* codegen not yet implemented
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type  |
+| ------ | ----- |
 | `base` | `int` |
-| `exp` | `int` |
+| `exp`  | `int` |
 
 **Returns:** `int`
 
@@ -39,4 +38,3 @@ fn main()
 ```
 
 ---
-

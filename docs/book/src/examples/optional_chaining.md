@@ -9,7 +9,6 @@ Test optional chaining (?.) and null coalesce (??)
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `get_value`
@@ -54,4 +53,3 @@ fn main()
 ```
 
 ---
-

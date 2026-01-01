@@ -11,7 +11,6 @@ Tests matching enum variants with pattern matching
 - [Enums](#enums)
 - [Functions](#functions)
 
-
 ## Enums
 
 ### `Color`
@@ -33,10 +32,10 @@ Tests matching enum variants with pattern matching
 #### Variants
 
 | Variant | Fields |
-|---------|--------|
-| `Red` | - |
-| `Green` | - |
-| `Blue` | - |
+| ------- | ------ |
+| `Red`   | -      |
+| `Green` | -      |
+| `Blue`  | -      |
 
 ---
 
@@ -52,11 +51,11 @@ enum Status {
 
 #### Variants
 
-| Variant | Fields |
-|---------|--------|
-| `Active` | - |
-| `Inactive` | - |
-| `Pending` | - |
+| Variant    | Fields |
+| ---------- | ------ |
+| `Active`   | -      |
+| `Inactive` | -      |
+| `Pending`  | -      |
 
 ---
 
@@ -72,9 +71,9 @@ Match on simple enum variant
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `c` | `Color` |
+| Name | Type    |
+| ---- | ------- |
+| `c`  | `Color` |
 
 **Returns:** `string`
 
@@ -88,9 +87,9 @@ fn describe_status(s: Status) -> string
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `s` | `Status` |
+| Name | Type     |
+| ---- | -------- |
+| `s`  | `Status` |
 
 **Returns:** `string`
 
@@ -106,11 +105,10 @@ Test with wildcard fallback
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `c` | `Color` |
+| Name | Type    |
+| ---- | ------- |
+| `c`  | `Color` |
 
 **Returns:** `string`
 
 ---
-

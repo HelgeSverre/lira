@@ -10,7 +10,6 @@ Test function types as parameters and return values
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `apply`
@@ -23,10 +22,10 @@ Function that takes a function as parameter
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `f` | `fn(int) -> int` |
-| `x` | `int` |
+| Name | Type             |
+| ---- | ---------------- |
+| `f`  | `fn(int) -> int` |
+| `x`  | `int`            |
 
 **Returns:** `int`
 
@@ -42,11 +41,11 @@ Function that takes two functions
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `f` | `fn(int) -> int` |
-| `g` | `fn(int) -> int` |
-| `x` | `int` |
+| Name | Type             |
+| ---- | ---------------- |
+| `f`  | `fn(int) -> int` |
+| `g`  | `fn(int) -> int` |
+| `x`  | `int`            |
 
 **Returns:** `int`
 
@@ -62,9 +61,9 @@ Functions to pass around
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `x` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `x`  | `int` |
 
 **Returns:** `int`
 
@@ -78,9 +77,9 @@ fn square(x: int) -> int
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `x` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `x`  | `int` |
 
 **Returns:** `int`
 
@@ -94,9 +93,9 @@ fn add_five(x: int) -> int
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `x` | `int` |
+| Name | Type  |
+| ---- | ----- |
+| `x`  | `int` |
 
 **Returns:** `int`
 
@@ -109,4 +108,3 @@ fn main()
 ```
 
 ---
-

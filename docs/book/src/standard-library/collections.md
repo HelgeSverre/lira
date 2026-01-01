@@ -7,7 +7,6 @@ Enhanced array/list operations
 
 - [Functions](#functions)
 
-
 ## Functions
 
 ### `map_double`
@@ -20,8 +19,8 @@ Double each number
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type    |
+| ----- | ------- |
 | `arr` | `[int]` |
 
 **Returns:** `[int]`
@@ -38,8 +37,8 @@ Square each number
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type    |
+| ----- | ------- |
 | `arr` | `[int]` |
 
 **Returns:** `[int]`
@@ -56,8 +55,8 @@ Filter positive numbers
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type    |
+| ----- | ------- |
 | `arr` | `[int]` |
 
 **Returns:** `[int]`
@@ -74,8 +73,8 @@ Filter even numbers
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type    |
+| ----- | ------- |
 | `arr` | `[int]` |
 
 **Returns:** `[int]`
@@ -92,8 +91,8 @@ Filter odd numbers
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type    |
+| ----- | ------- |
 | `arr` | `[int]` |
 
 **Returns:** `[int]`
@@ -110,8 +109,8 @@ Sum all elements
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type    |
+| ----- | ------- |
 | `arr` | `[int]` |
 
 **Returns:** `int`
@@ -128,8 +127,8 @@ Product of all elements
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type    |
+| ----- | ------- |
 | `arr` | `[int]` |
 
 **Returns:** `int`
@@ -146,8 +145,8 @@ Find minimum
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type    |
+| ----- | ------- |
 | `arr` | `[int]` |
 
 **Returns:** `int`
@@ -164,8 +163,8 @@ Find maximum
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type    |
+| ----- | ------- |
 | `arr` | `[int]` |
 
 **Returns:** `int`
@@ -182,8 +181,8 @@ Average
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type    |
+| ----- | ------- |
 | `arr` | `[int]` |
 
 **Returns:** `float`
@@ -200,10 +199,10 @@ Check if array contains value
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `arr` | `[int]` |
-| `value` | `int` |
+| Name    | Type    |
+| ------- | ------- |
+| `arr`   | `[int]` |
+| `value` | `int`   |
 
 **Returns:** `bool`
 
@@ -219,10 +218,10 @@ Find index of value (-1 if not found)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `arr` | `[int]` |
-| `value` | `int` |
+| Name    | Type    |
+| ------- | ------- |
+| `arr`   | `[int]` |
+| `value` | `int`   |
 
 **Returns:** `int`
 
@@ -238,10 +237,10 @@ Count occurrences
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `arr` | `[int]` |
-| `value` | `int` |
+| Name    | Type    |
+| ------- | ------- |
+| `arr`   | `[int]` |
+| `value` | `int`   |
 
 **Returns:** `int`
 
@@ -257,8 +256,8 @@ Reverse array
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type    |
+| ----- | ------- |
 | `arr` | `[int]` |
 
 **Returns:** `[int]`
@@ -275,10 +274,10 @@ Take first n elements
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type    |
+| ----- | ------- |
 | `arr` | `[int]` |
-| `n` | `int` |
+| `n`   | `int`   |
 
 **Returns:** `[int]`
 
@@ -294,10 +293,10 @@ Skip first n elements
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type    |
+| ----- | ------- |
 | `arr` | `[int]` |
-| `n` | `int` |
+| `n`   | `int`   |
 
 **Returns:** `[int]`
 
@@ -313,11 +312,11 @@ Slice array from start to end (exclusive)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
-| `arr` | `[int]` |
-| `start` | `int` |
-| `end` | `int` |
+| Name    | Type    |
+| ------- | ------- |
+| `arr`   | `[int]` |
+| `start` | `int`   |
+| `end`   | `int`   |
 
 **Returns:** `[int]`
 
@@ -333,8 +332,8 @@ Concatenate two arrays
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name   | Type    |
+| ------ | ------- |
 | `arr1` | `[int]` |
 | `arr2` | `[int]` |
 
@@ -352,8 +351,8 @@ Remove duplicates
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type    |
+| ----- | ------- |
 | `arr` | `[int]` |
 
 **Returns:** `[int]`
@@ -370,8 +369,8 @@ Flatten nested operation (combine multiple arrays)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name     | Type      |
+| -------- | --------- |
 | `arrays` | `[[int]]` |
 
 **Returns:** `[int]`
@@ -388,8 +387,8 @@ Sorting (Selection sort - works by finding min and appending)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type    |
+| ----- | ------- |
 | `arr` | `[int]` |
 
 **Returns:** `[int]`
@@ -404,8 +403,8 @@ fn sort_desc(arr: [int]) -> [int]
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type    |
+| ----- | ------- |
 | `arr` | `[int]` |
 
 **Returns:** `[int]`
@@ -422,10 +421,10 @@ Generate range [start, end)
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name    | Type  |
+| ------- | ----- |
 | `start` | `int` |
-| `end` | `int` |
+| `end`   | `int` |
 
 **Returns:** `[int]`
 
@@ -441,11 +440,11 @@ Generate range with step
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name    | Type  |
+| ------- | ----- |
 | `start` | `int` |
-| `end` | `int` |
-| `step` | `int` |
+| `end`   | `int` |
+| `step`  | `int` |
 
 **Returns:** `[int]`
 
@@ -461,10 +460,10 @@ Repeat value n times
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name    | Type  |
+| ------- | ----- |
 | `value` | `int` |
-| `n` | `int` |
+| `n`     | `int` |
 
 **Returns:** `[int]`
 
@@ -480,8 +479,8 @@ Check if all elements are non-zero
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type    |
+| ----- | ------- |
 | `arr` | `[int]` |
 
 **Returns:** `bool`
@@ -498,8 +497,8 @@ Check if any element is non-zero
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type    |
+| ----- | ------- |
 | `arr` | `[int]` |
 
 **Returns:** `bool`
@@ -516,11 +515,10 @@ Check if no elements are non-zero
 
 **Parameters:**
 
-| Name | Type |
-|------|------|
+| Name  | Type    |
+| ----- | ------- |
 | `arr` | `[int]` |
 
 **Returns:** `bool`
 
 ---
-

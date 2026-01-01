@@ -10,7 +10,6 @@ Test interface declarations and implementations
 - [Implementations](#implementations)
 - [Functions](#functions)
 
-
 ## Structs
 
 ### `Rectangle`
@@ -26,10 +25,10 @@ Struct that will implement the interface
 
 #### Fields
 
-| Field | Type | Visibility |
-|-------|------|------------|
-| `width` | `int` | private |
-| `height` | `int` | private |
+| Field    | Type  | Visibility |
+| -------- | ----- | ---------- |
+| `width`  | `int` | private    |
+| `height` | `int` | private    |
 
 ---
 
@@ -43,9 +42,9 @@ struct Circle {
 
 #### Fields
 
-| Field | Type | Visibility |
-|-------|------|------------|
-| `radius` | `int` | private |
+| Field    | Type  | Visibility |
+| -------- | ----- | ---------- |
+| `radius` | `int` | private    |
 
 ---
 
@@ -98,4 +97,3 @@ fn main()
 ```
 
 ---
-
