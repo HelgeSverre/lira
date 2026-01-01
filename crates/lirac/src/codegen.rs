@@ -45,8 +45,8 @@ pub struct CodeGenerator {
     function_defaults: FunctionDefaults,
     /// Module-level constants: name -> constant pool index
     module_consts: HashMap<String, u16>,
-    /// Impl methods for primitive types: type_name -> {method_name -> mangled_function_name}
-    primitive_impl_methods: HashMap<String, HashMap<String, String>>,
+    /// Impl methods for all types: type_name -> {method_name -> mangled_function_name}
+    impl_methods: HashMap<String, HashMap<String, String>>,
 }
 
 /// Key for constant deduplication
@@ -98,7 +98,7 @@ impl CodeGenerator {
             captures: Vec::new(),
             function_defaults: HashMap::new(),
             module_consts: HashMap::new(),
-            primitive_impl_methods: HashMap::new(),
+            impl_methods: HashMap::new(),
         }
     }
 
@@ -142,7 +142,6 @@ impl CodeGenerator {
                     type_name, methods, ..
                 } => {
                     // Collect impl methods with mangled names
-                    let is_primitive = matches!(type_name.as_str(), "int" | "float" | "string");
                     for method in methods {
                         if let StatementKind::FnDecl { name, params, .. } = &method.kind {
                             let mangled_name = format!("{}_{}", type_name, name);
@@ -152,13 +151,11 @@ impl CodeGenerator {
                                 param_count: params.len() as u8,
                                 local_count: 0,
                             });
-                            // Track primitive impl methods for method call dispatch
-                            if is_primitive {
-                                self.primitive_impl_methods
-                                    .entry(type_name.clone())
-                                    .or_default()
-                                    .insert(name.clone(), mangled_name);
-                            }
+                            // Track all impl methods for method call dispatch
+                            self.impl_methods
+                                .entry(type_name.clone())
+                                .or_default()
+                                .insert(name.clone(), mangled_name);
                         }
                     }
                 }
@@ -423,6 +420,28 @@ impl CodeGenerator {
         None
     }
 
+    /// Convert a type expression to a simple string for method dispatch
+    fn type_expr_to_string(&self, type_expr: &TypeExpr) -> String {
+        match &type_expr.kind {
+            TypeExprKind::Named(name) => name.clone(),
+            TypeExprKind::Generic { name, .. } => name.clone(),
+            TypeExprKind::Optional(inner) => format!("{}?", self.type_expr_to_string(inner)),
+            TypeExprKind::Array(inner) => format!("[{}]", self.type_expr_to_string(inner)),
+            TypeExprKind::Tuple(types) => {
+                let parts: Vec<String> = types.iter().map(|t| self.type_expr_to_string(t)).collect();
+                format!("({})", parts.join(", "))
+            }
+            TypeExprKind::Function { params, return_type } => {
+                let param_strs: Vec<String> = params.iter().map(|t| self.type_expr_to_string(t)).collect();
+                format!("fn({}) -> {}", param_strs.join(", "), self.type_expr_to_string(return_type))
+            }
+            TypeExprKind::Result { ok_type, err_type } => {
+                format!("Result<{}, {}>", self.type_expr_to_string(ok_type), self.type_expr_to_string(err_type))
+            }
+            TypeExprKind::Path(parts) => parts.join("::"),
+        }
+    }
+
     /// Define local variables for all bindings in a pattern (without initializing)
     fn define_pattern_locals(&mut self, pattern: &Pattern) {
         match &pattern.kind {
@@ -458,6 +477,17 @@ impl CodeGenerator {
                     if let ExpressionKind::FieldAccess { object, .. } = &callee.kind {
                         if let ExpressionKind::Identifier(type_name) = &object.kind {
                             self.define_local_type(name, type_name);
+                        }
+                    } else if let ExpressionKind::Identifier(func_name) = &callee.kind {
+                        // Check if function name matches a constructor pattern like "typename_*"
+                        // e.g., "timestamp_now" -> "Timestamp", "timestamp_from_ms" -> "Timestamp"
+                        let type_names: Vec<String> = self.impl_methods.keys().cloned().collect();
+                        for type_name in type_names {
+                            let prefix = type_name.to_lowercase() + "_";
+                            if func_name.starts_with(&prefix) {
+                                self.define_local_type(name, &type_name);
+                                break;
+                            }
                         }
                     }
                 } else if let ExpressionKind::StructLiteral { name: Some(sn), .. } = &init.kind {
@@ -939,9 +969,12 @@ impl CodeGenerator {
                 // Record function offset
                 self.functions[func_idx].code_offset = self.current_offset();
 
-                // Define parameters as locals
+                // Define parameters as locals and track their types
                 for param in params {
                     self.define_local(&param.name);
+                    // Record parameter type for method dispatch
+                    let type_name = self.type_expr_to_string(&param.type_ann);
+                    self.define_local_type(&param.name, &type_name);
                 }
 
                 // Generate body
@@ -3010,8 +3043,8 @@ impl CodeGenerator {
                                             .push(format!("Method not found: {}", mangled_name));
                                     }
                                 } else {
-                                    // Check for primitive impl methods
-                                    if let Some(methods) = self.primitive_impl_methods.get(obj_type)
+                                    // Check for impl methods (works for all types, not just primitives)
+                                    if let Some(methods) = self.impl_methods.get(obj_type)
                                     {
                                         if let Some(mangled_name) = methods.get(field).cloned() {
                                             // Get function offset before mutable borrow
@@ -3057,7 +3090,7 @@ impl CodeGenerator {
                                 // No type info - check for primitive impl methods
                                 let receiver_type = self.infer_primitive_type(object);
                                 if let Some(ref type_name) = receiver_type {
-                                    if let Some(methods) = self.primitive_impl_methods.get(type_name)
+                                    if let Some(methods) = self.impl_methods.get(type_name)
                                     {
                                         if let Some(mangled_name) = methods.get(field).cloned() {
                                             // Get function offset before mutable borrow
@@ -3107,7 +3140,7 @@ impl CodeGenerator {
 
                         if let Some(ref type_name) = receiver_type {
                             // Check if this is a primitive impl method
-                            if let Some(methods) = self.primitive_impl_methods.get(type_name) {
+                            if let Some(methods) = self.impl_methods.get(type_name) {
                                 if let Some(mangled_name) = methods.get(field).cloned() {
                                     // Get function offset before mutable borrow
                                     let func_offset = self
@@ -3991,7 +4024,7 @@ impl CodeGenerator {
 
                 if let Some(type_name) = receiver_type {
                     // Check if this is a primitive impl method
-                    if let Some(methods) = self.primitive_impl_methods.get(&type_name) {
+                    if let Some(methods) = self.impl_methods.get(&type_name) {
                         if let Some(mangled_name) = methods.get(method).cloned() {
                             // Get function offset before mutable borrow
                             let func_offset = self

@@ -42,11 +42,12 @@ if len(iso) > 10 {
 let formatted = time_format(ms, "%Y-%m-%d")
 println("Date format: " + formatted)
 
-// Test duration constants
-let one_hour = 3600000
-let one_minute = 60000
-let one_second = 1000
-let one_day = 86400000
+// Test duration helpers (methods on int)
+let n = 1
+let one_hour = n.hours()
+let one_minute = n.minutes()
+let one_second = n.seconds()
+let one_day = n.days()
 if one_hour == 3600000 && one_minute == 60000 && one_second == 1000 && one_day == 86400000 {
     println("duration test passed")
 }
@@ -89,20 +90,36 @@ println("Today: " + today())
 println("Now time: " + now_time())
 println("Now ISO: " + now_iso())
 
-// Test Timestamp struct creation
+// Test Timestamp struct with constructor functions
 let now = timestamp_now()
 println("timestamp_now ms: " + now.ms)
 
-// Test Timestamp from_ms
+// Test Timestamp methods
 let ts = timestamp_from_ms(ms)
-println("timestamp_from_ms ms: " + ts.ms)
+println("format_date: " + ts.format_date())
+println("format_time: " + ts.format_time())
+println("format_datetime: " + ts.format_datetime())
 
-// Note: Struct method calls from imported modules have a codegen issue.
-// The impl Timestamp methods are defined but method calls don't resolve correctly.
-// This will be fixed in a future commit.
+// Test elapsed time via Timestamp
+let start_ts = timestamp_now()
+sleep(50)
+let elapsed = start_ts.elapsed()
+println("Elapsed after sleep(50): " + elapsed + "ms")
 
-// Direct time format calls work (builtins)
-println("format_date via builtin: " + time_format(ms, "%Y-%m-%d"))
-println("format_time via builtin: " + time_format(ms, "%H:%M:%S"))
+// Test is_past/is_future via Timestamp
+let one_day_ms = n.days()
+let past_ts = timestamp_from_ms(time_ms() - one_day_ms)
+let future_ts = timestamp_from_ms(time_ms() + one_day_ms)
+println("is_past(yesterday): " + past_ts.is_past())
+println("is_future(tomorrow): " + future_ts.is_future())
+
+// Test Timestamp arithmetic
+let tomorrow = now.add(one_day_ms)
+println("Tomorrow: " + tomorrow.format_date())
+
+// Test Timestamp component methods
+println("Year: " + ts.year())
+println("Month: " + ts.month())
+println("Day: " + ts.day())
 
 println("=== All Time Tests Completed ===")
