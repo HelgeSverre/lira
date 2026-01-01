@@ -61,10 +61,10 @@ The extension will automatically connect to `lira-lsp` if it's in your PATH.
 
 ## Configuration
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `lira.languageServer.enable` | `true` | Enable/disable the language server |
-| `lira.languageServer.path` | `"lira-lsp"` | Path to the lira-lsp binary |
+| Setting                      | Default      | Description                        |
+| ---------------------------- | ------------ | ---------------------------------- |
+| `lira.languageServer.enable` | `true`       | Enable/disable the language server |
+| `lira.languageServer.path`   | `"lira-lsp"` | Path to the lira-lsp binary        |
 
 ## Highlighted Elements
 
