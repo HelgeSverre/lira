@@ -1,7 +1,7 @@
 # Lira
 
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.md)
 [![Build](https://img.shields.io/badge/build-passing-brightgreen.svg)]()
 
 A modern systems programming language with Go-like fiber concurrency, pattern matching, and a clean syntax. Compiles to bytecode and runs on a custom VM.
@@ -218,4 +218,4 @@ import std.fs.{read_file, write_file}
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.
+MIT License — see [LICENSE](LICENSE.md) for details.

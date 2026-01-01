@@ -460,10 +460,10 @@ just fmt
 
 | Metric         | Count   |
 | -------------- | ------- |
-| Total tasks    | ~160    |
+| Total tasks    | ~167    |
 | Completed      | ~74     |
 | In Progress    | ~4      |
-| Pending        | ~82     |
+| Pending        | ~89     |
 | Compiler LOC   | ~15,900 |
 | VM LOC         | ~5,600  |
 | Core LOC       | ~350    |
@@ -545,6 +545,18 @@ _This roadmap tracks the development of Lira as a standalone systems programming
 | T8.20 | lira-doc                       | Documentation generator                                  | [x]    |
 | T8.21 | lira-doc - mdbook generation   | Generate mdbook structure from doc comments              | [x]    |
 | T8.22 | lira-doc - mdbook enhancements | Custom theme for mdbook doc site and syntax highlighting | [ ]    |
+
+### 8.5 Zed Advanced Features
+
+| ID    | Task                 | Description                                               | Status |
+| ----- | -------------------- | --------------------------------------------------------- | ------ |
+| T8.28 | Zed DAP integration  | Debug adapter protocol for step debugging in Zed          | [ ]    |
+| T8.29 | Zed slash commands   | `/lira-run`, `/lira-check`, `/lira-docs` for AI assistant | [ ]    |
+| T8.30 | Zed context server   | Provide Lira semantic context to AI assistant             | [ ]    |
+| T8.31 | Zed docs indexing    | Index stdlib for `/docs` slash command                    | [ ]    |
+| T8.32 | Zed build tasks      | Predefined compile/run task templates                     | [ ]    |
+| T8.33 | Zed LSP auto-install | Automatic lira-lsp download and configuration             | [ ]    |
+| T8.34 | Zed file icons       | Custom icons for `.li` and `.lic` files (32x32 SVG)       | [ ]    |
 
 ---
 

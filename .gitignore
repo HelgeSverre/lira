@@ -27,6 +27,10 @@ editors/intellij-lira/gradle/
 editors/intellij-lira/gradlew
 editors/intellij-lira/gradlew.bat
 
+# Generated documentation
+docs/book/
+docs/stdlib/
+
 # Misc
 *.log
 *.tmp
