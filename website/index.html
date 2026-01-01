@@ -36,7 +36,8 @@
             <div class="nav-links">
                 <a href="#features">Features</a>
                 <a href="#examples">Examples</a>
-                <a href="#getting-started">Get Started</a>
+                <a href="guide.html">Tour</a>
+                <a href="getting-started.html">Get Started</a>
                 <a href="https://github.com/HelgeSverre/lira" class="nav-github" aria-label="GitHub">
                     <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
                         <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
@@ -58,7 +59,7 @@
                 Write concurrent code that's as elegant as it is fast.
             </p>
             <div class="hero-actions">
-                <a href="#getting-started" class="btn btn-primary">Get Started</a>
+                <a href="getting-started.html" class="btn btn-primary">Get Started</a>
                 <a href="#examples" class="btn btn-secondary">See Examples</a>
             </div>
             <div class="hero-code">
@@ -282,62 +283,73 @@
         </div>
     </section>
 
-    <!-- Getting Started Section -->
-    <section id="getting-started" class="getting-started">
+    <!-- Tooling Section -->
+    <section id="tooling" class="tooling">
         <div class="container">
-            <h2 class="section-title">Get Started</h2>
-            <div class="steps">
-                <div class="step">
-                    <div class="step-number">1</div>
-                    <div class="step-content">
-                        <h3>Install Lira</h3>
-                        <div class="code-inline">
-                            <code>cargo install lirac liravm</code>
-                            <button class="copy-btn" data-copy="cargo install lirac liravm" aria-label="Copy to clipboard">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                                    <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"></path>
-                                </svg>
-                            </button>
-                        </div>
+            <h2 class="section-title">Complete Toolchain</h2>
+            <p class="section-subtitle">Everything you need to be productive, from day one.</p>
+            <div class="tooling-grid">
+                <div class="tool-showcase">
+                    <div class="tool-showcase-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="32" height="32">
+                            <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
                     </div>
+                    <h3>lirac</h3>
+                    <p>Fast compiler with helpful error messages and type inference.</p>
                 </div>
-                <div class="step">
-                    <div class="step-number">2</div>
-                    <div class="step-content">
-                        <h3>Write Your First Program</h3>
-                        <div class="code-header compact">
-                            <span class="code-filename">hello.li</span>
-                        </div>
-<pre class="code-block compact"><code><span class="kw">fn</span> <span class="fn">main</span>() {
-    <span class="fn">println</span>(<span class="str">"Hello, Lira!"</span>)
-}</code></pre>
+                <div class="tool-showcase">
+                    <div class="tool-showcase-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="32" height="32">
+                            <path d="M5 3l14 9-14 9V3z" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
                     </div>
+                    <h3>liravm</h3>
+                    <p>Lightweight bytecode VM with fiber scheduler and fast startup.</p>
                 </div>
-                <div class="step">
-                    <div class="step-number">3</div>
-                    <div class="step-content">
-                        <h3>Run It</h3>
-                        <div class="code-inline">
-                            <code>lira run hello.li</code>
-                            <button class="copy-btn" data-copy="lira run hello.li" aria-label="Copy to clipboard">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                                    <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"></path>
-                                </svg>
-                            </button>
-                        </div>
-                        <p class="step-output">Hello, Lira!</p>
+                <div class="tool-showcase">
+                    <div class="tool-showcase-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="32" height="32">
+                            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
                     </div>
+                    <h3>lira-lsp</h3>
+                    <p>Language server with completions, hover info, and go-to-definition.</p>
+                </div>
+                <div class="tool-showcase">
+                    <div class="tool-showcase-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="32" height="32">
+                            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" stroke-linecap="round" stroke-linejoin="round"/>
+                            <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </div>
+                    <h3>lira-doc</h3>
+                    <p>Generate beautiful Markdown documentation from your code.</p>
                 </div>
             </div>
-            <div class="cta-box">
-                <h3>Ready to dive deeper?</h3>
-                <p>Explore 85+ examples, read the language guide, or join the community.</p>
-                <div class="cta-buttons">
-                    <a href="https://github.com/HelgeSverre/lira/tree/main/examples" class="btn btn-primary">Browse Examples</a>
-                    <a href="https://github.com/HelgeSverre/lira/tree/main/docs" class="btn btn-secondary">Read the Docs</a>
+            <div class="editors-showcase">
+                <h3>Editor Support</h3>
+                <div class="editor-logos">
+                    <a href="https://github.com/HelgeSverre/lira/tree/main/editors/vscode-lira" class="editor-logo" title="VS Code">
+                        <span>VS Code</span>
+                    </a>
+                    <a href="https://github.com/HelgeSverre/lira/tree/main/editors/zed-lira" class="editor-logo" title="Zed">
+                        <span>Zed</span>
+                    </a>
+                    <a href="https://github.com/HelgeSverre/lira/tree/main/editors/vim-lira" class="editor-logo" title="Vim/Neovim">
+                        <span>Vim</span>
+                    </a>
+                    <a href="https://github.com/HelgeSverre/lira/tree/main/editors/helix-lira" class="editor-logo" title="Helix">
+                        <span>Helix</span>
+                    </a>
+                    <a href="https://github.com/HelgeSverre/lira/tree/main/editors/intellij-lira" class="editor-logo" title="IntelliJ">
+                        <span>IntelliJ</span>
+                    </a>
                 </div>
+            </div>
+            <div class="cta-centered">
+                <a href="getting-started.html" class="btn btn-primary">Get Started</a>
+                <a href="https://github.com/HelgeSverre/lira/tree/main/docs" class="btn btn-secondary">Read the Docs</a>
             </div>
         </div>
     </section>
