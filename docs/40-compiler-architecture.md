@@ -2,12 +2,12 @@
 
 ## Document Information
 
-| Property | Value |
-|----------|-------|
-| **Document ID** | 40-compiler-architecture |
-| **Version** | 1.0.0-draft |
-| **Status** | Draft Specification |
-| **Implementation Language** | Rust |
+| Property                    | Value                    |
+| --------------------------- | ------------------------ |
+| **Document ID**             | 40-compiler-architecture |
+| **Version**                 | 1.0.0-draft              |
+| **Status**                  | Draft Specification      |
+| **Implementation Language** | Rust                     |
 
 ---
 
@@ -1395,17 +1395,17 @@ impl DiagnosticEmitter {
 
 ## Appendix: Compiler Phases Summary
 
-| Phase | Input | Output | Purpose |
-|-------|-------|--------|---------|
-| Lexer | Source text | Tokens | Tokenization |
-| Parser | Tokens | AST | Syntax analysis |
-| Resolver | AST | Resolved AST | Name resolution |
-| TypeChecker | Resolved AST | Typed AST | Type checking |
-| Lowering | Typed AST | HIR | Desugaring |
-| CodeGen | HIR | Bytecode | Code generation |
-| Optimizer | Bytecode | Optimized bytecode | Optimization |
-| Emitter | Bytecode | .lic file | Output |
+| Phase       | Input        | Output             | Purpose         |
+| ----------- | ------------ | ------------------ | --------------- |
+| Lexer       | Source text  | Tokens             | Tokenization    |
+| Parser      | Tokens       | AST                | Syntax analysis |
+| Resolver    | AST          | Resolved AST       | Name resolution |
+| TypeChecker | Resolved AST | Typed AST          | Type checking   |
+| Lowering    | Typed AST    | HIR                | Desugaring      |
+| CodeGen     | HIR          | Bytecode           | Code generation |
+| Optimizer   | Bytecode     | Optimized bytecode | Optimization    |
+| Emitter     | Bytecode     | .lic file          | Output          |
 
 ---
 
-*This document is part of the Lira Language Specification.*
+_This document is part of the Lira Language Specification._

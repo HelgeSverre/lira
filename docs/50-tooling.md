@@ -2,11 +2,11 @@
 
 ## Document Information
 
-| Property | Value |
-|----------|-------|
-| **Document ID** | 50-tooling |
-| **Version** | 1.0.0-draft |
-| **Status** | Draft Specification |
+| Property        | Value               |
+| --------------- | ------------------- |
+| **Document ID** | 50-tooling          |
+| **Version**     | 1.0.0-draft         |
+| **Status**      | Draft Specification |
 
 ---
 
@@ -428,6 +428,7 @@ prefer_single_quotes = false
 ### 5.4 Output Examples
 
 Before:
+
 ```li
 fn   calculate(x:int,y:int)->int{
 let result=x+y
@@ -435,6 +436,7 @@ return result}
 ```
 
 After:
+
 ```li
 fn calculate(x: int, y: int) -> int {
     let result = x + y
@@ -487,7 +489,7 @@ EXAMPLES:
 
 ### 6.3 Documentation Comments
 
-```li
+````li
 /// A user account in the system.
 ///
 /// Users can have multiple roles and permissions.
@@ -516,11 +518,12 @@ pub class User {
         // ...
     }
 }
-```
+````
 
 ### 6.4 Generated Documentation
 
 The documentation includes:
+
 - Module overview and organization
 - Type definitions with fields and methods
 - Function signatures with descriptions
@@ -637,6 +640,7 @@ li-lsp --tcp --port 9999
 ```
 
 Features:
+
 - Code completion
 - Go to definition
 - Find references
@@ -660,6 +664,7 @@ li-dap --port 9998
 ```
 
 Features:
+
 - Breakpoints (line, conditional, function)
 - Step in/out/over
 - Variable inspection
@@ -676,9 +681,9 @@ Extension `lira`:
 ```json
 // settings.json
 {
-    "lira.format.onSave": true,
-    "lira.check.onSave": true,
-    "lira.lsp.path": "/usr/bin/li-lsp"
+  "lira.format.onSave": true,
+  "lira.check.onSave": true,
+  "lira.lsp.path": "/usr/bin/li-lsp"
 }
 ```
 
@@ -704,31 +709,31 @@ autocmd BufWritePre *.li :LiFormat
 
 ## Appendix A: Exit Codes
 
-| Code | Meaning |
-|------|---------|
-| 0 | Success |
-| 1 | General error |
-| 2 | Invalid arguments |
-| 10 | Syntax error |
-| 11 | Type error |
-| 12 | Resolution error |
-| 20 | Runtime error |
-| 21 | VM error |
-| 30 | I/O error |
-| 31 | Network error |
+| Code | Meaning           |
+| ---- | ----------------- |
+| 0    | Success           |
+| 1    | General error     |
+| 2    | Invalid arguments |
+| 10   | Syntax error      |
+| 11   | Type error        |
+| 12   | Resolution error  |
+| 20   | Runtime error     |
+| 21   | VM error          |
+| 30   | I/O error         |
+| 31   | Network error     |
 
 ---
 
 ## Appendix B: Environment Variables
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `LI_HOME` | Lira installation directory | `/usr/lib/li` |
-| `LI_PATH` | Module search path | `.:/usr/lib/li/std` |
-| `LI_DEBUG` | Enable debug output | `0` |
-| `LI_COLOR` | Enable colored output | `auto` |
-| `LI_HEAP_SIZE` | Default heap size | `256M` |
-| `LI_STACK_SIZE` | Default stack size | `1M` |
+| Variable        | Description                 | Default             |
+| --------------- | --------------------------- | ------------------- |
+| `LI_HOME`       | Lira installation directory | `/usr/lib/li`       |
+| `LI_PATH`       | Module search path          | `.:/usr/lib/li/std` |
+| `LI_DEBUG`      | Enable debug output         | `0`                 |
+| `LI_COLOR`      | Enable colored output       | `auto`              |
+| `LI_HEAP_SIZE`  | Default heap size           | `256M`              |
+| `LI_STACK_SIZE` | Default stack size          | `1M`                |
 
 ---
 
@@ -756,4 +761,4 @@ registry = "https://packages.helge.io"
 
 ---
 
-*This document is part of the Lira Language Specification.*
+_This document is part of the Lira Language Specification._

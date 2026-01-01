@@ -2,11 +2,11 @@
 
 ## Document Information
 
-| Property | Value |
-|----------|-------|
-| **Document ID** | 51-testing |
-| **Version** | 1.0.0-draft |
-| **Status** | Draft Specification |
+| Property        | Value               |
+| --------------- | ------------------- |
+| **Document ID** | 51-testing          |
+| **Version**     | 1.0.0-draft         |
+| **Status**      | Draft Specification |
 
 ---
 
@@ -52,11 +52,11 @@ Lira testing follows a layered approach that enables rapid development iteration
 
 ### 1.2 Testing Modes
 
-| Mode | Environment | Speed | Coverage | Use Case |
-|------|-------------|-------|----------|----------|
-| **Unit** | Any host | < 1s | Logic | Pure functions, algorithms |
-| **Host** | macOS/Linux | 1-10s | I/O | Integration with mocks |
-| **System** | Full stack | 10s+ | Full | End-to-end validation |
+| Mode       | Environment | Speed | Coverage | Use Case                   |
+| ---------- | ----------- | ----- | -------- | -------------------------- |
+| **Unit**   | Any host    | < 1s  | Logic    | Pure functions, algorithms |
+| **Host**   | macOS/Linux | 1-10s | I/O      | Integration with mocks     |
+| **System** | Full stack  | 10s+  | Full     | End-to-end validation      |
 
 ### 1.3 What Runs Where
 
@@ -641,21 +641,21 @@ fn execute_syscall(&mut self, syscall_num: u16) -> Value {
 
 ### 4.3 Syscall Mapping
 
-| Syscall | Number | Host-Mode Behavior |
-|------------------|--------|-------------------|
-| `sys_exit` | 0x0000 | Record exit code, terminate fiber |
-| `sys_fork` | 0x0001 | Not supported in host mode (error) |
-| `sys_read` | 0x0022 | Read from MockFS file handle |
-| `sys_write` | 0x0023 | Write to MockFS or capture stdout |
-| `sys_open` | 0x0020 | Open MockFS file, return handle |
-| `sys_close` | 0x0021 | Close MockFS handle |
-| `sys_get_time` | 0x0080 | Return MockClock time |
-| `sys_sleep` | 0x0081 | Advance MockClock, no real sleep |
-| `sys_create_window` | 0x00A8 | Create MockWindow, return handle |
-| `sys_destroy_window` | 0x00A9 | Destroy MockWindow |
-| `sys_get_event` | 0x00AD | Return event from MockEventQueue |
-| `sys_send` | 0x0050 | Route to MockIPC |
-| `sys_receive` | 0x0051 | Route to MockIPC |
+| Syscall              | Number | Host-Mode Behavior                 |
+| -------------------- | ------ | ---------------------------------- |
+| `sys_exit`           | 0x0000 | Record exit code, terminate fiber  |
+| `sys_fork`           | 0x0001 | Not supported in host mode (error) |
+| `sys_read`           | 0x0022 | Read from MockFS file handle       |
+| `sys_write`          | 0x0023 | Write to MockFS or capture stdout  |
+| `sys_open`           | 0x0020 | Open MockFS file, return handle    |
+| `sys_close`          | 0x0021 | Close MockFS handle                |
+| `sys_get_time`       | 0x0080 | Return MockClock time              |
+| `sys_sleep`          | 0x0081 | Advance MockClock, no real sleep   |
+| `sys_create_window`  | 0x00A8 | Create MockWindow, return handle   |
+| `sys_destroy_window` | 0x00A9 | Destroy MockWindow                 |
+| `sys_get_event`      | 0x00AD | Return event from MockEventQueue   |
+| `sys_send`           | 0x0050 | Route to MockIPC                   |
+| `sys_receive`        | 0x0051 | Route to MockIPC                   |
 
 ### 4.4 Command Line Usage
 
@@ -681,18 +681,18 @@ liravm --host --headless --mock-fs ./fixtures app.lic
 
 ### 4.5 Host-Mode Limitations
 
-| Feature | Supported | Notes |
-|---------|-----------|-------|
-| File I/O | ✓ | Via MockFS (in-memory or real host FS) |
-| Console I/O | ✓ | Via host stdin/stdout |
-| Time/Sleep | ✓ | Via MockClock (controllable) |
-| GUI Windows | ✓ | Via MockWindow (headless) |
-| GUI Events | ✓ | Via MockEventQueue (synthetic) |
-| Rendering | Partial | Capture pixel buffer, no display |
-| Process Fork | ✗ | Not supported |
-| Multi-Process | ✗ | Single process only |
-| Hardware Drivers | ✗ | Not applicable |
-| Raw Syscalls | ✗ | All intercepted |
+| Feature          | Supported | Notes                                  |
+| ---------------- | --------- | -------------------------------------- |
+| File I/O         | ✓         | Via MockFS (in-memory or real host FS) |
+| Console I/O      | ✓         | Via host stdin/stdout                  |
+| Time/Sleep       | ✓         | Via MockClock (controllable)           |
+| GUI Windows      | ✓         | Via MockWindow (headless)              |
+| GUI Events       | ✓         | Via MockEventQueue (synthetic)         |
+| Rendering        | Partial   | Capture pixel buffer, no display       |
+| Process Fork     | ✗         | Not supported                          |
+| Multi-Process    | ✗         | Single process only                    |
+| Hardware Drivers | ✗         | Not applicable                         |
+| Raw Syscalls     | ✗         | All intercepted                        |
 
 ---
 
@@ -1788,4 +1788,4 @@ class MockEventQueue {
 
 ---
 
-*This document is part of the Lira Language Specification.*
+_This document is part of the Lira Language Specification._

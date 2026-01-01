@@ -2,12 +2,12 @@
 
 ## Document Information
 
-| Property | Value |
-|----------|-------|
-| **Document ID** | 13-memory-model |
-| **Version** | 1.0.0-draft |
-| **Status** | Draft Specification |
-| **Prerequisites** | 12-vm-runtime |
+| Property          | Value               |
+| ----------------- | ------------------- |
+| **Document ID**   | 13-memory-model     |
+| **Version**       | 1.0.0-draft         |
+| **Status**        | Draft Specification |
+| **Prerequisites** | 12-vm-runtime       |
 
 ---
 
@@ -261,6 +261,7 @@ fn example(obj: MyClass) {
 ```
 
 Bytecode:
+
 ```
 ; Function entry - obj already has +1 ref from caller
 LOAD_0              ; Load obj
@@ -1053,6 +1054,7 @@ fn process(items: List<Item>) {
 ```
 
 Safe elision conditions:
+
 1. **Temporary values**: Values that don't escape current expression
 2. **Loop iterators**: Values bound to loop variables with known scope
 3. **Known-live parents**: Child references while parent is live
@@ -1255,4 +1257,4 @@ impl ObjectHeader {
 
 ---
 
-*This document is part of the Lira Language Specification.*
+_This document is part of the Lira Language Specification._

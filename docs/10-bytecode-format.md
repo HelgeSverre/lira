@@ -2,11 +2,11 @@
 
 ## Document Information
 
-| Property | Value |
-|----------|-------|
-| **Document ID** | 10-bytecode-format |
-| **Version** | 1.0.0-draft |
-| **Status** | Draft Specification |
+| Property           | Value                  |
+| ------------------ | ---------------------- |
+| **Document ID**    | 10-bytecode-format     |
+| **Version**        | 1.0.0-draft            |
+| **Status**         | Draft Specification    |
 | **File Extension** | `.lic` (Lira Compiled) |
 
 ---
@@ -216,6 +216,7 @@ enum SectionType {
 ### 4.3 Required Sections
 
 Every `.lic` file must contain:
+
 - `ConstPool` (0x01)
 - `Code` (0x02)
 - `Types` (0x03)
@@ -270,12 +271,14 @@ enum ConstTag {
 ### 5.3 Constant Formats
 
 #### Null
+
 ```
 [0x00]
 Size: 1 byte
 ```
 
 #### Boolean
+
 ```
 [0x01][value: u8]
 Size: 2 bytes
@@ -283,6 +286,7 @@ Value: 0x00 = false, 0x01 = true
 ```
 
 #### Integers
+
 ```
 Int8:   [0x02][value: i8]         // 2 bytes
 Int16:  [0x03][value: i16]        // 3 bytes
@@ -295,17 +299,20 @@ UInt64: [0x09][value: u64]        // 9 bytes
 ```
 
 #### Floats
+
 ```
 Float32: [0x10][value: f32]       // 5 bytes (IEEE 754)
 Float64: [0x11][value: f64]       // 9 bytes (IEEE 754)
 ```
 
 #### Character
+
 ```
 Char: [0x12][codepoint: u32]      // 5 bytes (Unicode scalar)
 ```
 
 #### String
+
 ```
 String: [0x20][length: u32][data: u8...]
 Size: 5 + length bytes
@@ -313,12 +320,14 @@ Data: UTF-8 encoded, NOT null-terminated
 ```
 
 #### Bytes
+
 ```
 Bytes: [0x21][length: u32][data: u8...]
 Size: 5 + length bytes
 ```
 
 #### Type Reference
+
 ```
 TypeRef: [0x30][type_index: u32]
 Size: 5 bytes
@@ -326,6 +335,7 @@ References entry in Types section
 ```
 
 #### Function Reference
+
 ```
 FuncRef: [0x31][func_index: u32]
 Size: 5 bytes
@@ -333,12 +343,14 @@ References entry in Code section
 ```
 
 #### Field Reference
+
 ```
 FieldRef: [0x32][type_index: u32][field_index: u16]
 Size: 7 bytes
 ```
 
 #### Method Reference
+
 ```
 MethodRef: [0x33][type_index: u32][method_index: u16]
 Size: 7 bytes
@@ -720,4 +732,4 @@ struct StringEntry {
 
 ---
 
-*This document is part of the Lira Language Specification.*
+_This document is part of the Lira Language Specification._

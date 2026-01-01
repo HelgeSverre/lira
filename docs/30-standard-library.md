@@ -2,11 +2,11 @@
 
 ## Document Information
 
-| Property | Value |
-|----------|-------|
+| Property        | Value               |
+| --------------- | ------------------- |
 | **Document ID** | 30-standard-library |
-| **Version** | 1.0.0-draft |
-| **Status** | Draft Specification |
+| **Version**     | 1.0.0-draft         |
+| **Status**      | Draft Specification |
 
 ---
 
@@ -1430,4 +1430,4 @@ import gui.events.{MouseEvent, KeyEvent}
 
 ---
 
-*This document is part of the Lira Language Specification.*
+_This document is part of the Lira Language Specification._

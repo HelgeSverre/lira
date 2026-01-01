@@ -2,12 +2,12 @@
 
 ## Document Information
 
-| Property | Value |
-|----------|-------|
-| **Document ID** | 21-liui-widgets |
-| **Version** | 1.0.0-draft |
-| **Status** | Draft Specification |
-| **Prerequisites** | 20-liui-format |
+| Property          | Value               |
+| ----------------- | ------------------- |
+| **Document ID**   | 21-liui-widgets     |
+| **Version**       | 1.0.0-draft         |
+| **Status**        | Draft Specification |
+| **Prerequisites** | 20-liui-format      |
 
 ---
 
@@ -1633,45 +1633,45 @@ color: ${theme.colors.primary} // Theme reference
 
 ## Appendix: Widget Quick Reference
 
-| Widget | Description | Key Props |
-|--------|-------------|-----------|
-| **Layout** |||
-| VBox | Vertical stack | spacing, align, justify |
-| HBox | Horizontal stack | spacing, align, justify |
-| ZStack | Overlay stack | alignment |
-| Grid | Grid layout | columns, rows, gap |
-| Flex | Flexbox container | direction, wrap, gap |
-| ScrollView | Scrollable area | direction, showScrollbar |
-| **Text** |||
-| Label | Single-line text | text, fontSize, color |
-| Text | Multi-line text | content, textAlign |
-| Link | Clickable link | text, href, onClick |
-| **Buttons** |||
-| Button | Standard button | text, variant, onClick |
-| IconButton | Icon-only button | icon, size, onClick |
-| **Inputs** |||
-| TextField | Text input | value, label, placeholder |
-| TextArea | Multi-line input | value, rows, autoGrow |
-| NumberField | Numeric input | value, min, max, step |
-| **Selection** |||
-| Checkbox | Boolean toggle | checked, label |
-| Radio | Single select | value, options |
-| Switch | Toggle switch | on, label |
-| Slider | Range selector | value, min, max |
-| Select | Dropdown | value, options |
-| **Display** |||
-| Image | Display image | src, fit, alt |
-| Icon | Display icon | name, size, color |
-| ProgressBar | Progress indicator | value, indeterminate |
-| Spinner | Loading spinner | size, color |
-| **Navigation** |||
-| TabView | Tabbed content | tabs, selectedIndex |
-| Sidebar | Side navigation | expanded, items |
-| **Overlays** |||
-| Modal | Modal dialog | open, closeOnEscape |
-| Tooltip | Hover tooltip | content, position |
-| Toast | Notification | message, type, duration |
+| Widget         | Description        | Key Props                 |
+| -------------- | ------------------ | ------------------------- |
+| **Layout**     |                    |                           |
+| VBox           | Vertical stack     | spacing, align, justify   |
+| HBox           | Horizontal stack   | spacing, align, justify   |
+| ZStack         | Overlay stack      | alignment                 |
+| Grid           | Grid layout        | columns, rows, gap        |
+| Flex           | Flexbox container  | direction, wrap, gap      |
+| ScrollView     | Scrollable area    | direction, showScrollbar  |
+| **Text**       |                    |                           |
+| Label          | Single-line text   | text, fontSize, color     |
+| Text           | Multi-line text    | content, textAlign        |
+| Link           | Clickable link     | text, href, onClick       |
+| **Buttons**    |                    |                           |
+| Button         | Standard button    | text, variant, onClick    |
+| IconButton     | Icon-only button   | icon, size, onClick       |
+| **Inputs**     |                    |                           |
+| TextField      | Text input         | value, label, placeholder |
+| TextArea       | Multi-line input   | value, rows, autoGrow     |
+| NumberField    | Numeric input      | value, min, max, step     |
+| **Selection**  |                    |                           |
+| Checkbox       | Boolean toggle     | checked, label            |
+| Radio          | Single select      | value, options            |
+| Switch         | Toggle switch      | on, label                 |
+| Slider         | Range selector     | value, min, max           |
+| Select         | Dropdown           | value, options            |
+| **Display**    |                    |                           |
+| Image          | Display image      | src, fit, alt             |
+| Icon           | Display icon       | name, size, color         |
+| ProgressBar    | Progress indicator | value, indeterminate      |
+| Spinner        | Loading spinner    | size, color               |
+| **Navigation** |                    |                           |
+| TabView        | Tabbed content     | tabs, selectedIndex       |
+| Sidebar        | Side navigation    | expanded, items           |
+| **Overlays**   |                    |                           |
+| Modal          | Modal dialog       | open, closeOnEscape       |
+| Tooltip        | Hover tooltip      | content, position         |
+| Toast          | Notification       | message, type, duration   |
 
 ---
 
-*This document is part of the Lira Language Specification.*
+_This document is part of the Lira Language Specification._

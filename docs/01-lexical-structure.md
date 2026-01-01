@@ -2,12 +2,12 @@
 
 ## Document Information
 
-| Property | Value |
-|----------|-------|
-| **Document ID** | 01-lexical-structure |
-| **Version** | 1.0.0-draft |
-| **Status** | Draft Specification |
-| **Prerequisites** | 00-lira-overview.md |
+| Property          | Value                |
+| ----------------- | -------------------- |
+| **Document ID**   | 01-lexical-structure |
+| **Version**       | 1.0.0-draft          |
+| **Status**        | Draft Specification  |
+| **Prerequisites** | 00-lira-overview.md  |
 
 ---
 
@@ -46,12 +46,12 @@ SourceCharacter ::= <any Unicode code point>
 
 The following control characters have special meaning:
 
-| Character | Code Point | Name | Usage |
-|-----------|------------|------|-------|
-| HT | U+0009 | Horizontal Tab | Whitespace |
-| LF | U+000A | Line Feed | Line terminator |
-| CR | U+000D | Carriage Return | Line terminator |
-| SP | U+0020 | Space | Whitespace |
+| Character | Code Point | Name            | Usage           |
+| --------- | ---------- | --------------- | --------------- |
+| HT        | U+0009     | Horizontal Tab  | Whitespace      |
+| LF        | U+000A     | Line Feed       | Line terminator |
+| CR        | U+000D     | Carriage Return | Line terminator |
+| SP        | U+0020     | Space           | Whitespace      |
 
 ### 1.3 Line Terminators
 
@@ -76,19 +76,20 @@ Lira source files use the `.li` extension. Lira UI files use the `.liui` extensi
 
 Lira source text is divided into the following token categories:
 
-| Category | Examples |
-|----------|----------|
-| **Whitespace** | spaces, tabs, newlines |
-| **Comments** | `// ...`, `/* ... */`, `/// ...` |
-| **Identifiers** | `foo`, `myVariable`, `_private` |
-| **Keywords** | `fn`, `let`, `if`, `class` |
-| **Literals** | `42`, `3.14`, `"hello"`, `true` |
-| **Operators** | `+`, `-`, `==`, `&&` |
-| **Punctuation** | `{`, `}`, `(`, `)`, `;` |
+| Category        | Examples                         |
+| --------------- | -------------------------------- |
+| **Whitespace**  | spaces, tabs, newlines           |
+| **Comments**    | `// ...`, `/* ... */`, `/// ...` |
+| **Identifiers** | `foo`, `myVariable`, `_private`  |
+| **Keywords**    | `fn`, `let`, `if`, `class`       |
+| **Literals**    | `42`, `3.14`, `"hello"`, `true`  |
+| **Operators**   | `+`, `-`, `==`, `&&`             |
+| **Punctuation** | `{`, `}`, `(`, `)`, `;`          |
 
 ### 2.2 Token Boundaries
 
 Tokens are delimited by:
+
 - Whitespace
 - Comments
 - Other tokens (where lexically unambiguous)
@@ -120,12 +121,12 @@ Whitespace ::= WhitespaceChar+
 WhitespaceChar ::= SP | HT | LineTerminator
 ```
 
-| Character | Description |
-|-----------|-------------|
-| U+0009 | Horizontal Tab (HT) |
-| U+000A | Line Feed (LF) |
-| U+000D | Carriage Return (CR) |
-| U+0020 | Space (SP) |
+| Character | Description          |
+| --------- | -------------------- |
+| U+0009    | Horizontal Tab (HT)  |
+| U+000A    | Line Feed (LF)       |
+| U+000D    | Carriage Return (CR) |
+| U+0020    | Space (SP)           |
 
 ### 3.2 Significant Newlines
 
@@ -165,6 +166,7 @@ CommentChar       ::= <any Unicode except LineTerminator>
 ```
 
 Example:
+
 ```li
 // This is a single-line comment
 let x = 42  // Inline comment
@@ -180,6 +182,7 @@ CommentContent   ::= <any sequence not containing '*/' >
 ```
 
 Multi-line comments do NOT nest:
+
 ```li
 /* This is a
    multi-line comment */
@@ -188,6 +191,7 @@ Multi-line comments do NOT nest:
 ```
 
 Example:
+
 ```li
 /*
  * Multi-line comment
@@ -208,7 +212,7 @@ DocBlockComment ::= '/**' DocContent '*/'
 
 Documentation comments are attached to the following declaration and support Markdown formatting:
 
-```li
+````li
 /// Calculates the factorial of a number.
 ///
 /// # Arguments
@@ -237,7 +241,7 @@ struct Point {
     x: float
     y: float
 }
-```
+````
 
 ### 4.4 Comment Directives
 
@@ -285,9 +289,9 @@ let japanese = "value"      // Using ASCII for example
 
 The following identifier patterns are reserved:
 
-| Pattern | Reservation |
-|---------|-------------|
-| `_` (single underscore) | Discard binding |
+| Pattern                          | Reservation                 |
+| -------------------------------- | --------------------------- |
+| `_` (single underscore)          | Discard binding             |
 | `__*` (double underscore prefix) | Reserved for implementation |
 | `*__` (double underscore suffix) | Reserved for implementation |
 
@@ -295,16 +299,16 @@ The following identifier patterns are reserved:
 
 While not enforced by the compiler, the following conventions are strongly recommended:
 
-| Entity | Convention | Example |
-|--------|------------|---------|
-| Variables | snake_case | `my_variable` |
-| Functions | snake_case | `calculate_total` |
-| Types (class, struct, enum) | PascalCase | `UserAccount` |
-| Interfaces | PascalCase | `Drawable` |
-| Constants | SCREAMING_SNAKE_CASE | `MAX_BUFFER_SIZE` |
-| Type parameters | Single uppercase | `T`, `K`, `V` |
-| Private members | Leading underscore | `_internal` |
-| Modules | snake_case | `string_utils` |
+| Entity                      | Convention           | Example           |
+| --------------------------- | -------------------- | ----------------- |
+| Variables                   | snake_case           | `my_variable`     |
+| Functions                   | snake_case           | `calculate_total` |
+| Types (class, struct, enum) | PascalCase           | `UserAccount`     |
+| Interfaces                  | PascalCase           | `Drawable`        |
+| Constants                   | SCREAMING_SNAKE_CASE | `MAX_BUFFER_SIZE` |
+| Type parameters             | Single uppercase     | `T`, `K`, `V`     |
+| Private members             | Leading underscore   | `_internal`       |
+| Modules                     | snake_case           | `string_utils`    |
 
 ### 5.5 Identifier Examples
 
@@ -333,6 +337,7 @@ let _ = ignored  // Discard binding
 The following identifiers are reserved as keywords and cannot be used as identifiers:
 
 #### Declaration Keywords
+
 ```
 class       const       enum        export      fn
 impl        import      interface   let         mod
@@ -341,6 +346,7 @@ var
 ```
 
 #### Control Flow Keywords
+
 ```
 break       case        continue    default     else
 for         if          in          loop        match
@@ -348,33 +354,39 @@ return      when        while
 ```
 
 #### Type Keywords
+
 ```
 bool        char        float       int         string
 uint        void
 ```
 
 #### Literal Keywords
+
 ```
 false       null        true
 ```
 
 #### Expression Keywords
+
 ```
 as          is          new         this        super
 ```
 
 #### Concurrency Keywords
+
 ```
 async       await       receive     select      send
 spawn
 ```
 
 #### Error Handling Keywords
+
 ```
 catch       finally     throw       try
 ```
 
 #### Modifier Keywords
+
 ```
 abstract    extends     mut         override
 ```
@@ -402,66 +414,66 @@ do          goto        with        from
 
 Complete alphabetical list:
 
-| Keyword | Category | Description |
-|---------|----------|-------------|
-| `abstract` | Modifier | Abstract class/method |
-| `as` | Expression | Type cast |
-| `async` | Concurrency | Async function marker |
-| `await` | Concurrency | Await async result |
-| `bool` | Type | Boolean type |
-| `break` | Control | Exit loop |
-| `case` | Control | Match case |
-| `catch` | Error | Exception handler |
-| `char` | Type | Character type |
-| `class` | Declaration | Reference type |
-| `const` | Declaration | Compile-time constant |
-| `continue` | Control | Next loop iteration |
-| `default` | Control | Default case |
-| `else` | Control | Alternative branch |
-| `enum` | Declaration | Enumeration type |
-| `export` | Declaration | Public export |
-| `extends` | Modifier | Inheritance |
-| `false` | Literal | Boolean false |
-| `finally` | Error | Cleanup block |
-| `float` | Type | Floating-point type |
-| `fn` | Declaration | Function |
-| `for` | Control | For loop |
-| `if` | Control | Conditional |
-| `impl` | Declaration | Implementation block |
-| `import` | Declaration | Import module |
-| `in` | Control | Iterator keyword |
-| `int` | Type | Integer type |
-| `interface` | Declaration | Interface/trait |
-| `is` | Expression | Type check |
-| `let` | Declaration | Immutable binding |
-| `loop` | Control | Infinite loop |
-| `match` | Control | Pattern matching |
-| `mod` | Declaration | Module |
-| `mut` | Modifier | Mutable reference |
-| `new` | Expression | Object creation |
-| `null` | Literal | Null value |
-| `override` | Modifier | Override method |
-| `priv` | Modifier | Private visibility |
-| `pub` | Modifier | Public visibility |
-| `receive` | Concurrency | Channel receive |
-| `return` | Control | Function return |
-| `select` | Concurrency | Channel select |
-| `send` | Concurrency | Channel send |
-| `spawn` | Concurrency | Spawn fiber |
-| `static` | Modifier | Static member |
-| `string` | Type | String type |
-| `struct` | Declaration | Value type |
-| `super` | Expression | Parent class |
-| `this` | Expression | Current instance |
-| `throw` | Error | Throw exception |
-| `true` | Literal | Boolean true |
-| `try` | Error | Try block |
-| `type` | Declaration | Type alias |
-| `uint` | Type | Unsigned integer |
-| `var` | Declaration | Mutable binding |
-| `void` | Type | No value type |
-| `when` | Control | Pattern guard |
-| `while` | Control | While loop |
+| Keyword     | Category    | Description           |
+| ----------- | ----------- | --------------------- |
+| `abstract`  | Modifier    | Abstract class/method |
+| `as`        | Expression  | Type cast             |
+| `async`     | Concurrency | Async function marker |
+| `await`     | Concurrency | Await async result    |
+| `bool`      | Type        | Boolean type          |
+| `break`     | Control     | Exit loop             |
+| `case`      | Control     | Match case            |
+| `catch`     | Error       | Exception handler     |
+| `char`      | Type        | Character type        |
+| `class`     | Declaration | Reference type        |
+| `const`     | Declaration | Compile-time constant |
+| `continue`  | Control     | Next loop iteration   |
+| `default`   | Control     | Default case          |
+| `else`      | Control     | Alternative branch    |
+| `enum`      | Declaration | Enumeration type      |
+| `export`    | Declaration | Public export         |
+| `extends`   | Modifier    | Inheritance           |
+| `false`     | Literal     | Boolean false         |
+| `finally`   | Error       | Cleanup block         |
+| `float`     | Type        | Floating-point type   |
+| `fn`        | Declaration | Function              |
+| `for`       | Control     | For loop              |
+| `if`        | Control     | Conditional           |
+| `impl`      | Declaration | Implementation block  |
+| `import`    | Declaration | Import module         |
+| `in`        | Control     | Iterator keyword      |
+| `int`       | Type        | Integer type          |
+| `interface` | Declaration | Interface/trait       |
+| `is`        | Expression  | Type check            |
+| `let`       | Declaration | Immutable binding     |
+| `loop`      | Control     | Infinite loop         |
+| `match`     | Control     | Pattern matching      |
+| `mod`       | Declaration | Module                |
+| `mut`       | Modifier    | Mutable reference     |
+| `new`       | Expression  | Object creation       |
+| `null`      | Literal     | Null value            |
+| `override`  | Modifier    | Override method       |
+| `priv`      | Modifier    | Private visibility    |
+| `pub`       | Modifier    | Public visibility     |
+| `receive`   | Concurrency | Channel receive       |
+| `return`    | Control     | Function return       |
+| `select`    | Concurrency | Channel select        |
+| `send`      | Concurrency | Channel send          |
+| `spawn`     | Concurrency | Spawn fiber           |
+| `static`    | Modifier    | Static member         |
+| `string`    | Type        | String type           |
+| `struct`    | Declaration | Value type            |
+| `super`     | Expression  | Parent class          |
+| `this`      | Expression  | Current instance      |
+| `throw`     | Error       | Throw exception       |
+| `true`      | Literal     | Boolean true          |
+| `try`       | Error       | Try block             |
+| `type`      | Declaration | Type alias            |
+| `uint`      | Type        | Unsigned integer      |
+| `var`       | Declaration | Mutable binding       |
+| `void`      | Type        | No value type         |
+| `when`      | Control     | Pattern guard         |
+| `while`     | Control     | While loop            |
 
 ---
 
@@ -493,6 +505,7 @@ IntegerSuffix  ::= 'i8' | 'i16' | 'i32' | 'i64'
 ```
 
 Examples:
+
 ```li
 // Decimal
 let a = 42
@@ -531,6 +544,7 @@ FloatSuffix    ::= 'f32' | 'f64'
 ```
 
 Examples:
+
 ```li
 // Basic decimals
 let a = 3.14159
@@ -562,6 +576,7 @@ BooleanLiteral ::= 'true' | 'false'
 ```
 
 Examples:
+
 ```li
 let active = true
 let disabled = false
@@ -578,6 +593,7 @@ SingleChar     ::= <any Unicode except '\'' or '\' or LineTerminator>
 ```
 
 Escape sequences:
+
 ```
 EscapeSequence ::= SimpleEscape | UnicodeEscape
 SimpleEscape   ::= '\' EscapeChar
@@ -585,18 +601,19 @@ EscapeChar     ::= 'n' | 'r' | 't' | '\\' | '\'' | '"' | '0'
 UnicodeEscape  ::= '\u{' HexDigit{1,6} '}'
 ```
 
-| Escape | Character | Name |
-|--------|-----------|------|
-| `\n` | U+000A | Newline |
-| `\r` | U+000D | Carriage return |
-| `\t` | U+0009 | Tab |
-| `\\` | U+005C | Backslash |
-| `\'` | U+0027 | Single quote |
-| `\"` | U+0022 | Double quote |
-| `\0` | U+0000 | Null |
-| `\u{XXXX}` | U+XXXX | Unicode code point |
+| Escape     | Character | Name               |
+| ---------- | --------- | ------------------ |
+| `\n`       | U+000A    | Newline            |
+| `\r`       | U+000D    | Carriage return    |
+| `\t`       | U+0009    | Tab                |
+| `\\`       | U+005C    | Backslash          |
+| `\'`       | U+0027    | Single quote       |
+| `\"`       | U+0022    | Double quote       |
+| `\0`       | U+0000    | Null               |
+| `\u{XXXX}` | U+XXXX    | Unicode code point |
 
 Examples:
+
 ```li
 let a = 'A'
 let newline = '\n'
@@ -625,6 +642,7 @@ Interpolation  ::= '${' Expression '}'
 ```
 
 Examples:
+
 ```li
 // Simple strings
 let s1 = "Hello, World!"
@@ -665,6 +683,7 @@ NullLiteral ::= 'null'
 ```
 
 Null can only be assigned to optional types:
+
 ```li
 let maybe: int? = null   // OK
 // let never: int = null // ERROR: int is not optional
@@ -676,121 +695,122 @@ let maybe: int? = null   // OK
 
 ### 8.1 Arithmetic Operators
 
-| Operator | Name | Arity | Example |
-|----------|------|-------|---------|
-| `+` | Addition | Binary | `a + b` |
-| `-` | Subtraction | Binary | `a - b` |
-| `*` | Multiplication | Binary | `a * b` |
-| `/` | Division | Binary | `a / b` |
-| `%` | Remainder | Binary | `a % b` |
-| `**` | Exponentiation | Binary | `a ** b` |
-| `-` | Negation | Unary | `-a` |
+| Operator | Name           | Arity  | Example  |
+| -------- | -------------- | ------ | -------- |
+| `+`      | Addition       | Binary | `a + b`  |
+| `-`      | Subtraction    | Binary | `a - b`  |
+| `*`      | Multiplication | Binary | `a * b`  |
+| `/`      | Division       | Binary | `a / b`  |
+| `%`      | Remainder      | Binary | `a % b`  |
+| `**`     | Exponentiation | Binary | `a ** b` |
+| `-`      | Negation       | Unary  | `-a`     |
 
 ### 8.2 Comparison Operators
 
-| Operator | Name | Example |
-|----------|------|---------|
-| `==` | Equal | `a == b` |
-| `!=` | Not equal | `a != b` |
-| `<` | Less than | `a < b` |
-| `>` | Greater than | `a > b` |
-| `<=` | Less or equal | `a <= b` |
-| `>=` | Greater or equal | `a >= b` |
+| Operator | Name             | Example  |
+| -------- | ---------------- | -------- |
+| `==`     | Equal            | `a == b` |
+| `!=`     | Not equal        | `a != b` |
+| `<`      | Less than        | `a < b`  |
+| `>`      | Greater than     | `a > b`  |
+| `<=`     | Less or equal    | `a <= b` |
+| `>=`     | Greater or equal | `a >= b` |
 
 ### 8.3 Logical Operators
 
-| Operator | Name | Example |
-|----------|------|---------|
-| `&&` | Logical AND | `a && b` |
-| `\|\|` | Logical OR | `a \|\| b` |
-| `!` | Logical NOT | `!a` |
+| Operator | Name        | Example    |
+| -------- | ----------- | ---------- |
+| `&&`     | Logical AND | `a && b`   |
+| `\|\|`   | Logical OR  | `a \|\| b` |
+| `!`      | Logical NOT | `!a`       |
 
 Short-circuit evaluation:
+
 - `&&` does not evaluate right operand if left is false
 - `||` does not evaluate right operand if left is true
 
 ### 8.4 Bitwise Operators
 
-| Operator | Name | Example |
-|----------|------|---------|
-| `&` | Bitwise AND | `a & b` |
-| `\|` | Bitwise OR | `a \| b` |
-| `^` | Bitwise XOR | `a ^ b` |
-| `~` | Bitwise NOT | `~a` |
-| `<<` | Left shift | `a << n` |
-| `>>` | Right shift (arithmetic) | `a >> n` |
-| `>>>` | Right shift (logical) | `a >>> n` |
+| Operator | Name                     | Example   |
+| -------- | ------------------------ | --------- |
+| `&`      | Bitwise AND              | `a & b`   |
+| `\|`     | Bitwise OR               | `a \| b`  |
+| `^`      | Bitwise XOR              | `a ^ b`   |
+| `~`      | Bitwise NOT              | `~a`      |
+| `<<`     | Left shift               | `a << n`  |
+| `>>`     | Right shift (arithmetic) | `a >> n`  |
+| `>>>`    | Right shift (logical)    | `a >>> n` |
 
 ### 8.5 Assignment Operators
 
-| Operator | Equivalent | Example |
-|----------|------------|---------|
-| `=` | Assignment | `a = b` |
-| `+=` | `a = a + b` | `a += b` |
-| `-=` | `a = a - b` | `a -= b` |
-| `*=` | `a = a * b` | `a *= b` |
-| `/=` | `a = a / b` | `a /= b` |
-| `%=` | `a = a % b` | `a %= b` |
-| `&=` | `a = a & b` | `a &= b` |
-| `\|=` | `a = a \| b` | `a \|= b` |
-| `^=` | `a = a ^ b` | `a ^= b` |
-| `<<=` | `a = a << b` | `a <<= b` |
-| `>>=` | `a = a >> b` | `a >>= b` |
+| Operator | Equivalent   | Example   |
+| -------- | ------------ | --------- |
+| `=`      | Assignment   | `a = b`   |
+| `+=`     | `a = a + b`  | `a += b`  |
+| `-=`     | `a = a - b`  | `a -= b`  |
+| `*=`     | `a = a * b`  | `a *= b`  |
+| `/=`     | `a = a / b`  | `a /= b`  |
+| `%=`     | `a = a % b`  | `a %= b`  |
+| `&=`     | `a = a & b`  | `a &= b`  |
+| `\|=`    | `a = a \| b` | `a \|= b` |
+| `^=`     | `a = a ^ b`  | `a ^= b`  |
+| `<<=`    | `a = a << b` | `a <<= b` |
+| `>>=`    | `a = a >> b` | `a >>= b` |
 
 ### 8.6 Special Operators
 
-| Operator | Name | Description |
-|----------|------|-------------|
-| `?.` | Optional chaining | Access if not null |
-| `??` | Null coalescing | Default if null |
-| `?:` | Elvis | Return left if non-null |
-| `!` | Force unwrap | Unwrap optional (may panic) |
-| `?` | Propagation | Propagate error/null |
-| `..` | Range (exclusive) | `0..10` (0 to 9) |
-| `..=` | Range (inclusive) | `0..=10` (0 to 10) |
-| `=>` | Arrow | Lambda, match arm |
-| `->` | Return type | Function signature |
-| `<-` | Receive | Channel receive |
+| Operator | Name              | Description                 |
+| -------- | ----------------- | --------------------------- |
+| `?.`     | Optional chaining | Access if not null          |
+| `??`     | Null coalescing   | Default if null             |
+| `?:`     | Elvis             | Return left if non-null     |
+| `!`      | Force unwrap      | Unwrap optional (may panic) |
+| `?`      | Propagation       | Propagate error/null        |
+| `..`     | Range (exclusive) | `0..10` (0 to 9)            |
+| `..=`    | Range (inclusive) | `0..=10` (0 to 10)          |
+| `=>`     | Arrow             | Lambda, match arm           |
+| `->`     | Return type       | Function signature          |
+| `<-`     | Receive           | Channel receive             |
 
 ### 8.7 Punctuation
 
-| Symbol | Name | Usage |
-|--------|------|-------|
-| `{` `}` | Braces | Blocks, objects |
-| `(` `)` | Parentheses | Grouping, calls |
-| `[` `]` | Brackets | Arrays, indexing |
-| `;` | Semicolon | Statement terminator |
-| `:` | Colon | Type annotations |
-| `,` | Comma | Separator |
-| `.` | Dot | Member access |
-| `@` | At | Decorators/attributes |
-| `#` | Hash | Compiler directives |
-| `$` | Dollar | Interpolation prefix |
-| `_` | Underscore | Discard, wildcards |
+| Symbol  | Name        | Usage                 |
+| ------- | ----------- | --------------------- |
+| `{` `}` | Braces      | Blocks, objects       |
+| `(` `)` | Parentheses | Grouping, calls       |
+| `[` `]` | Brackets    | Arrays, indexing      |
+| `;`     | Semicolon   | Statement terminator  |
+| `:`     | Colon       | Type annotations      |
+| `,`     | Comma       | Separator             |
+| `.`     | Dot         | Member access         |
+| `@`     | At          | Decorators/attributes |
+| `#`     | Hash        | Compiler directives   |
+| `$`     | Dollar      | Interpolation prefix  |
+| `_`     | Underscore  | Discard, wildcards    |
 
 ### 8.8 Operator Precedence
 
 From highest to lowest precedence:
 
-| Level | Operators | Associativity |
-|-------|-----------|---------------|
-| 1 | `()` `[]` `.` `?.` `!` (postfix) | Left |
-| 2 | `!` `-` `~` (prefix) | Right |
-| 3 | `**` | Right |
-| 4 | `*` `/` `%` | Left |
-| 5 | `+` `-` | Left |
-| 6 | `<<` `>>` `>>>` | Left |
-| 7 | `<` `<=` `>` `>=` | Left |
-| 8 | `==` `!=` | Left |
-| 9 | `&` | Left |
-| 10 | `^` | Left |
-| 11 | `\|` | Left |
-| 12 | `&&` | Left |
-| 13 | `\|\|` | Left |
-| 14 | `??` `?:` | Right |
-| 15 | `..` `..=` | None |
-| 16 | `=` `+=` `-=` etc. | Right |
-| 17 | `=>` | Right |
+| Level | Operators                        | Associativity |
+| ----- | -------------------------------- | ------------- |
+| 1     | `()` `[]` `.` `?.` `!` (postfix) | Left          |
+| 2     | `!` `-` `~` (prefix)             | Right         |
+| 3     | `**`                             | Right         |
+| 4     | `*` `/` `%`                      | Left          |
+| 5     | `+` `-`                          | Left          |
+| 6     | `<<` `>>` `>>>`                  | Left          |
+| 7     | `<` `<=` `>` `>=`                | Left          |
+| 8     | `==` `!=`                        | Left          |
+| 9     | `&`                              | Left          |
+| 10    | `^`                              | Left          |
+| 11    | `\|`                             | Left          |
+| 12    | `&&`                             | Left          |
+| 13    | `\|\|`                           | Left          |
+| 14    | `??` `?:`                        | Right         |
+| 15    | `..` `..=`                       | None          |
+| 16    | `=` `+=` `-=` etc.               | Right         |
+| 17    | `=>`                             | Right         |
 
 ---
 
@@ -845,6 +865,7 @@ InComment:
 ### 9.3 Error Recovery
 
 The lexer reports errors for:
+
 - Unterminated strings
 - Invalid escape sequences
 - Invalid number formats
@@ -852,6 +873,7 @@ The lexer reports errors for:
 - Unterminated comments
 
 After an error, the lexer attempts to recover by:
+
 1. Skipping to the next whitespace or newline
 2. Emitting an error token
 3. Continuing lexing from the recovery point
@@ -859,11 +881,13 @@ After an error, the lexer attempts to recover by:
 ### 9.4 Example Tokenization
 
 Input:
+
 ```li
 let x = 42 + 3.14
 ```
 
 Tokens:
+
 ```
 [
   Token(LET, "let", line=1, col=1),
@@ -880,24 +904,24 @@ Tokens:
 
 ## Appendix A: ASCII Character Classification
 
-| Range | Classification |
-|-------|----------------|
-| 0x00-0x08 | Invalid |
-| 0x09 | Whitespace (tab) |
-| 0x0A | Newline |
-| 0x0B-0x0C | Invalid |
-| 0x0D | Newline (CR) |
-| 0x0E-0x1F | Invalid |
-| 0x20 | Whitespace (space) |
+| Range     | Classification        |
+| --------- | --------------------- |
+| 0x00-0x08 | Invalid               |
+| 0x09      | Whitespace (tab)      |
+| 0x0A      | Newline               |
+| 0x0B-0x0C | Invalid               |
+| 0x0D      | Newline (CR)          |
+| 0x0E-0x1F | Invalid               |
+| 0x20      | Whitespace (space)    |
 | 0x21-0x2F | Operators/Punctuation |
-| 0x30-0x39 | Digits |
+| 0x30-0x39 | Digits                |
 | 0x3A-0x40 | Operators/Punctuation |
-| 0x41-0x5A | Letters (uppercase) |
+| 0x41-0x5A | Letters (uppercase)   |
 | 0x5B-0x60 | Operators/Punctuation |
-| 0x61-0x7A | Letters (lowercase) |
+| 0x61-0x7A | Letters (lowercase)   |
 | 0x7B-0x7E | Operators/Punctuation |
-| 0x7F | Invalid |
-| 0x80+ | Unicode (extended) |
+| 0x7F      | Invalid               |
+| 0x80+     | Unicode (extended)    |
 
 ---
 
@@ -921,4 +945,4 @@ Tokens:
 
 ---
 
-*This document is part of the Lira Language Specification.*
+_This document is part of the Lira Language Specification._

@@ -2,11 +2,11 @@
 
 ## Document Information
 
-| Property | Value |
-|----------|-------|
-| **Document ID** | 03-syntax-constructs |
-| **Version** | 1.0.0-draft |
-| **Status** | Draft Specification |
+| Property          | Value                            |
+| ----------------- | -------------------------------- |
+| **Document ID**   | 03-syntax-constructs             |
+| **Version**       | 1.0.0-draft                      |
+| **Status**        | Draft Specification              |
 | **Prerequisites** | 00-02 (overview, lexical, types) |
 
 ---
@@ -1618,4 +1618,4 @@ PrimaryExpr     ::= Literal | Identifier | '(' Expression ')' | IfExpr
 
 ---
 
-*This document is part of the Lira Language Specification.*
+_This document is part of the Lira Language Specification._

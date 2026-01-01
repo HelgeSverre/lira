@@ -2,12 +2,12 @@
 
 ## Document Information
 
-| Property | Value |
-|----------|-------|
-| **Document ID** | 11-instruction-set |
-| **Version** | 1.0.0-draft |
-| **Status** | Draft Specification |
-| **Prerequisites** | 10-bytecode-format |
+| Property          | Value               |
+| ----------------- | ------------------- |
+| **Document ID**   | 11-instruction-set  |
+| **Version**       | 1.0.0-draft         |
+| **Status**        | Draft Specification |
+| **Prerequisites** | 10-bytecode-format  |
 
 ---
 
@@ -67,6 +67,7 @@ All values on the stack and in locals are 64-bit using NaN-boxing:
 ### 1.3 Notation
 
 Stack effects are shown as:
+
 ```
 ( before -- after )
 ```
@@ -93,36 +94,36 @@ Stack top is rightmost.
 
 ### 2.2 Operand Types
 
-| Type | Size | Description |
-|------|------|-------------|
-| `u8` | 1 | Unsigned 8-bit |
-| `i8` | 1 | Signed 8-bit |
-| `u16` | 2 | Unsigned 16-bit (little-endian) |
-| `i16` | 2 | Signed 16-bit (little-endian) |
-| `u32` | 4 | Unsigned 32-bit (little-endian) |
-| `i32` | 4 | Signed 32-bit (little-endian) |
+| Type  | Size | Description                     |
+| ----- | ---- | ------------------------------- |
+| `u8`  | 1    | Unsigned 8-bit                  |
+| `i8`  | 1    | Signed 8-bit                    |
+| `u16` | 2    | Unsigned 16-bit (little-endian) |
+| `i16` | 2    | Signed 16-bit (little-endian)   |
+| `u32` | 4    | Unsigned 32-bit (little-endian) |
+| `i32` | 4    | Signed 32-bit (little-endian)   |
 
 ### 2.3 Opcode Ranges
 
-| Range | Category |
-|-------|----------|
-| 0x00-0x0F | Stack Operations |
-| 0x10-0x1F | Local Variables |
-| 0x20-0x2F | Constants |
-| 0x30-0x4F | Arithmetic |
-| 0x50-0x5F | Bitwise |
-| 0x60-0x6F | Comparison |
-| 0x70-0x7F | Type Conversion |
-| 0x80-0x8F | Control Flow |
+| Range     | Category            |
+| --------- | ------------------- |
+| 0x00-0x0F | Stack Operations    |
+| 0x10-0x1F | Local Variables     |
+| 0x20-0x2F | Constants           |
+| 0x30-0x4F | Arithmetic          |
+| 0x50-0x5F | Bitwise             |
+| 0x60-0x6F | Comparison          |
+| 0x70-0x7F | Type Conversion     |
+| 0x80-0x8F | Control Flow        |
 | 0x90-0x9F | Function Operations |
-| 0xA0-0xAF | Object Operations |
-| 0xB0-0xBF | Array Operations |
-| 0xC0-0xCF | String Operations |
-| 0xD0-0xD7 | Reference Counting |
-| 0xD8-0xDF | Channel Operations |
-| 0xE0-0xE7 | Fiber Operations |
-| 0xE8-0xEF | Syscall Operations |
-| 0xF0-0xFF | Miscellaneous |
+| 0xA0-0xAF | Object Operations   |
+| 0xB0-0xBF | Array Operations    |
+| 0xC0-0xCF | String Operations   |
+| 0xD0-0xD7 | Reference Counting  |
+| 0xD8-0xDF | Channel Operations  |
+| 0xE0-0xE7 | Fiber Operations    |
+| 0xE8-0xEF | Syscall Operations  |
+| 0xF0-0xFF | Miscellaneous       |
 
 ---
 
@@ -2481,238 +2482,238 @@ Effect:  Trigger illegal instruction error
 
 ### 20.1 Complete Opcode Listing
 
-| Opcode | Mnemonic | Operands | Stack Effect |
-|--------|----------|----------|--------------|
-| **Stack Operations (0x00-0x0F)** ||||
-| 0x00 | NOP | - | ( -- ) |
-| 0x01 | POP | - | ( v -- ) |
-| 0x02 | POP2 | - | ( v1 v2 -- ) |
-| 0x03 | DUP | - | ( v -- v v ) |
-| 0x04 | DUP2 | - | ( v1 v2 -- v1 v2 v1 v2 ) |
-| 0x05 | DUP_X1 | - | ( v1 v2 -- v2 v1 v2 ) |
-| 0x06 | DUP_X2 | - | ( v1 v2 v3 -- v3 v1 v2 v3 ) |
-| 0x07 | SWAP | - | ( v1 v2 -- v2 v1 ) |
-| 0x08 | ROT | - | ( v1 v2 v3 -- v2 v3 v1 ) |
-| 0x09 | OVER | - | ( v1 v2 -- v1 v2 v1 ) |
-| **Local Variables (0x10-0x1F)** ||||
-| 0x10 | LOAD | u8 | ( -- v ) |
-| 0x11 | LOAD_W | u16 | ( -- v ) |
-| 0x12 | LOAD_0 | - | ( -- v ) |
-| 0x13 | LOAD_1 | - | ( -- v ) |
-| 0x14 | LOAD_2 | - | ( -- v ) |
-| 0x15 | LOAD_3 | - | ( -- v ) |
-| 0x16 | STORE | u8 | ( v -- ) |
-| 0x17 | STORE_W | u16 | ( v -- ) |
-| 0x18 | STORE_0 | - | ( v -- ) |
-| 0x19 | STORE_1 | - | ( v -- ) |
-| 0x1A | STORE_2 | - | ( v -- ) |
-| 0x1B | STORE_3 | - | ( v -- ) |
-| 0x1C | IINC | u8, i8 | ( -- ) |
-| 0x1D | IINC_W | u16, i16 | ( -- ) |
-| **Constants (0x20-0x2F)** ||||
-| 0x20 | CONST_NULL | - | ( -- null ) |
-| 0x21 | CONST_TRUE | - | ( -- true ) |
-| 0x22 | CONST_FALSE | - | ( -- false ) |
-| 0x23 | CONST_I0 | - | ( -- 0 ) |
-| 0x24 | CONST_I1 | - | ( -- 1 ) |
-| 0x25 | CONST_I2 | - | ( -- 2 ) |
-| 0x26 | CONST_IM1 | - | ( -- -1 ) |
-| 0x27 | CONST_F0 | - | ( -- 0.0 ) |
-| 0x28 | CONST_F1 | - | ( -- 1.0 ) |
-| 0x29 | BIPUSH | i8 | ( -- i ) |
-| 0x2A | SIPUSH | i16 | ( -- i ) |
-| 0x2B | LDC | u8 | ( -- c ) |
-| 0x2C | LDC_W | u16 | ( -- c ) |
-| 0x2D | LDC2_W | u16 | ( -- c64 ) |
-| **Integer Arithmetic (0x30-0x3F)** ||||
-| 0x30 | IADD | - | ( a b -- a+b ) |
-| 0x31 | ISUB | - | ( a b -- a-b ) |
-| 0x32 | IMUL | - | ( a b -- a*b ) |
-| 0x33 | IDIV | - | ( a b -- a/b ) |
-| 0x34 | IREM | - | ( a b -- a%b ) |
-| 0x35 | INEG | - | ( a -- -a ) |
-| 0x36 | IABS | - | ( a -- \|a\| ) |
-| 0x37 | IMIN | - | ( a b -- min ) |
-| 0x38 | IMAX | - | ( a b -- max ) |
-| 0x39 | LADD | - | ( a b -- a+b ):i64 |
-| 0x3A | LSUB | - | ( a b -- a-b ):i64 |
-| 0x3B | LMUL | - | ( a b -- a*b ):i64 |
-| 0x3C | LDIV | - | ( a b -- a/b ):i64 |
-| 0x3D | LREM | - | ( a b -- a%b ):i64 |
-| 0x3E | LNEG | - | ( a -- -a ):i64 |
-| **Float Arithmetic (0x40-0x4F)** ||||
-| 0x40 | FADD | - | ( a b -- a+b ):f32 |
-| 0x41 | FSUB | - | ( a b -- a-b ):f32 |
-| 0x42 | FMUL | - | ( a b -- a*b ):f32 |
-| 0x43 | FDIV | - | ( a b -- a/b ):f32 |
-| 0x44 | FREM | - | ( a b -- a%b ):f32 |
-| 0x45 | FNEG | - | ( a -- -a ):f32 |
-| 0x46 | DADD | - | ( a b -- a+b ):f64 |
-| 0x47 | DSUB | - | ( a b -- a-b ):f64 |
-| 0x48 | DMUL | - | ( a b -- a*b ):f64 |
-| 0x49 | DDIV | - | ( a b -- a/b ):f64 |
-| 0x4A | DREM | - | ( a b -- a%b ):f64 |
-| 0x4B | DNEG | - | ( a -- -a ):f64 |
-| 0x4C | DABS | - | ( a -- \|a\| ):f64 |
-| 0x4D | DSQRT | - | ( a -- sqrt(a) ):f64 |
-| 0x4E | DMIN | - | ( a b -- min ):f64 |
-| 0x4F | DMAX | - | ( a b -- max ):f64 |
-| **Bitwise Operations (0x50-0x5F)** ||||
-| 0x50 | IAND | - | ( a b -- a&b ) |
-| 0x51 | IOR | - | ( a b -- a\|b ) |
-| 0x52 | IXOR | - | ( a b -- a^b ) |
-| 0x53 | INOT | - | ( a -- ~a ) |
-| 0x54 | ISHL | - | ( a n -- a<<n ) |
-| 0x55 | ISHR | - | ( a n -- a>>n ) |
-| 0x56 | IUSHR | - | ( a n -- a>>>n ) |
-| 0x57 | LAND | - | ( a b -- a&b ):i64 |
-| 0x58 | LOR | - | ( a b -- a\|b ):i64 |
-| 0x59 | LXOR | - | ( a b -- a^b ):i64 |
-| 0x5A | LNOT | - | ( a -- ~a ):i64 |
-| 0x5B | LSHL | - | ( a n -- a<<n ):i64 |
-| 0x5C | LSHR | - | ( a n -- a>>n ):i64 |
-| 0x5D | LUSHR | - | ( a n -- a>>>n ):i64 |
-| **Comparison (0x60-0x6F)** ||||
-| 0x60 | ICMP_EQ | - | ( a b -- a==b ) |
-| 0x61 | ICMP_NE | - | ( a b -- a!=b ) |
-| 0x62 | ICMP_LT | - | ( a b -- a<b ) |
-| 0x63 | ICMP_LE | - | ( a b -- a<=b ) |
-| 0x64 | ICMP_GT | - | ( a b -- a>b ) |
-| 0x65 | ICMP_GE | - | ( a b -- a>=b ) |
-| 0x66 | DCMP_EQ | - | ( a b -- a==b ):f64 |
-| 0x67 | DCMP_NE | - | ( a b -- a!=b ):f64 |
-| 0x68 | DCMP_LT | - | ( a b -- a<b ):f64 |
-| 0x69 | DCMP_LE | - | ( a b -- a<=b ):f64 |
-| 0x6A | DCMP_GT | - | ( a b -- a>b ):f64 |
-| 0x6B | DCMP_GE | - | ( a b -- a>=b ):f64 |
-| 0x6C | REF_EQ | - | ( r1 r2 -- r1===r2 ) |
-| 0x6D | REF_NE | - | ( r1 r2 -- r1!==r2 ) |
-| 0x6E | IS_NULL | - | ( v -- v==null ) |
-| 0x6F | IS_NOT_NULL | - | ( v -- v!=null ) |
-| **Type Conversion (0x70-0x7F)** ||||
-| 0x70 | I2L | - | ( i -- l ) |
-| 0x71 | I2F | - | ( i -- f ) |
-| 0x72 | I2D | - | ( i -- d ) |
-| 0x73 | L2I | - | ( l -- i ) |
-| 0x74 | L2F | - | ( l -- f ) |
-| 0x75 | L2D | - | ( l -- d ) |
-| 0x76 | F2I | - | ( f -- i ) |
-| 0x77 | F2L | - | ( f -- l ) |
-| 0x78 | F2D | - | ( f -- d ) |
-| 0x79 | D2I | - | ( d -- i ) |
-| 0x7A | D2L | - | ( d -- l ) |
-| 0x7B | D2F | - | ( d -- f ) |
-| 0x7C | I2B | - | ( i -- b ) |
-| 0x7D | I2S | - | ( i -- s ) |
-| 0x7E | I2C | - | ( i -- c ) |
-| **Control Flow (0x80-0x8F)** ||||
-| 0x80 | GOTO | i16 | ( -- ) |
-| 0x81 | GOTO_W | i32 | ( -- ) |
-| 0x82 | IF_TRUE | i16 | ( c -- ) |
-| 0x83 | IF_FALSE | i16 | ( c -- ) |
-| 0x84 | IF_NULL | i16 | ( v -- ) |
-| 0x85 | IF_NOT_NULL | i16 | ( v -- ) |
-| 0x86 | IF_ICMP_EQ | i16 | ( a b -- ) |
-| 0x87 | IF_ICMP_NE | i16 | ( a b -- ) |
-| 0x88 | IF_ICMP_LT | i16 | ( a b -- ) |
-| 0x89 | IF_ICMP_LE | i16 | ( a b -- ) |
-| 0x8A | IF_ICMP_GT | i16 | ( a b -- ) |
-| 0x8B | IF_ICMP_GE | i16 | ( a b -- ) |
-| 0x8C | TABLESWITCH | ... | ( i -- ) |
-| 0x8D | LOOKUPSWITCH | ... | ( k -- ) |
-| **Function Operations (0x90-0x9F)** ||||
-| 0x90 | INVOKE | u16 | ( args -- r ) |
-| 0x91 | INVOKE_VIRTUAL | u16 | ( rcv args -- r ) |
-| 0x92 | INVOKE_INTERFACE | u16, u8 | ( rcv args -- r ) |
-| 0x93 | INVOKE_STATIC | u16, u16 | ( args -- r ) |
-| 0x94 | INVOKE_SPECIAL | u16 | ( rcv args -- r ) |
-| 0x95 | INVOKE_DYNAMIC | u16 | ( t args -- r ) |
-| 0x96 | RETURN | - | ( v -- ) |
-| 0x97 | RETURN_VOID | - | ( -- ) |
-| 0x98 | TAILCALL | u16 | ( args -- ) |
-| **Object Operations (0xA0-0xAF)** ||||
-| 0xA0 | NEW | u16 | ( -- obj ) |
-| 0xA1 | GET_FIELD | u16 | ( obj -- v ) |
-| 0xA2 | PUT_FIELD | u16 | ( obj v -- ) |
-| 0xA3 | GET_STATIC | u16, u16 | ( -- v ) |
-| 0xA4 | PUT_STATIC | u16, u16 | ( v -- ) |
-| 0xA5 | INSTANCEOF | u16 | ( obj -- b ) |
-| 0xA6 | CHECKCAST | u16 | ( obj -- obj ) |
-| 0xA7 | GET_TYPE | - | ( obj -- t ) |
-| 0xA8 | EQUALS | - | ( o1 o2 -- b ) |
-| 0xA9 | HASHCODE | - | ( obj -- h ) |
-| 0xAA | TOSTRING | - | ( obj -- s ) |
-| 0xAB | CLONE | - | ( obj -- cp ) |
-| **Array Operations (0xB0-0xBF)** ||||
-| 0xB0 | NEWARRAY | u8 | ( len -- arr ) |
-| 0xB1 | ANEWARRAY | u16 | ( len -- arr ) |
-| 0xB2 | ARRAYLENGTH | - | ( arr -- len ) |
-| 0xB3 | ALOAD | - | ( arr i -- v ) |
-| 0xB4 | ASTORE | - | ( arr i v -- ) |
-| 0xB5 | IALOAD | - | ( arr i -- v ) |
-| 0xB6 | IASTORE | - | ( arr i v -- ) |
-| 0xB7 | DALOAD | - | ( arr i -- v ) |
-| 0xB8 | DASTORE | - | ( arr i v -- ) |
-| 0xB9 | AALOAD | - | ( arr i -- o ) |
-| 0xBA | AASTORE | - | ( arr i o -- ) |
-| 0xBB | ARRAY_COPY | - | ( s sp d dp l -- ) |
-| 0xBC | ARRAY_FILL | - | ( arr v -- ) |
-| **String Operations (0xC0-0xCF)** ||||
-| 0xC0 | STR_CONCAT | - | ( s1 s2 -- r ) |
-| 0xC1 | STR_LENGTH | - | ( s -- l ) |
-| 0xC2 | STR_CHAR_AT | - | ( s i -- c ) |
-| 0xC3 | STR_SUBSTRING | - | ( s a b -- r ) |
-| 0xC4 | STR_EQUALS | - | ( s1 s2 -- b ) |
-| 0xC5 | STR_COMPARE | - | ( s1 s2 -- i ) |
-| 0xC6 | STR_CONTAINS | - | ( s p -- b ) |
-| 0xC7 | STR_INDEX_OF | - | ( s p -- i ) |
-| 0xC8 | STR_STARTS_WITH | - | ( s p -- b ) |
-| 0xC9 | STR_ENDS_WITH | - | ( s p -- b ) |
-| 0xCA | STR_TRIM | - | ( s -- r ) |
-| 0xCB | STR_TO_UPPER | - | ( s -- r ) |
-| 0xCC | STR_TO_LOWER | - | ( s -- r ) |
-| 0xCD | STR_SPLIT | - | ( s d -- a ) |
-| 0xCE | STR_JOIN | - | ( a d -- s ) |
-| 0xCF | STR_FORMAT | u8 | ( f args -- r ) |
-| **Reference Counting (0xD0-0xD7)** ||||
-| 0xD0 | INC_REF | - | ( o -- o ) |
-| 0xD1 | DEC_REF | - | ( o -- ) |
-| 0xD2 | MOVE | - | ( o -- o ) |
-| 0xD3 | WEAK_REF | - | ( o -- w ) |
-| 0xD4 | WEAK_DEREF | - | ( w -- o? ) |
-| 0xD5 | CYCLE_COLLECT | - | ( -- ) |
-| **Channel Operations (0xD8-0xDF)** ||||
-| 0xD8 | CHAN_NEW | - | ( cap -- ch ) |
-| 0xD9 | CHAN_SEND | - | ( ch v -- ) |
-| 0xDA | CHAN_RECV | - | ( ch -- v ) |
-| 0xDB | CHAN_TRY_SEND | - | ( ch v -- b ) |
-| 0xDC | CHAN_TRY_RECV | - | ( ch -- v? b ) |
-| 0xDD | CHAN_CLOSE | - | ( ch -- ) |
-| 0xDE | SELECT | u8, ... | ( chs... -- i r? ) |
-| 0xDF | CHAN_LEN | - | ( ch -- l ) |
-| **Fiber Operations (0xE0-0xE7)** ||||
-| 0xE0 | FIBER_SPAWN | u16 | ( args -- f ) |
-| 0xE1 | FIBER_YIELD | - | ( -- ) |
-| 0xE2 | FIBER_RESUME | - | ( f -- ) |
-| 0xE3 | FIBER_JOIN | - | ( f -- r ) |
-| 0xE4 | FIBER_CURRENT | - | ( -- f ) |
-| 0xE5 | FIBER_STATUS | - | ( f -- s ) |
-| 0xE6 | FIBER_CANCEL | - | ( f -- ) |
-| 0xE7 | FIBER_SLEEP | - | ( ms -- ) |
-| **Syscall Operations (0xE8-0xEF)** ||||
-| 0xE8 | SYSCALL | u16 | ( args -- r ) |
-| 0xE9 | SYSCALL_FAST | u8 | ( a1 a2 -- r ) |
-| **Miscellaneous (0xF0-0xFF)** ||||
-| 0xF0 | THROW | - | ( e -- ) |
-| 0xF1 | RETHROW | - | ( -- ) |
-| 0xF2 | MONITOR_ENTER | - | ( o -- ) |
-| 0xF3 | MONITOR_EXIT | - | ( o -- ) |
-| 0xF4 | BREAKPOINT | - | ( -- ) |
-| 0xF5 | ASSERT | - | ( c m -- ) |
-| 0xF6 | PRINT_DEBUG | - | ( v -- ) |
-| 0xF7 | LINE_NUMBER | u16 | ( -- ) |
-| 0xFE | WIDE | u8, ... | varies |
-| 0xFF | ILLEGAL | - | error |
+| Opcode                              | Mnemonic         | Operands | Stack Effect                |
+| ----------------------------------- | ---------------- | -------- | --------------------------- |
+| **Stack Operations (0x00-0x0F)**    |                  |          |                             |
+| 0x00                                | NOP              | -        | ( -- )                      |
+| 0x01                                | POP              | -        | ( v -- )                    |
+| 0x02                                | POP2             | -        | ( v1 v2 -- )                |
+| 0x03                                | DUP              | -        | ( v -- v v )                |
+| 0x04                                | DUP2             | -        | ( v1 v2 -- v1 v2 v1 v2 )    |
+| 0x05                                | DUP_X1           | -        | ( v1 v2 -- v2 v1 v2 )       |
+| 0x06                                | DUP_X2           | -        | ( v1 v2 v3 -- v3 v1 v2 v3 ) |
+| 0x07                                | SWAP             | -        | ( v1 v2 -- v2 v1 )          |
+| 0x08                                | ROT              | -        | ( v1 v2 v3 -- v2 v3 v1 )    |
+| 0x09                                | OVER             | -        | ( v1 v2 -- v1 v2 v1 )       |
+| **Local Variables (0x10-0x1F)**     |                  |          |                             |
+| 0x10                                | LOAD             | u8       | ( -- v )                    |
+| 0x11                                | LOAD_W           | u16      | ( -- v )                    |
+| 0x12                                | LOAD_0           | -        | ( -- v )                    |
+| 0x13                                | LOAD_1           | -        | ( -- v )                    |
+| 0x14                                | LOAD_2           | -        | ( -- v )                    |
+| 0x15                                | LOAD_3           | -        | ( -- v )                    |
+| 0x16                                | STORE            | u8       | ( v -- )                    |
+| 0x17                                | STORE_W          | u16      | ( v -- )                    |
+| 0x18                                | STORE_0          | -        | ( v -- )                    |
+| 0x19                                | STORE_1          | -        | ( v -- )                    |
+| 0x1A                                | STORE_2          | -        | ( v -- )                    |
+| 0x1B                                | STORE_3          | -        | ( v -- )                    |
+| 0x1C                                | IINC             | u8, i8   | ( -- )                      |
+| 0x1D                                | IINC_W           | u16, i16 | ( -- )                      |
+| **Constants (0x20-0x2F)**           |                  |          |                             |
+| 0x20                                | CONST_NULL       | -        | ( -- null )                 |
+| 0x21                                | CONST_TRUE       | -        | ( -- true )                 |
+| 0x22                                | CONST_FALSE      | -        | ( -- false )                |
+| 0x23                                | CONST_I0         | -        | ( -- 0 )                    |
+| 0x24                                | CONST_I1         | -        | ( -- 1 )                    |
+| 0x25                                | CONST_I2         | -        | ( -- 2 )                    |
+| 0x26                                | CONST_IM1        | -        | ( -- -1 )                   |
+| 0x27                                | CONST_F0         | -        | ( -- 0.0 )                  |
+| 0x28                                | CONST_F1         | -        | ( -- 1.0 )                  |
+| 0x29                                | BIPUSH           | i8       | ( -- i )                    |
+| 0x2A                                | SIPUSH           | i16      | ( -- i )                    |
+| 0x2B                                | LDC              | u8       | ( -- c )                    |
+| 0x2C                                | LDC_W            | u16      | ( -- c )                    |
+| 0x2D                                | LDC2_W           | u16      | ( -- c64 )                  |
+| **Integer Arithmetic (0x30-0x3F)**  |                  |          |                             |
+| 0x30                                | IADD             | -        | ( a b -- a+b )              |
+| 0x31                                | ISUB             | -        | ( a b -- a-b )              |
+| 0x32                                | IMUL             | -        | ( a b -- a\*b )             |
+| 0x33                                | IDIV             | -        | ( a b -- a/b )              |
+| 0x34                                | IREM             | -        | ( a b -- a%b )              |
+| 0x35                                | INEG             | -        | ( a -- -a )                 |
+| 0x36                                | IABS             | -        | ( a -- \|a\| )              |
+| 0x37                                | IMIN             | -        | ( a b -- min )              |
+| 0x38                                | IMAX             | -        | ( a b -- max )              |
+| 0x39                                | LADD             | -        | ( a b -- a+b ):i64          |
+| 0x3A                                | LSUB             | -        | ( a b -- a-b ):i64          |
+| 0x3B                                | LMUL             | -        | ( a b -- a\*b ):i64         |
+| 0x3C                                | LDIV             | -        | ( a b -- a/b ):i64          |
+| 0x3D                                | LREM             | -        | ( a b -- a%b ):i64          |
+| 0x3E                                | LNEG             | -        | ( a -- -a ):i64             |
+| **Float Arithmetic (0x40-0x4F)**    |                  |          |                             |
+| 0x40                                | FADD             | -        | ( a b -- a+b ):f32          |
+| 0x41                                | FSUB             | -        | ( a b -- a-b ):f32          |
+| 0x42                                | FMUL             | -        | ( a b -- a\*b ):f32         |
+| 0x43                                | FDIV             | -        | ( a b -- a/b ):f32          |
+| 0x44                                | FREM             | -        | ( a b -- a%b ):f32          |
+| 0x45                                | FNEG             | -        | ( a -- -a ):f32             |
+| 0x46                                | DADD             | -        | ( a b -- a+b ):f64          |
+| 0x47                                | DSUB             | -        | ( a b -- a-b ):f64          |
+| 0x48                                | DMUL             | -        | ( a b -- a\*b ):f64         |
+| 0x49                                | DDIV             | -        | ( a b -- a/b ):f64          |
+| 0x4A                                | DREM             | -        | ( a b -- a%b ):f64          |
+| 0x4B                                | DNEG             | -        | ( a -- -a ):f64             |
+| 0x4C                                | DABS             | -        | ( a -- \|a\| ):f64          |
+| 0x4D                                | DSQRT            | -        | ( a -- sqrt(a) ):f64        |
+| 0x4E                                | DMIN             | -        | ( a b -- min ):f64          |
+| 0x4F                                | DMAX             | -        | ( a b -- max ):f64          |
+| **Bitwise Operations (0x50-0x5F)**  |                  |          |                             |
+| 0x50                                | IAND             | -        | ( a b -- a&b )              |
+| 0x51                                | IOR              | -        | ( a b -- a\|b )             |
+| 0x52                                | IXOR             | -        | ( a b -- a^b )              |
+| 0x53                                | INOT             | -        | ( a -- ~a )                 |
+| 0x54                                | ISHL             | -        | ( a n -- a<<n )             |
+| 0x55                                | ISHR             | -        | ( a n -- a>>n )             |
+| 0x56                                | IUSHR            | -        | ( a n -- a>>>n )            |
+| 0x57                                | LAND             | -        | ( a b -- a&b ):i64          |
+| 0x58                                | LOR              | -        | ( a b -- a\|b ):i64         |
+| 0x59                                | LXOR             | -        | ( a b -- a^b ):i64          |
+| 0x5A                                | LNOT             | -        | ( a -- ~a ):i64             |
+| 0x5B                                | LSHL             | -        | ( a n -- a<<n ):i64         |
+| 0x5C                                | LSHR             | -        | ( a n -- a>>n ):i64         |
+| 0x5D                                | LUSHR            | -        | ( a n -- a>>>n ):i64        |
+| **Comparison (0x60-0x6F)**          |                  |          |                             |
+| 0x60                                | ICMP_EQ          | -        | ( a b -- a==b )             |
+| 0x61                                | ICMP_NE          | -        | ( a b -- a!=b )             |
+| 0x62                                | ICMP_LT          | -        | ( a b -- a<b )              |
+| 0x63                                | ICMP_LE          | -        | ( a b -- a<=b )             |
+| 0x64                                | ICMP_GT          | -        | ( a b -- a>b )              |
+| 0x65                                | ICMP_GE          | -        | ( a b -- a>=b )             |
+| 0x66                                | DCMP_EQ          | -        | ( a b -- a==b ):f64         |
+| 0x67                                | DCMP_NE          | -        | ( a b -- a!=b ):f64         |
+| 0x68                                | DCMP_LT          | -        | ( a b -- a<b ):f64          |
+| 0x69                                | DCMP_LE          | -        | ( a b -- a<=b ):f64         |
+| 0x6A                                | DCMP_GT          | -        | ( a b -- a>b ):f64          |
+| 0x6B                                | DCMP_GE          | -        | ( a b -- a>=b ):f64         |
+| 0x6C                                | REF_EQ           | -        | ( r1 r2 -- r1===r2 )        |
+| 0x6D                                | REF_NE           | -        | ( r1 r2 -- r1!==r2 )        |
+| 0x6E                                | IS_NULL          | -        | ( v -- v==null )            |
+| 0x6F                                | IS_NOT_NULL      | -        | ( v -- v!=null )            |
+| **Type Conversion (0x70-0x7F)**     |                  |          |                             |
+| 0x70                                | I2L              | -        | ( i -- l )                  |
+| 0x71                                | I2F              | -        | ( i -- f )                  |
+| 0x72                                | I2D              | -        | ( i -- d )                  |
+| 0x73                                | L2I              | -        | ( l -- i )                  |
+| 0x74                                | L2F              | -        | ( l -- f )                  |
+| 0x75                                | L2D              | -        | ( l -- d )                  |
+| 0x76                                | F2I              | -        | ( f -- i )                  |
+| 0x77                                | F2L              | -        | ( f -- l )                  |
+| 0x78                                | F2D              | -        | ( f -- d )                  |
+| 0x79                                | D2I              | -        | ( d -- i )                  |
+| 0x7A                                | D2L              | -        | ( d -- l )                  |
+| 0x7B                                | D2F              | -        | ( d -- f )                  |
+| 0x7C                                | I2B              | -        | ( i -- b )                  |
+| 0x7D                                | I2S              | -        | ( i -- s )                  |
+| 0x7E                                | I2C              | -        | ( i -- c )                  |
+| **Control Flow (0x80-0x8F)**        |                  |          |                             |
+| 0x80                                | GOTO             | i16      | ( -- )                      |
+| 0x81                                | GOTO_W           | i32      | ( -- )                      |
+| 0x82                                | IF_TRUE          | i16      | ( c -- )                    |
+| 0x83                                | IF_FALSE         | i16      | ( c -- )                    |
+| 0x84                                | IF_NULL          | i16      | ( v -- )                    |
+| 0x85                                | IF_NOT_NULL      | i16      | ( v -- )                    |
+| 0x86                                | IF_ICMP_EQ       | i16      | ( a b -- )                  |
+| 0x87                                | IF_ICMP_NE       | i16      | ( a b -- )                  |
+| 0x88                                | IF_ICMP_LT       | i16      | ( a b -- )                  |
+| 0x89                                | IF_ICMP_LE       | i16      | ( a b -- )                  |
+| 0x8A                                | IF_ICMP_GT       | i16      | ( a b -- )                  |
+| 0x8B                                | IF_ICMP_GE       | i16      | ( a b -- )                  |
+| 0x8C                                | TABLESWITCH      | ...      | ( i -- )                    |
+| 0x8D                                | LOOKUPSWITCH     | ...      | ( k -- )                    |
+| **Function Operations (0x90-0x9F)** |                  |          |                             |
+| 0x90                                | INVOKE           | u16      | ( args -- r )               |
+| 0x91                                | INVOKE_VIRTUAL   | u16      | ( rcv args -- r )           |
+| 0x92                                | INVOKE_INTERFACE | u16, u8  | ( rcv args -- r )           |
+| 0x93                                | INVOKE_STATIC    | u16, u16 | ( args -- r )               |
+| 0x94                                | INVOKE_SPECIAL   | u16      | ( rcv args -- r )           |
+| 0x95                                | INVOKE_DYNAMIC   | u16      | ( t args -- r )             |
+| 0x96                                | RETURN           | -        | ( v -- )                    |
+| 0x97                                | RETURN_VOID      | -        | ( -- )                      |
+| 0x98                                | TAILCALL         | u16      | ( args -- )                 |
+| **Object Operations (0xA0-0xAF)**   |                  |          |                             |
+| 0xA0                                | NEW              | u16      | ( -- obj )                  |
+| 0xA1                                | GET_FIELD        | u16      | ( obj -- v )                |
+| 0xA2                                | PUT_FIELD        | u16      | ( obj v -- )                |
+| 0xA3                                | GET_STATIC       | u16, u16 | ( -- v )                    |
+| 0xA4                                | PUT_STATIC       | u16, u16 | ( v -- )                    |
+| 0xA5                                | INSTANCEOF       | u16      | ( obj -- b )                |
+| 0xA6                                | CHECKCAST        | u16      | ( obj -- obj )              |
+| 0xA7                                | GET_TYPE         | -        | ( obj -- t )                |
+| 0xA8                                | EQUALS           | -        | ( o1 o2 -- b )              |
+| 0xA9                                | HASHCODE         | -        | ( obj -- h )                |
+| 0xAA                                | TOSTRING         | -        | ( obj -- s )                |
+| 0xAB                                | CLONE            | -        | ( obj -- cp )               |
+| **Array Operations (0xB0-0xBF)**    |                  |          |                             |
+| 0xB0                                | NEWARRAY         | u8       | ( len -- arr )              |
+| 0xB1                                | ANEWARRAY        | u16      | ( len -- arr )              |
+| 0xB2                                | ARRAYLENGTH      | -        | ( arr -- len )              |
+| 0xB3                                | ALOAD            | -        | ( arr i -- v )              |
+| 0xB4                                | ASTORE           | -        | ( arr i v -- )              |
+| 0xB5                                | IALOAD           | -        | ( arr i -- v )              |
+| 0xB6                                | IASTORE          | -        | ( arr i v -- )              |
+| 0xB7                                | DALOAD           | -        | ( arr i -- v )              |
+| 0xB8                                | DASTORE          | -        | ( arr i v -- )              |
+| 0xB9                                | AALOAD           | -        | ( arr i -- o )              |
+| 0xBA                                | AASTORE          | -        | ( arr i o -- )              |
+| 0xBB                                | ARRAY_COPY       | -        | ( s sp d dp l -- )          |
+| 0xBC                                | ARRAY_FILL       | -        | ( arr v -- )                |
+| **String Operations (0xC0-0xCF)**   |                  |          |                             |
+| 0xC0                                | STR_CONCAT       | -        | ( s1 s2 -- r )              |
+| 0xC1                                | STR_LENGTH       | -        | ( s -- l )                  |
+| 0xC2                                | STR_CHAR_AT      | -        | ( s i -- c )                |
+| 0xC3                                | STR_SUBSTRING    | -        | ( s a b -- r )              |
+| 0xC4                                | STR_EQUALS       | -        | ( s1 s2 -- b )              |
+| 0xC5                                | STR_COMPARE      | -        | ( s1 s2 -- i )              |
+| 0xC6                                | STR_CONTAINS     | -        | ( s p -- b )                |
+| 0xC7                                | STR_INDEX_OF     | -        | ( s p -- i )                |
+| 0xC8                                | STR_STARTS_WITH  | -        | ( s p -- b )                |
+| 0xC9                                | STR_ENDS_WITH    | -        | ( s p -- b )                |
+| 0xCA                                | STR_TRIM         | -        | ( s -- r )                  |
+| 0xCB                                | STR_TO_UPPER     | -        | ( s -- r )                  |
+| 0xCC                                | STR_TO_LOWER     | -        | ( s -- r )                  |
+| 0xCD                                | STR_SPLIT        | -        | ( s d -- a )                |
+| 0xCE                                | STR_JOIN         | -        | ( a d -- s )                |
+| 0xCF                                | STR_FORMAT       | u8       | ( f args -- r )             |
+| **Reference Counting (0xD0-0xD7)**  |                  |          |                             |
+| 0xD0                                | INC_REF          | -        | ( o -- o )                  |
+| 0xD1                                | DEC_REF          | -        | ( o -- )                    |
+| 0xD2                                | MOVE             | -        | ( o -- o )                  |
+| 0xD3                                | WEAK_REF         | -        | ( o -- w )                  |
+| 0xD4                                | WEAK_DEREF       | -        | ( w -- o? )                 |
+| 0xD5                                | CYCLE_COLLECT    | -        | ( -- )                      |
+| **Channel Operations (0xD8-0xDF)**  |                  |          |                             |
+| 0xD8                                | CHAN_NEW         | -        | ( cap -- ch )               |
+| 0xD9                                | CHAN_SEND        | -        | ( ch v -- )                 |
+| 0xDA                                | CHAN_RECV        | -        | ( ch -- v )                 |
+| 0xDB                                | CHAN_TRY_SEND    | -        | ( ch v -- b )               |
+| 0xDC                                | CHAN_TRY_RECV    | -        | ( ch -- v? b )              |
+| 0xDD                                | CHAN_CLOSE       | -        | ( ch -- )                   |
+| 0xDE                                | SELECT           | u8, ...  | ( chs... -- i r? )          |
+| 0xDF                                | CHAN_LEN         | -        | ( ch -- l )                 |
+| **Fiber Operations (0xE0-0xE7)**    |                  |          |                             |
+| 0xE0                                | FIBER_SPAWN      | u16      | ( args -- f )               |
+| 0xE1                                | FIBER_YIELD      | -        | ( -- )                      |
+| 0xE2                                | FIBER_RESUME     | -        | ( f -- )                    |
+| 0xE3                                | FIBER_JOIN       | -        | ( f -- r )                  |
+| 0xE4                                | FIBER_CURRENT    | -        | ( -- f )                    |
+| 0xE5                                | FIBER_STATUS     | -        | ( f -- s )                  |
+| 0xE6                                | FIBER_CANCEL     | -        | ( f -- )                    |
+| 0xE7                                | FIBER_SLEEP      | -        | ( ms -- )                   |
+| **Syscall Operations (0xE8-0xEF)**  |                  |          |                             |
+| 0xE8                                | SYSCALL          | u16      | ( args -- r )               |
+| 0xE9                                | SYSCALL_FAST     | u8       | ( a1 a2 -- r )              |
+| **Miscellaneous (0xF0-0xFF)**       |                  |          |                             |
+| 0xF0                                | THROW            | -        | ( e -- )                    |
+| 0xF1                                | RETHROW          | -        | ( -- )                      |
+| 0xF2                                | MONITOR_ENTER    | -        | ( o -- )                    |
+| 0xF3                                | MONITOR_EXIT     | -        | ( o -- )                    |
+| 0xF4                                | BREAKPOINT       | -        | ( -- )                      |
+| 0xF5                                | ASSERT           | -        | ( c m -- )                  |
+| 0xF6                                | PRINT_DEBUG      | -        | ( v -- )                    |
+| 0xF7                                | LINE_NUMBER      | u16      | ( -- )                      |
+| 0xFE                                | WIDE             | u8, ...  | varies                      |
+| 0xFF                                | ILLEGAL          | -        | error                       |
 
 ---
 
@@ -2727,6 +2728,7 @@ let c = a + b
 ```
 
 Bytecode:
+
 ```
 BIPUSH 5        ; 29 05
 STORE_0         ; 18
@@ -2749,6 +2751,7 @@ let result = add(10, 20)
 ```
 
 Bytecode (call site):
+
 ```
 BIPUSH 10       ; 29 0A
 BIPUSH 20       ; 29 14
@@ -2768,6 +2771,7 @@ let p = Point { x: 10, y: 20 }
 ```
 
 Bytecode:
+
 ```
 NEW 0           ; A0 00 00    (type index 0 = Point)
 DUP             ; 03
@@ -2790,6 +2794,7 @@ let value = ch.receive()
 ```
 
 Bytecode (main fiber):
+
 ```
 CONST_I0        ; 23          (capacity 0 = unbuffered)
 CHAN_NEW        ; D8
@@ -2812,6 +2817,7 @@ if x > 10 {
 ```
 
 Bytecode:
+
 ```
 LOAD_0          ; 12          (x)
 BIPUSH 10       ; 29 0A
@@ -2836,6 +2842,7 @@ try {
 ```
 
 Bytecode:
+
 ```
 ; Try block (offsets 0-4)
 00: INVOKE 0        ; risky_operation
@@ -2852,6 +2859,7 @@ Bytecode:
 ```
 
 Exception handler table entry:
+
 ```
 try_start:   0x00
 try_end:     0x05
@@ -2887,4 +2895,4 @@ catch_type:  0x01 (Error type index)
 
 ---
 
-*This document is part of the Lira Language Specification.*
+_This document is part of the Lira Language Specification._

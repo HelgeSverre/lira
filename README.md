@@ -47,17 +47,17 @@ fn main() {
 
 ### Commands
 
-| Command | Description |
-|---------|-------------|
-| `just build` | Build compiler and VM (debug) |
-| `just release` | Build in release mode |
-| `just test` | Run all tests |
-| `just test-verbose` | Run tests with output |
-| `just run <file>` | Compile and run a `.li` file |
-| `just check` | Type check without building |
-| `just clippy` | Run Rust linter |
-| `just fmt` | Format Rust code |
-| `just clean` | Clean build artifacts |
+| Command             | Description                   |
+| ------------------- | ----------------------------- |
+| `just build`        | Build compiler and VM (debug) |
+| `just release`      | Build in release mode         |
+| `just test`         | Run all tests                 |
+| `just test-verbose` | Run tests with output         |
+| `just run <file>`   | Compile and run a `.li` file  |
+| `just check`        | Type check without building   |
+| `just clippy`       | Run Rust linter               |
+| `just fmt`          | Format Rust code              |
+| `just clean`        | Clean build artifacts         |
 
 ### Manual Build (without just)
 
@@ -78,6 +78,7 @@ cargo test --workspace
 ### CLI Tools
 
 **lirac** — The Lira compiler
+
 ```bash
 lirac compile <file.li> [-o output.lic]   # Compile to bytecode
 lirac check <file.li>                      # Type check only
@@ -85,6 +86,7 @@ lirac --version                            # Show version
 ```
 
 **liravm** — The Lira virtual machine
+
 ```bash
 liravm run <file.lic>      # Execute bytecode
 liravm run-debug <file>    # Run with debug output
@@ -92,11 +94,13 @@ liravm --version           # Show version
 ```
 
 **lira-lsp** — The Lira language server
+
 ```bash
 lira-lsp                   # Start LSP server (stdio)
 ```
 
 **lira-doc** — The Lira documentation generator
+
 ```bash
 lira-doc <file.li>         # Generate Markdown docs for a file
 lira-doc stdlib/           # Generate docs for a directory
@@ -104,14 +108,14 @@ lira-doc stdlib/           # Generate docs for a directory
 
 ## Editor Support
 
-| Editor | Extension | Features |
-|--------|-----------|----------|
-| VS Code | [vscode-lira](editors/vscode-lira) | Syntax, LSP, snippets |
-| Zed | [zed-lira](editors/zed-lira) | Syntax, tree-sitter |
-| Neovim | [vim-lira](editors/vim-lira) | Syntax, LSP config |
-| Vim | [vim-lira](editors/vim-lira) | Syntax highlighting |
-| Helix | [helix-lira](editors/helix-lira) | Syntax, LSP config |
-| IntelliJ | [intellij-lira](editors/intellij-lira) | Syntax (TextMate) |
+| Editor   | Extension                              | Features              |
+| -------- | -------------------------------------- | --------------------- |
+| VS Code  | [vscode-lira](editors/vscode-lira)     | Syntax, LSP, snippets |
+| Zed      | [zed-lira](editors/zed-lira)           | Syntax, tree-sitter   |
+| Neovim   | [vim-lira](editors/vim-lira)           | Syntax, LSP config    |
+| Vim      | [vim-lira](editors/vim-lira)           | Syntax highlighting   |
+| Helix    | [helix-lira](editors/helix-lira)       | Syntax, LSP config    |
+| IntelliJ | [intellij-lira](editors/intellij-lira) | Syntax (TextMate)     |
 
 Install with `just <editor>-install` (e.g., `just nvim-install`).
 
@@ -177,30 +181,30 @@ import std.fs.{read_file, write_file}
 
 ## Documentation
 
-| Document | Description |
-|----------|-------------|
-| [Language Overview](docs/00-lira-overview.md) | Introduction to Lira |
-| [Type System](docs/02-type-system.md) | Types, generics, inference |
-| [Concurrency](docs/04-concurrency.md) | Fibers, channels, select |
-| [Standard Library](docs/30-standard-library.md) | Stdlib reference |
-| [Bytecode Format](docs/10-bytecode-format.md) | `.lic` file specification |
-| [Roadmap](docs/ROADMAP.md) | Development progress |
+| Document                                        | Description                |
+| ----------------------------------------------- | -------------------------- |
+| [Language Overview](docs/00-lira-overview.md)   | Introduction to Lira       |
+| [Type System](docs/02-type-system.md)           | Types, generics, inference |
+| [Concurrency](docs/04-concurrency.md)           | Fibers, channels, select   |
+| [Standard Library](docs/30-standard-library.md) | Stdlib reference           |
+| [Bytecode Format](docs/10-bytecode-format.md)   | `.lic` file specification  |
+| [Roadmap](docs/ROADMAP.md)                      | Development progress       |
 
 ## Status
 
 **Current Phase**: Developer Tooling
 
-| Component | Status |
-|-----------|--------|
-| Lexer & Parser | Complete |
-| Type System | Complete |
-| Bytecode Compiler | Complete |
-| VM Core | Complete |
-| Fiber Runtime | Complete |
-| Standard Library | Complete (20 modules) |
-| Language Server | Complete |
-| Documentation Generator | Complete |
-| Editor Extensions | Complete |
+| Component               | Status                |
+| ----------------------- | --------------------- |
+| Lexer & Parser          | Complete              |
+| Type System             | Complete              |
+| Bytecode Compiler       | Complete              |
+| VM Core                 | Complete              |
+| Fiber Runtime           | Complete              |
+| Standard Library        | Complete (20 modules) |
+| Language Server         | Complete              |
+| Documentation Generator | Complete              |
+| Editor Extensions       | Complete              |
 
 ## Contributing
 

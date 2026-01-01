@@ -2,11 +2,11 @@
 
 ## Document Information
 
-| Property | Value |
-|----------|-------|
-| **Document ID** | 04-concurrency |
-| **Version** | 1.0.0-draft |
-| **Status** | Draft Specification |
+| Property          | Value                       |
+| ----------------- | --------------------------- |
+| **Document ID**   | 04-concurrency              |
+| **Version**       | 1.0.0-draft                 |
+| **Status**        | Draft Specification         |
 | **Prerequisites** | 00-03 (core language specs) |
 
 ---
@@ -30,6 +30,7 @@
 Lira uses **green threads (fibers)** with **channel-based communication** as its primary concurrency model. This design is inspired by Go's goroutines and CSP (Communicating Sequential Processes).
 
 Key characteristics:
+
 - **Lightweight**: Fibers use ~8KB stack (vs ~1MB for OS threads)
 - **Cooperatively scheduled**: Fibers yield at specific points
 - **No shared mutable state**: Communication via channels
@@ -66,6 +67,7 @@ Fibers communicate through channels rather than shared mutable state, eliminatin
 ```
 
 Fibers yield control at:
+
 - `spawn` (creating new fiber)
 - Channel `send` / `receive` (blocking)
 - `select` statement
@@ -296,12 +298,12 @@ ch.send(42)  // Panics!
 
 ### 3.5 Channel Semantics
 
-| Operation | Unbuffered | Buffered (not full) | Buffered (full) | Closed |
-|-----------|------------|---------------------|-----------------|--------|
-| `send` | Block until receiver | Immediate | Block until space | Panic |
-| `receive` | Block until sender | Immediate | Block until value | Return null |
-| `try_send` | false | true | false | Panic |
-| `try_receive` | null | value | value | null |
+| Operation     | Unbuffered           | Buffered (not full) | Buffered (full)   | Closed      |
+| ------------- | -------------------- | ------------------- | ----------------- | ----------- |
+| `send`        | Block until receiver | Immediate           | Block until space | Panic       |
+| `receive`     | Block until sender   | Immediate           | Block until value | Return null |
+| `try_send`    | false                | true                | false             | Panic       |
+| `try_receive` | null                 | value               | value             | null        |
 
 ### 3.6 Multiple Producers / Multiple Consumers
 
@@ -979,4 +981,4 @@ Duration.hours(n)
 
 ---
 
-*This document is part of the Lira Language Specification.*
+_This document is part of the Lira Language Specification._

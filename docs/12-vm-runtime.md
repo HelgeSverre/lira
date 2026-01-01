@@ -2,11 +2,11 @@
 
 ## Document Information
 
-| Property | Value |
-|----------|-------|
-| **Document ID** | 12-vm-runtime |
-| **Version** | 1.0.0-draft |
-| **Status** | Draft Specification |
+| Property          | Value                                  |
+| ----------------- | -------------------------------------- |
+| **Document ID**   | 12-vm-runtime                          |
+| **Version**       | 1.0.0-draft                            |
+| **Status**        | Draft Specification                    |
 | **Prerequisites** | 10-bytecode-format, 11-instruction-set |
 
 ---
@@ -68,6 +68,7 @@
 ### 1.3 Implementation Language
 
 The VM is implemented in Rust for:
+
 - Memory safety without GC
 - Zero-cost abstractions
 - Direct syscall access
@@ -89,6 +90,7 @@ struct Value(u64);
 ```
 
 IEEE 754 double-precision floats use a specific bit pattern for NaN:
+
 - Sign bit: 1 bit
 - Exponent: 11 bits (all 1s for NaN)
 - Mantissa: 52 bits (non-zero for NaN)
@@ -2146,4 +2148,4 @@ struct CachedStack {
 
 ---
 
-*This document is part of the Lira Language Specification.*
+_This document is part of the Lira Language Specification._

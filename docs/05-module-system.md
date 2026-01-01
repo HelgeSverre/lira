@@ -2,11 +2,11 @@
 
 ## Document Information
 
-| Property | Value |
-|----------|-------|
-| **Document ID** | 05-module-system |
-| **Version** | 1.0.0-draft |
-| **Status** | Draft Specification |
+| Property          | Value                       |
+| ----------------- | --------------------------- |
+| **Document ID**   | 05-module-system            |
+| **Version**       | 1.0.0-draft                 |
+| **Status**        | Draft Specification         |
 | **Prerequisites** | 00-04 (core language specs) |
 
 ---
@@ -48,11 +48,11 @@ Package (my_app)
 
 ### 1.3 Visibility Levels
 
-| Visibility | Keyword | Accessible From |
-|------------|---------|-----------------|
-| Private | (default) | Same file only |
-| Package-private | `internal` | Same package |
-| Public | `pub` | Anywhere (if exported) |
+| Visibility      | Keyword    | Accessible From        |
+| --------------- | ---------- | ---------------------- |
+| Private         | (default)  | Same file only         |
+| Package-private | `internal` | Same package           |
+| Public          | `pub`      | Anywhere (if exported) |
 
 ---
 
@@ -100,6 +100,7 @@ src/utils/
 ```
 
 **mod.li** (module root):
+
 ```li
 // src/utils/mod.li
 // Re-export submodules
@@ -375,6 +376,7 @@ Dependencies are resolved from:
 3. **Package registry**: `"1.0.0"` (version string)
 
 Version syntax:
+
 - `"1.0.0"` - Exact version
 - `"^1.0"` - Compatible with 1.x
 - `"~1.0"` - Approximately 1.0.x
@@ -708,4 +710,4 @@ ExportItem     ::= Identifier ('as' Identifier)?
 
 ---
 
-*This document is part of the Lira Language Specification.*
+_This document is part of the Lira Language Specification._

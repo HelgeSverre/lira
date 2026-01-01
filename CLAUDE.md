@@ -21,12 +21,14 @@ just lsp            # Run LSP server (for testing)
 ```
 
 **Manual build (without just):**
+
 ```bash
 cargo build --package lirac --package liravm
 cargo test --workspace
 ```
 
 **Run a single test:**
+
 ```bash
 cargo test --package lirac --test integration -- <test_name>
 cargo test --package liravm -- <test_name>
@@ -37,11 +39,14 @@ cargo test --package liravm -- <test_name>
 The project is organized as a Cargo workspace with five crates:
 
 ### `lira-core` - Shared types
+
 - `opcode.rs` - VM instruction definitions
 - `bytecode.rs` - Bytecode format structures
 
 ### `lirac` - Compiler (source → bytecode)
+
 Compilation pipeline in order:
+
 1. `lexer.rs` - Tokenization
 2. `parser.rs` - AST construction
 3. `checker.rs` - Type checking and inference
@@ -49,10 +54,12 @@ Compilation pipeline in order:
 5. `module_loader.rs` - Import resolution
 
 Entry points:
+
 - `compile_file()` / `compile_with_imports()` - Full compilation
 - `check_file()` / `check_with_imports()` - Type checking only
 
 ### `liravm` - Virtual Machine (executes bytecode)
+
 - `vm.rs` - Bytecode interpreter (main execution loop)
 - `fiber.rs` - Green thread scheduler
 - `runtime.rs` - Built-in functions and syscalls
@@ -60,14 +67,18 @@ Entry points:
 - `value.rs` - Runtime value types
 
 Entry points:
+
 - `run_file()` / `run()` - Execute bytecode
 - `run_with_capture()` - Execute with output capture (for testing)
 
 ### `lira-lsp` - Language Server Protocol
+
 LSP implementation using tower-lsp for IDE features.
 
 ### `lira-doc` - Documentation Generator
+
 Generates Markdown documentation from Lira source files.
+
 - `extractor.rs` - Extracts doc comments and declarations
 - `generator.rs` - Produces Markdown output
 - `types.rs` - Documentation model types
@@ -75,6 +86,7 @@ Generates Markdown documentation from Lira source files.
 ## Testing
 
 Integration tests use directive comments in `.li` source files:
+
 - `// @expect: <output>` - Expect exact output line
 - `// @expect-contains: <text>` - Output contains text
 - `// @expect-error` - Expect compilation failure

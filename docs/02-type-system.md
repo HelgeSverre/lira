@@ -2,11 +2,11 @@
 
 ## Document Information
 
-| Property | Value |
-|----------|-------|
-| **Document ID** | 02-type-system |
-| **Version** | 1.0.0-draft |
-| **Status** | Draft Specification |
+| Property          | Value                                        |
+| ----------------- | -------------------------------------------- |
+| **Document ID**   | 02-type-system                               |
+| **Version**       | 1.0.0-draft                                  |
+| **Status**        | Draft Specification                          |
 | **Prerequisites** | 00-lira-overview.md, 01-lexical-structure.md |
 
 ---
@@ -74,33 +74,33 @@ let active: bool = true
 let disabled: bool = false
 ```
 
-| Property | Value |
-|----------|-------|
-| Size | 1 byte |
-| Values | `true`, `false` |
-| Default | `false` |
+| Property | Value           |
+| -------- | --------------- |
+| Size     | 1 byte          |
+| Values   | `true`, `false` |
+| Default  | `false`         |
 
 ### 2.2 Integer Types
 
 #### Signed Integers
 
-| Type | Size | Range |
-|------|------|-------|
-| `int8` | 1 byte | -128 to 127 |
+| Type    | Size    | Range             |
+| ------- | ------- | ----------------- |
+| `int8`  | 1 byte  | -128 to 127       |
 | `int16` | 2 bytes | -32,768 to 32,767 |
-| `int32` | 4 bytes | -2^31 to 2^31-1 |
-| `int64` | 8 bytes | -2^63 to 2^63-1 |
-| `int` | 8 bytes | Alias for `int64` |
+| `int32` | 4 bytes | -2^31 to 2^31-1   |
+| `int64` | 8 bytes | -2^63 to 2^63-1   |
+| `int`   | 8 bytes | Alias for `int64` |
 
 #### Unsigned Integers
 
-| Type | Size | Range |
-|------|------|-------|
-| `uint8` | 1 byte | 0 to 255 |
-| `uint16` | 2 bytes | 0 to 65,535 |
-| `uint32` | 4 bytes | 0 to 2^32-1 |
-| `uint64` | 8 bytes | 0 to 2^64-1 |
-| `uint` | 8 bytes | Alias for `uint64` |
+| Type     | Size    | Range              |
+| -------- | ------- | ------------------ |
+| `uint8`  | 1 byte  | 0 to 255           |
+| `uint16` | 2 bytes | 0 to 65,535        |
+| `uint32` | 4 bytes | 0 to 2^32-1        |
+| `uint64` | 8 bytes | 0 to 2^64-1        |
+| `uint`   | 8 bytes | Alias for `uint64` |
 
 ```li
 let a: int = 42              // int64
@@ -112,21 +112,23 @@ let d: int32 = 1_000_000     // int32
 #### Integer Operations
 
 All integer types support:
+
 - Arithmetic: `+`, `-`, `*`, `/`, `%`
 - Bitwise: `&`, `|`, `^`, `~`, `<<`, `>>`
 - Comparison: `==`, `!=`, `<`, `>`, `<=`, `>=`
 
 Overflow behavior:
+
 - Debug builds: Panic on overflow
 - Release builds: Wrap around (two's complement)
 
 ### 2.3 Floating-Point Types
 
-| Type | Size | Precision |
-|------|------|-----------|
-| `float32` | 4 bytes | IEEE 754 single |
-| `float64` | 8 bytes | IEEE 754 double |
-| `float` | 8 bytes | Alias for `float64` |
+| Type      | Size    | Precision           |
+| --------- | ------- | ------------------- |
+| `float32` | 4 bytes | IEEE 754 single     |
+| `float64` | 8 bytes | IEEE 754 double     |
+| `float`   | 8 bytes | Alias for `float64` |
 
 ```li
 let pi: float = 3.14159
@@ -156,10 +158,10 @@ let ch: char = 'A'
 let emoji: char = '\u{1F600}'
 ```
 
-| Property | Value |
-|----------|-------|
-| Size | 4 bytes |
-| Range | U+0000 to U+10FFFF (excluding surrogates) |
+| Property | Value                                     |
+| -------- | ----------------------------------------- |
+| Size     | 4 bytes                                   |
+| Range    | U+0000 to U+10FFFF (excluding surrogates) |
 
 ### 2.5 String Type
 
@@ -170,10 +172,10 @@ let s: string = "Hello, World!"
 let empty: string = ""
 ```
 
-| Property | Value |
-|----------|-------|
-| Encoding | UTF-8 |
-| Mutability | Immutable |
+| Property        | Value                |
+| --------------- | -------------------- |
+| Encoding        | UTF-8                |
+| Mutability      | Immutable            |
 | Null-terminated | No (length-prefixed) |
 
 #### String Operations
@@ -802,12 +804,12 @@ trait Ord: Eq {
 
 #### Trait vs Interface
 
-| Aspect | Interface | Trait |
-|--------|-----------|-------|
-| Typing | Structural (duck typing) | Nominal (explicit) |
+| Aspect         | Interface                 | Trait                    |
+| -------------- | ------------------------- | ------------------------ |
+| Typing         | Structural (duck typing)  | Nominal (explicit)       |
 | Implementation | Implicit if methods match | Explicit `impl` required |
-| Use case | Flexibility, interop | Type safety, coherence |
-| Keyword | `interface` | `trait` |
+| Use case       | Flexibility, interop      | Type safety, coherence   |
+| Keyword        | `interface`               | `trait`                  |
 
 ```li
 // Interface: structural subtyping
@@ -1033,12 +1035,12 @@ c.increment()           // Mutable method
 let v = c.into_value()  // Consuming method (c is invalid after)
 ```
 
-| Receiver | Syntax | Description |
-|----------|--------|-------------|
-| `self` | Immutable borrow | Read-only access |
-| `self mut` | Mutable borrow | Can modify |
-| `self owned` | Ownership | Consumes value |
-| (none) | Static | No instance needed |
+| Receiver     | Syntax           | Description        |
+| ------------ | ---------------- | ------------------ |
+| `self`       | Immutable borrow | Read-only access   |
+| `self mut`   | Mutable borrow   | Can modify         |
+| `self owned` | Ownership        | Consumes value     |
+| (none)       | Static           | No instance needed |
 
 #### Impl Block Constraints
 
@@ -1567,20 +1569,20 @@ never (bottom type)
 
 ## Appendix B: Type Size and Alignment
 
-| Type | Size | Alignment |
-|------|------|-----------|
-| `bool` | 1 byte | 1 byte |
-| `int8`, `uint8` | 1 byte | 1 byte |
-| `int16`, `uint16` | 2 bytes | 2 bytes |
-| `int32`, `uint32`, `float32` | 4 bytes | 4 bytes |
-| `int64`, `uint64`, `float64` | 8 bytes | 8 bytes |
-| `char` | 4 bytes | 4 bytes |
-| `string` | 16 bytes (reference) | 8 bytes |
-| `List<T>` | 24 bytes (reference) | 8 bytes |
-| `Map<K,V>` | 24 bytes (reference) | 8 bytes |
-| Class reference | 8 bytes | 8 bytes |
-| Struct | sum of fields | max field alignment |
+| Type                         | Size                 | Alignment           |
+| ---------------------------- | -------------------- | ------------------- |
+| `bool`                       | 1 byte               | 1 byte              |
+| `int8`, `uint8`              | 1 byte               | 1 byte              |
+| `int16`, `uint16`            | 2 bytes              | 2 bytes             |
+| `int32`, `uint32`, `float32` | 4 bytes              | 4 bytes             |
+| `int64`, `uint64`, `float64` | 8 bytes              | 8 bytes             |
+| `char`                       | 4 bytes              | 4 bytes             |
+| `string`                     | 16 bytes (reference) | 8 bytes             |
+| `List<T>`                    | 24 bytes (reference) | 8 bytes             |
+| `Map<K,V>`                   | 24 bytes (reference) | 8 bytes             |
+| Class reference              | 8 bytes              | 8 bytes             |
+| Struct                       | sum of fields        | max field alignment |
 
 ---
 
-*This document is part of the Lira Language Specification.*
+_This document is part of the Lira Language Specification._

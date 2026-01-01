@@ -2,13 +2,13 @@
 
 ## Document Information
 
-| Property | Value |
-|----------|-------|
-| **Version** | 1.0.0-draft |
-| **Status** | Draft Specification |
-| **Platform** | macOS, Linux |
-| **Implementation** | Rust |
-| **Last Updated** | 2025-12 |
+| Property           | Value               |
+| ------------------ | ------------------- |
+| **Version**        | 1.0.0-draft         |
+| **Status**         | Draft Specification |
+| **Platform**       | macOS, Linux        |
+| **Implementation** | Rust                |
+| **Last Updated**   | 2025-12             |
 
 ---
 
@@ -101,14 +101,14 @@ Following the QML model, Lira separates application logic (`.li` files) from use
 
 Lira uses a strong, static type system with full type inference:
 
-| Category | Types |
-|----------|-------|
-| **Primitives** | `int`, `float`, `bool`, `string`, `char`, `void` |
-| **Integers** | `int8`, `int16`, `int32`, `int64`, `uint8`, `uint16`, `uint32`, `uint64` |
-| **Collections** | `List<T>`, `Map<K,V>`, `Set<T>`, tuples `(T, U, ...)` |
-| **Optionals** | `T?` (nullable), unwrap with `?`, `??`, `!` |
-| **User Types** | `class`, `struct`, `enum`, `interface` |
-| **Functions** | `fn(Args) -> Return` |
+| Category        | Types                                                                    |
+| --------------- | ------------------------------------------------------------------------ |
+| **Primitives**  | `int`, `float`, `bool`, `string`, `char`, `void`                         |
+| **Integers**    | `int8`, `int16`, `int32`, `int64`, `uint8`, `uint16`, `uint32`, `uint64` |
+| **Collections** | `List<T>`, `Map<K,V>`, `Set<T>`, tuples `(T, U, ...)`                    |
+| **Optionals**   | `T?` (nullable), unwrap with `?`, `??`, `!`                              |
+| **User Types**  | `class`, `struct`, `enum`, `interface`                                   |
+| **Functions**   | `fn(Args) -> Return`                                                     |
 
 ### 3.2 Memory Management
 
@@ -529,6 +529,7 @@ fn main() {
 ### 6.8 GUI with Lira UI
 
 **counter.li:**
+
 ```li
 // State module
 export var count = 0
@@ -543,6 +544,7 @@ export fn decrement() {
 ```
 
 **counter.liui:**
+
 ```liui
 import { count, increment, decrement } from "./counter.li"
 
@@ -592,17 +594,17 @@ Window {
 
 Lira applications interact with the host operating system through a set of built-in primitives implemented in the VM:
 
-| Primitive | Purpose |
-|-----------|---------|
-| `file_open` | Open file |
-| `file_close` | Close file descriptor |
-| `file_read` | Read from file |
-| `file_write` | Write to file |
-| `file_exists` | Check file existence |
-| `time_ms` | Get current time in milliseconds |
-| `sleep` | Sleep for milliseconds |
-| `env_get` | Get environment variable |
-| `env_args` | Get command line arguments |
+| Primitive     | Purpose                          |
+| ------------- | -------------------------------- |
+| `file_open`   | Open file                        |
+| `file_close`  | Close file descriptor            |
+| `file_read`   | Read from file                   |
+| `file_write`  | Write to file                    |
+| `file_exists` | Check file existence             |
+| `time_ms`     | Get current time in milliseconds |
+| `sleep`       | Sleep for milliseconds           |
+| `env_get`     | Get environment variable         |
+| `env_args`    | Get command line arguments       |
 
 ### 7.2 Memory Model
 
@@ -630,39 +632,38 @@ This specification is organized into the following documents:
 
 ### Core Language
 
-| Document | Description |
-|----------|-------------|
-| **00-lira-overview.md** | This document - overview and quick start |
-| **01-lexical-structure.md** | Tokens, keywords, literals, operators |
-| **02-type-system.md** | Types, generics, inference rules |
-| **03-syntax-constructs.md** | Statements, expressions, control flow |
-| **04-concurrency.md** | Fibers, channels, synchronization |
-| **05-module-system.md** | Imports, exports, packages |
+| Document                    | Description                              |
+| --------------------------- | ---------------------------------------- |
+| **00-lira-overview.md**     | This document - overview and quick start |
+| **01-lexical-structure.md** | Tokens, keywords, literals, operators    |
+| **02-type-system.md**       | Types, generics, inference rules         |
+| **03-syntax-constructs.md** | Statements, expressions, control flow    |
+| **04-concurrency.md**       | Fibers, channels, synchronization        |
+| **05-module-system.md**     | Imports, exports, packages               |
 
 ### Virtual Machine
 
-| Document | Description |
-|----------|-------------|
-| **10-bytecode-format.md** | .lic file format specification |
-| **11-instruction-set.md** | Complete opcode reference |
-| **12-vm-runtime.md** | Execution model, data structures |
-| **13-memory-model.md** | Reference counting, cycle detection |
+| Document                  | Description                         |
+| ------------------------- | ----------------------------------- |
+| **10-bytecode-format.md** | .lic file format specification      |
+| **11-instruction-set.md** | Complete opcode reference           |
+| **12-vm-runtime.md**      | Execution model, data structures    |
+| **13-memory-model.md**    | Reference counting, cycle detection |
 
 ### Declarative UI
 
-| Document | Description |
-|----------|-------------|
-| **20-liui-format.md** | .liui syntax and semantics |
+| Document               | Description                   |
+| ---------------------- | ----------------------------- |
+| **20-liui-format.md**  | .liui syntax and semantics    |
 | **21-liui-widgets.md** | Widget catalog and properties |
 
 ### Implementation
 
-| Document | Description |
-|----------|-------------|
-| **30-standard-library.md** | std.* module reference |
-| **40-compiler-architecture.md** | Compiler design |
-| **50-tooling.md** | CLI tools reference |
-
+| Document                        | Description             |
+| ------------------------------- | ----------------------- |
+| **30-standard-library.md**      | std.\* module reference |
+| **40-compiler-architecture.md** | Compiler design         |
+| **50-tooling.md**               | CLI tools reference     |
 
 ---
 
@@ -687,33 +688,33 @@ when        while
 
 ## Appendix B: Operators by Precedence
 
-| Precedence | Operators | Associativity |
-|------------|-----------|---------------|
-| 1 (highest) | `()` `[]` `.` `?.` | Left |
-| 2 | `!` `-` (unary) `~` | Right |
-| 3 | `**` | Right |
-| 4 | `*` `/` `%` | Left |
-| 5 | `+` `-` | Left |
-| 6 | `<<` `>>` `>>>` | Left |
-| 7 | `<` `<=` `>` `>=` | Left |
-| 8 | `==` `!=` | Left |
-| 9 | `&` | Left |
-| 10 | `^` | Left |
-| 11 | `\|` | Left |
-| 12 | `&&` | Left |
-| 13 | `\|\|` | Left |
-| 14 | `??` `?:` | Right |
-| 15 | `=` `+=` `-=` `*=` `/=` etc. | Right |
-| 16 (lowest) | `=>` | Right |
+| Precedence  | Operators                    | Associativity |
+| ----------- | ---------------------------- | ------------- |
+| 1 (highest) | `()` `[]` `.` `?.`           | Left          |
+| 2           | `!` `-` (unary) `~`          | Right         |
+| 3           | `**`                         | Right         |
+| 4           | `*` `/` `%`                  | Left          |
+| 5           | `+` `-`                      | Left          |
+| 6           | `<<` `>>` `>>>`              | Left          |
+| 7           | `<` `<=` `>` `>=`            | Left          |
+| 8           | `==` `!=`                    | Left          |
+| 9           | `&`                          | Left          |
+| 10          | `^`                          | Left          |
+| 11          | `\|`                         | Left          |
+| 12          | `&&`                         | Left          |
+| 13          | `\|\|`                       | Left          |
+| 14          | `??` `?:`                    | Right         |
+| 15          | `=` `+=` `-=` `*=` `/=` etc. | Right         |
+| 16 (lowest) | `=>`                         | Right         |
 
 ---
 
 ## Appendix C: Version History
 
-| Version | Date | Changes |
-|---------|------|---------|
+| Version     | Date    | Changes                     |
+| ----------- | ------- | --------------------------- |
 | 1.0.0-draft | 2025-01 | Initial specification draft |
 
 ---
 
-*This document is part of the Lira Language Specification.*
+_This document is part of the Lira Language Specification._

@@ -2,12 +2,12 @@
 
 ## Document Information
 
-| Property | Value |
-|----------|-------|
-| **Document ID** | 20-liui-format |
-| **Version** | 1.0.0-draft |
-| **Status** | Draft Specification |
-| **File Extension** | `.liui` |
+| Property           | Value               |
+| ------------------ | ------------------- |
+| **Document ID**    | 20-liui-format      |
+| **Version**        | 1.0.0-draft         |
+| **Status**         | Draft Specification |
+| **File Extension** | `.liui`             |
 
 ---
 
@@ -1544,32 +1544,32 @@ Guard        ::= 'if' Expression
 
 ## Appendix B: Built-in Directives Reference
 
-| Directive | Description |
-|-----------|-------------|
-| `@if` / `@else` | Conditional rendering |
-| `@for` | List iteration |
-| `@when` | Pattern matching |
-| `@slot` | Slot placeholder |
-| `@fragment` | Group elements without wrapper |
-| `@enter` | Enter animation |
-| `@exit` | Exit animation |
+| Directive       | Description                    |
+| --------------- | ------------------------------ |
+| `@if` / `@else` | Conditional rendering          |
+| `@for`          | List iteration                 |
+| `@when`         | Pattern matching               |
+| `@slot`         | Slot placeholder               |
+| `@fragment`     | Group elements without wrapper |
+| `@enter`        | Enter animation                |
+| `@exit`         | Exit animation                 |
 
 ---
 
 ## Appendix C: Property Modifier Reference
 
-| Modifier | Description |
-|----------|-------------|
-| `.stop` | Stop event propagation |
-| `.prevent` | Prevent default behavior |
-| `.capture` | Use capture phase |
-| `.self` | Only trigger if target is self |
-| `.once` | Trigger once then remove |
-| `.passive` | Passive event listener |
-| `.debounce(ms)` | Debounce value changes |
-| `.throttle(ms)` | Throttle value changes |
-| `.lazy` | Update on blur/submit |
+| Modifier        | Description                    |
+| --------------- | ------------------------------ |
+| `.stop`         | Stop event propagation         |
+| `.prevent`      | Prevent default behavior       |
+| `.capture`      | Use capture phase              |
+| `.self`         | Only trigger if target is self |
+| `.once`         | Trigger once then remove       |
+| `.passive`      | Passive event listener         |
+| `.debounce(ms)` | Debounce value changes         |
+| `.throttle(ms)` | Throttle value changes         |
+| `.lazy`         | Update on blur/submit          |
 
 ---
 
-*This document is part of the Lira Language Specification.*
+_This document is part of the Lira Language Specification._

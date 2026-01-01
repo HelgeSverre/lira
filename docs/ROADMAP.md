@@ -10,8 +10,8 @@
 
 This roadmap tracks the implementation of Lira, a modern systems programming language with Go-like fiber concurrency. Development follows a **host-first** strategy: the compiler and VM are developed and tested on macOS/Linux.
 
-**Total Estimated Tasks**: ~70 discrete implementation tasks
-**Major Phases**: 7 phases from lexer to advanced features
+**Total Estimated Tasks**: ~160 discrete implementation tasks
+**Major Phases**: 20 phases from lexer to production-ready
 **Test Coverage**: ~30% of language features (expanding)
 
 ---
@@ -26,6 +26,18 @@ This roadmap tracks the implementation of Lira, a modern systems programming lan
 6. [Phase 5: Fiber Runtime](#phase-5-fiber-runtime) - COMPLETE
 7. [Phase 6: Standard Library](#phase-6-standard-library) - COMPLETE
 8. [Phase 7: Advanced Features](#phase-7-advanced-features) - IN PROGRESS
+9. [Phase 8: Developer Tooling](#phase-8-developer-tooling) - IN PROGRESS
+10. [Phase 9: Developer Experience & Debugging](#phase-9-developer-experience--debugging) - PLANNED
+11. [Phase 10: Performance & Profiling](#phase-10-performance--profiling) - PLANNED
+12. [Phase 11: Package Ecosystem](#phase-11-package-ecosystem) - PLANNED
+13. [Phase 12: Native Compilation](#phase-12-native-compilation) - PLANNED
+14. [Phase 13: Interoperability](#phase-13-interoperability) - PLANNED
+15. [Phase 14: Self-Hosting](#phase-14-self-hosting) - PLANNED
+16. [Phase 15: Advanced Language Features](#phase-15-advanced-language-features) - PLANNED
+17. [Phase 16: Community & Ecosystem](#phase-16-community--ecosystem) - PLANNED
+18. [Phase 17: Testing Framework](#phase-17-testing-framework) - PLANNED
+19. [Phase 18: Standard Library Expansions](#phase-18-standard-library-expansions) - PLANNED
+20. [Phase 19: Concurrency Enhancements](#phase-19-concurrency-enhancements) - PLANNED
 
 ---
 
@@ -300,16 +312,41 @@ Phase 3 (Bytecode Generation)
 Phase 4 (VM Core)
     │
     ▼
-Phase 5 (Fiber Runtime)
-    │
-    ▼
-Phase 6 (Standard Library)
+Phase 5 (Fiber Runtime) ──────────────────────┐
+    │                                          │
+    ▼                                          ▼
+Phase 6 (Standard Library)            Phase 19 (Concurrency+)
     │
     ▼
 Phase 7 (Advanced Features)  ←── CURRENT
     │
     ▼
-Production-Ready Language
+Phase 8 (Developer Tooling)  ←── CURRENT
+    │
+    ▼
+Phase 9 (Dev Experience)
+    │
+    ▼
+Phase 10 (Performance)
+    │
+    ▼
+Phase 11 (Package Ecosystem) ─────────────────┐
+    │                                          │
+    ▼                                          ▼
+Phase 12 (Native Compilation)         Phase 17 (Testing)
+    │
+    ▼
+Phase 13 (Interoperability) ──────────────────┐
+    │                                          │
+    ▼                                          ▼
+Phase 14 (Self-Hosting)               Phase 18 (Stdlib+)
+    │
+    ▼
+Phase 15 (Metaprogramming)
+    │
+    ├────────────────────┐
+    ▼                    ▼
+Phase 16 (Community)    Production-Ready Language
 ```
 
 ---
@@ -423,15 +460,16 @@ just fmt
 
 | Metric         | Count   |
 | -------------- | ------- |
-| Total tasks    | ~85     |
+| Total tasks    | ~160    |
 | Completed      | ~74     |
 | In Progress    | ~4      |
-| Pending        | ~7      |
+| Pending        | ~82     |
 | Compiler LOC   | ~15,900 |
 | VM LOC         | ~5,600  |
 | Core LOC       | ~350    |
 | Stdlib modules | 21      |
 | Example files  | 86      |
+| Major Phases   | 20      |
 
 ---
 
@@ -473,16 +511,21 @@ _This roadmap tracks the development of Lira as a standalone systems programming
 
 ### 8.2 Language Server (LSP)
 
-| ID    | Task             | Description                          | Status |
-| ----- | ---------------- | ------------------------------------ | ------ |
-| T8.6  | LSP scaffold     | Basic server with tower-lsp          | [x]    |
-| T8.7  | Diagnostics      | Report errors from type checker      | [x]    |
-| T8.8  | Completion       | Keyword and symbol completion        | [x]    |
-| T8.9  | Hover            | Type info and documentation on hover | [x]    |
-| T8.10 | Go to definition | Navigate to symbol definitions       | [x]    |
-| T8.11 | Find references  | Find all references to a symbol      | [x]    |
-| T8.12 | Document symbols | Outline view for files               | [x]    |
-| T8.13 | Semantic tokens  | Enhanced syntax highlighting         | [x]    |
+| ID    | Task             | Description                                 | Status |
+| ----- | ---------------- | ------------------------------------------- | ------ |
+| T8.6  | LSP scaffold     | Basic server with tower-lsp                 | [x]    |
+| T8.7  | Diagnostics      | Report errors from type checker             | [x]    |
+| T8.8  | Completion       | Keyword and symbol completion               | [x]    |
+| T8.9  | Hover            | Type info and documentation on hover        | [x]    |
+| T8.10 | Go to definition | Navigate to symbol definitions              | [x]    |
+| T8.11 | Find references  | Find all references to a symbol             | [x]    |
+| T8.12 | Document symbols | Outline view for files                      | [x]    |
+| T8.13 | Semantic tokens  | Enhanced syntax highlighting                | [x]    |
+| T8.23 | Inlay hints      | Show inferred types inline in editor        | [ ]    |
+| T8.24 | Code actions     | Quick fixes and refactoring suggestions     | [ ]    |
+| T8.25 | Rename refactor  | Rename symbols across files                 | [ ]    |
+| T8.26 | Call hierarchy   | Show callers and callees of functions       | [ ]    |
+| T8.27 | Signature help   | Parameter hints while typing function calls | [ ]    |
 
 ### 8.3 Editor Extensions
 
@@ -502,3 +545,198 @@ _This roadmap tracks the development of Lira as a standalone systems programming
 | T8.20 | lira-doc                       | Documentation generator                                  | [x]    |
 | T8.21 | lira-doc - mdbook generation   | Generate mdbook structure from doc comments              | [x]    |
 | T8.22 | lira-doc - mdbook enhancements | Custom theme for mdbook doc site and syntax highlighting | [ ]    |
+
+---
+
+## Phase 9: Developer Experience & Debugging
+
+**Goal**: Improve developer workflow with interactive tools and debugging support.
+**Depends On**: Phase 8
+**Status**: PLANNED
+
+| ID   | Task                    | Description                                                         | Status |
+| ---- | ----------------------- | ------------------------------------------------------------------- | ------ |
+| T9.1 | REPL                    | Interactive interpreter for quick experimentation (`lira repl`)     | [ ]    |
+| T9.2 | AST Dump Flag           | `lirac --ast file.li` to output parsed AST as JSON/pretty-print     | [ ]    |
+| T9.3 | Bytecode Disassembler   | `lirac --disasm file.lic` for human-readable bytecode inspection    | [ ]    |
+| T9.4 | Debug Symbols           | Emit DWARF-like debug info, source mapping for stack traces         | [ ]    |
+| T9.5 | Step Debugger           | Interactive debugger with breakpoints, step-in/over, var inspection | [ ]    |
+| T9.6 | Watch Mode              | `lira watch` - auto-recompile on file changes                       | [ ]    |
+| T9.7 | Error Suggestions       | "Did you mean X?" suggestions for typos and common mistakes         | [ ]    |
+| T9.8 | Incremental Compilation | Only recompile changed files and their dependents                   | [ ]    |
+| T9.9 | Compilation Caching     | Cache compiled artifacts across sessions                            | [ ]    |
+
+---
+
+## Phase 10: Performance & Profiling
+
+**Goal**: Validate and optimize runtime performance.
+**Depends On**: Phase 9
+**Status**: PLANNED
+
+| ID     | Task                      | Description                                                  | Status |
+| ------ | ------------------------- | ------------------------------------------------------------ | ------ |
+| T10.1  | Benchmark Suite           | Standardized benchmarks (fibonacci, primes, sorting, I/O)    | [ ]    |
+| T10.2  | Cross-Language Benchmarks | Compare against Go, Rust, Python, Lua, JavaScript, Ruby      | [ ]    |
+| T10.3  | Runtime Profiler          | CPU time profiling with flame graphs (`liravm --profile`)    | [ ]    |
+| T10.4  | Memory Profiler           | Heap allocation tracking, leak detection, ARC cycle analysis | [ ]    |
+| T10.5  | Code Coverage             | Test coverage reports with line-level granularity            | [ ]    |
+| T10.6  | Dead Code Elimination     | Remove unreachable code during compilation                   | [ ]    |
+| T10.7  | Constant Folding          | Evaluate constant expressions at compile time                | [ ]    |
+| T10.8  | Tail Call Optimization    | Optimize recursive tail calls to prevent stack overflow      | [ ]    |
+| T10.9  | Escape Analysis           | Determine stack vs heap allocation for better performance    | [ ]    |
+| T10.10 | Function Inlining         | Inline small functions to reduce call overhead               | [ ]    |
+| T10.11 | Parallel Compilation      | Multi-threaded compiler for faster builds                    | [ ]    |
+
+---
+
+## Phase 11: Package Ecosystem
+
+**Goal**: Enable dependency management and community package sharing.
+**Depends On**: Phase 10
+**Status**: PLANNED
+
+| ID    | Task             | Description                                                  | Status |
+| ----- | ---------------- | ------------------------------------------------------------ | ------ |
+| T11.1 | Package Manifest | `lira.toml` for project metadata, dependencies, build config | [ ]    |
+| T11.2 | Package Manager  | `lira add`, `lira install`, dependency resolution            | [ ]    |
+| T11.3 | Package Registry | Central registry for publishing/discovering packages         | [ ]    |
+| T11.4 | Build System     | `lira build`, `lira test`, `lira run` unified CLI            | [ ]    |
+| T11.5 | Lockfiles        | `lira.lock` for reproducible builds                          | [ ]    |
+| T11.6 | Vendoring        | `lira vendor` to copy dependencies locally                   | [ ]    |
+| T11.7 | Feature Flags    | Optional package features (`[features]` in lira.toml)        | [ ]    |
+| T11.8 | Security Audit   | `lira audit` to check dependencies for vulnerabilities       | [ ]    |
+| T11.9 | License Checking | Verify dependency licenses are compatible                    | [ ]    |
+
+---
+
+## Phase 12: Native Compilation
+
+**Goal**: Compile to native machine code for production performance.
+**Depends On**: Phase 11
+**Status**: PLANNED
+
+| ID    | Task                 | Description                                      | Status |
+| ----- | -------------------- | ------------------------------------------------ | ------ |
+| T12.1 | LLVM Backend         | Compile Lira AST → LLVM IR → native machine code | [ ]    |
+| T12.2 | Native Binary Output | Produce standalone executables (no VM required)  | [ ]    |
+| T12.3 | Cross-Compilation    | Target different architectures (x86_64, ARM64)   | [ ]    |
+| T12.4 | WebAssembly Target   | Compile to WASM for browser/edge deployment      | [ ]    |
+
+---
+
+## Phase 13: Interoperability
+
+**Goal**: Enable integration with existing ecosystems.
+**Depends On**: Phase 12
+**Status**: PLANNED
+
+| ID    | Task              | Description                                                        | Status |
+| ----- | ----------------- | ------------------------------------------------------------------ | ------ |
+| T13.1 | C FFI             | Call C libraries, define extern functions, handle ABI              | [ ]    |
+| T13.2 | Embedded Runtime  | Embed Lira VM in Rust/C applications as a scripting engine         | [ ]    |
+| T13.3 | Async I/O         | Non-blocking I/O integrated with fiber scheduler (io_uring/kqueue) | [ ]    |
+| T13.4 | Sandboxing        | Restrict runtime capabilities (file access, network, etc.)         | [ ]    |
+| T13.5 | Signal Handling   | Handle OS signals (SIGINT, SIGTERM, etc.)                          | [ ]    |
+| T13.6 | Graceful Shutdown | Clean fiber termination on shutdown signals                        | [ ]    |
+| T13.7 | Process Spawning  | Spawn and manage child processes                                   | [ ]    |
+
+---
+
+## Phase 14: Self-Hosting
+
+**Goal**: Prove the language by implementing its own toolchain.
+**Depends On**: Phase 13
+**Status**: PLANNED
+
+| ID    | Task                 | Description                              | Status |
+| ----- | -------------------- | ---------------------------------------- | ------ |
+| T14.1 | Self-Hosted Compiler | Rewrite lirac in Lira itself (bootstrap) | [ ]    |
+| T14.2 | Self-Hosted VM       | Rewrite liravm in Lira (stretch goal)    | [ ]    |
+
+---
+
+## Phase 15: Advanced Language Features
+
+**Goal**: Add powerful metaprogramming and type system extensions.
+**Depends On**: Phase 14
+**Status**: PLANNED
+
+| ID    | Task                | Description                                               | Status |
+| ----- | ------------------- | --------------------------------------------------------- | ------ |
+| T15.1 | Macro System        | Compile-time metaprogramming (hygienic macros)            | [ ]    |
+| T15.2 | Comptime Evaluation | Compile-time function execution (`const fn` / `comptime`) | [ ]    |
+| T15.3 | Effect System       | Track side effects in type system (IO, exceptions)        | [ ]    |
+
+---
+
+## Phase 16: Community & Ecosystem
+
+**Goal**: Build community adoption and learning resources.
+**Depends On**: Phase 9+
+**Status**: PLANNED
+
+| ID    | Task              | Description                                  | Status |
+| ----- | ----------------- | -------------------------------------------- | ------ |
+| T16.1 | Online Playground | Web-based REPL (like Go Playground)          | [ ]    |
+| T16.2 | Language Tutorial | Interactive "Tour of Lira" guide             | [ ]    |
+| T16.3 | Static Analyzer   | Linter with configurable rules (`lira lint`) | [ ]    |
+| T16.4 | JIT Compilation   | Hot-path optimization with tracing JIT       | [ ]    |
+
+---
+
+## Phase 17: Testing Framework
+
+**Goal**: Comprehensive testing support for Lira applications.
+**Depends On**: Phase 11
+**Status**: PLANNED
+
+| ID    | Task                 | Description                                         | Status |
+| ----- | -------------------- | --------------------------------------------------- | ------ |
+| T17.1 | Inline Tests         | `#[test]` attribute for tests in source files       | [ ]    |
+| T17.2 | Doc Tests            | Run code examples in doc comments as tests          | [ ]    |
+| T17.3 | Snapshot Testing     | Compare output against saved snapshots              | [ ]    |
+| T17.4 | Property-Based Tests | Generate random inputs to find edge cases (fuzzing) | [ ]    |
+| T17.5 | Mocking Framework    | Mock functions and types for isolation testing      | [ ]    |
+| T17.6 | Test Fixtures        | Setup/teardown helpers for test suites              | [ ]    |
+| T17.7 | Parallel Test Runner | Run tests concurrently for faster feedback          | [ ]    |
+
+---
+
+## Phase 18: Standard Library Expansions
+
+**Goal**: Extend stdlib with production-ready modules.
+**Depends On**: Phase 6, Phase 13
+**Status**: PLANNED
+
+| ID     | Task          | Description                                       | Status |
+| ------ | ------------- | ------------------------------------------------- | ------ |
+| T18.1  | std.sql       | Database drivers (SQLite, PostgreSQL, MySQL)      | [ ]    |
+| T18.2  | std.cli       | Argument parsing, help generation, subcommands    | [ ]    |
+| T18.3  | std.compress  | Compression (gzip, zstd, brotli)                  | [ ]    |
+| T18.4  | std.websocket | WebSocket client and server                       | [ ]    |
+| T18.5  | std.template  | Template engine for text generation               | [ ]    |
+| T18.6  | std.csv       | CSV parsing and generation                        | [ ]    |
+| T18.7  | std.yaml      | YAML parsing and generation                       | [ ]    |
+| T18.8  | std.toml      | TOML parsing and generation                       | [ ]    |
+| T18.9  | std.image     | Basic image manipulation (resize, crop, format)   | [ ]    |
+| T18.10 | std.crypto    | Encryption (AES, RSA), signatures, key management | [ ]    |
+
+---
+
+## Phase 19: Concurrency Enhancements
+
+**Goal**: Advanced concurrency patterns and primitives.
+**Depends On**: Phase 5
+**Status**: PLANNED
+
+| ID    | Task                    | Description                                          | Status |
+| ----- | ----------------------- | ---------------------------------------------------- | ------ |
+| T19.1 | Channel Timeouts        | `recv_timeout`, `send_timeout` with deadlines        | [ ]    |
+| T19.2 | Context Cancellation    | Propagate cancellation through fiber hierarchies     | [ ]    |
+| T19.3 | Structured Concurrency  | Nurseries/scopes - child fibers tied to parent scope | [ ]    |
+| T19.4 | Select Default          | Non-blocking select with default case                | [ ]    |
+| T19.5 | Broadcast Channels      | One-to-many message distribution                     | [ ]    |
+| T19.6 | Work Stealing Scheduler | Improved fiber scheduling for multi-core             | [ ]    |
+| T19.7 | Fiber Pools             | Reusable fiber pools for high-throughput workloads   | [ ]    |
+| T19.8 | Deadlock Detection      | Runtime detection of channel deadlocks               | [ ]    |
