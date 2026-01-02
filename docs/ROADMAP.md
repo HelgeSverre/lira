@@ -799,3 +799,8 @@ _This roadmap tracks the development of Lira as a standalone systems programming
 | T21.9  | Versioning policy       | Semantic versioning, backwards compatibility rules       | [ ]    |
 | T21.10 | Specification website   | Published spec at docs.lira-lang.org/spec                | [ ]    |
 | T21.11 | Spec validation tool    | lira-spec crate for conformance testing                  | [x]    |
+| T21.12 | Tree-sitter comparison  | Compare EBNF spec with tree-sitter grammar               | [x]    |
+| T21.13 | Name normalization      | Normalize rule names across spec/tree-sitter/parser      | [ ]    |
+| T21.14 | Keyword audit           | Sync keywords across lexer, spec, and tree-sitter        | [ ]    |
+| T21.15 | Semantic tests          | Add runtime behavior conformance tests                   | [ ]    |
+| T21.16 | Sync strategy doc       | Document source-of-truth hierarchy (SPECIFICATION_SYNC)  | [x]    |
