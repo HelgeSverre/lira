@@ -1,0 +1,28 @@
+.debug-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.debug-controls .icon-button {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  transition: background 0.15s, color 0.15s;
+}
+
+.debug-controls .icon-button:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.debug-controls .icon-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.debug-controls .icon-button svg {
+  width: 16px;
+  height: 16px;
+}

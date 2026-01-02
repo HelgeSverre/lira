@@ -1,0 +1,78 @@
+.status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--statusbar-height);
+  padding: 0 12px;
+  background: var(--accent);
+  color: var(--night);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.status-bar-left,
+.status-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-indicator::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--night);
+  flex-shrink: 0;
+}
+
+/* Error: dark red dot with dark text */
+.status-indicator.status-error {
+  color: var(--night);
+}
+
+.status-indicator.status-error::before {
+  background: #7f1d1d;
+}
+
+/* Running: pulsing dark dot */
+.status-indicator.status-running {
+  color: var(--night);
+}
+
+.status-indicator.status-running::before {
+  background: #166534;
+  animation: pulse 1s infinite;
+}
+
+/* Success: dark green dot */
+.status-indicator.status-success {
+  color: var(--night);
+}
+
+.status-indicator.status-success::before {
+  background: #166534;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.fiber-count,
+.cursor-position,
+.language {
+  opacity: 0.9;
+}
+
+.language {
+  padding: 0 8px;
+  background: rgba(26, 27, 38, 0.2);
+  border-radius: 4px;
+}

@@ -1,0 +1,21 @@
+.panel-layout {
+  height: 100%;
+  width: 100%;
+}
+
+.panel-wrapper {
+  height: 100%;
+  overflow: hidden;
+}
+
+.resize-handle {
+  width: 4px;
+  background: var(--border-color);
+  transition: background 0.2s;
+  cursor: col-resize;
+}
+
+.resize-handle:hover,
+.resize-handle[data-resize-handle-active] {
+  background: var(--accent);
+}

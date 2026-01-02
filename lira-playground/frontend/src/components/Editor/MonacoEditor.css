@@ -1,0 +1,40 @@
+.monaco-editor-wrapper {
+  height: 100%;
+  width: 100%;
+}
+
+/* Breakpoint glyph - using Ember red */
+.breakpoint-glyph {
+  background-color: var(--ember);
+  border-radius: 50%;
+  width: 10px !important;
+  height: 10px !important;
+  margin-left: 5px;
+  margin-top: 4px;
+}
+
+/* Current execution line - using Lira Gold */
+.current-execution-line {
+  background-color: rgba(232, 169, 36, 0.15) !important;
+  border-left: 2px solid var(--accent);
+}
+
+.current-execution-glyph {
+  background-color: var(--accent);
+  width: 0;
+  height: 0;
+  border-left: 8px solid var(--accent);
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  margin-left: 3px;
+  margin-top: 3px;
+}
+
+/* Override Monaco default gutter styling */
+.monaco-editor .margin-view-overlays .line-numbers {
+  cursor: pointer;
+}
+
+.monaco-editor .margin-view-overlays .line-numbers:hover {
+  background-color: rgba(232, 169, 36, 0.1);
+}

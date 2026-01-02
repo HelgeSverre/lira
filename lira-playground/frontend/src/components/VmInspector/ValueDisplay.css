@@ -1,0 +1,28 @@
+.value {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.value-content {
+  /* Color applied by parent class */
+}
+
+.value-type {
+  font-size: 10px;
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+.value-null .value-content { color: var(--syntax-keyword); }
+.value-bool .value-content { color: var(--syntax-keyword); }
+.value-int .value-content { color: var(--syntax-number); }
+.value-float .value-content { color: var(--syntax-number); }
+.value-string .value-content { color: var(--syntax-string); }
+.value-array .value-content { color: var(--text-primary); }
+.value-object .value-content { color: var(--text-primary); }
+.value-function .value-content { color: var(--syntax-function); }
+.value-fiber .value-content { color: var(--syntax-type); }
+.value-channel .value-content { color: var(--syntax-type); }
