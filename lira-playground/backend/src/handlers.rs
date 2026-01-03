@@ -121,6 +121,7 @@ pub async fn run(Json(req): Json<RunRequest>) -> impl IntoResponse {
                 exit_code: None,
                 errors,
                 execution_time_ms: start.elapsed().as_millis() as u64,
+                breakpoint: None,
             });
         }
     };
@@ -135,6 +136,7 @@ pub async fn run(Json(req): Json<RunRequest>) -> impl IntoResponse {
                 exit_code: Some(exit_code),
                 errors: vec![],
                 execution_time_ms: start.elapsed().as_millis() as u64,
+                breakpoint: None,
             }),
             Err(e) => Json(RunResponse {
                 success: false,
@@ -147,6 +149,7 @@ pub async fn run(Json(req): Json<RunRequest>) -> impl IntoResponse {
                     severity: ErrorSeverity::Error,
                 }],
                 execution_time_ms: start.elapsed().as_millis() as u64,
+                breakpoint: None,
             }),
         }
     } else {
@@ -163,19 +166,37 @@ pub async fn run(Json(req): Json<RunRequest>) -> impl IntoResponse {
                         exit_code: Some(exit_code),
                         errors: vec![],
                         execution_time_ms: start.elapsed().as_millis() as u64,
+                        breakpoint: None,
                     }),
-                    Err(e) => Json(RunResponse {
-                        success: false,
-                        output: vm.get_output().to_vec(),
-                        exit_code: None,
-                        errors: vec![CompileError {
-                            message: e,
-                            line: None,
-                            column: None,
-                            severity: ErrorSeverity::Error,
-                        }],
-                        execution_time_ms: start.elapsed().as_millis() as u64,
-                    }),
+                    Err(e) => {
+                        // Check if this is a breakpoint hit
+                        if let Some(bp) = parse_breakpoint_error(&e) {
+                            // Breakpoint hit - return output so far and breakpoint info
+                            Json(RunResponse {
+                                success: true, // Not an error, just paused
+                                output: vm.get_output().to_vec(),
+                                exit_code: None,
+                                errors: vec![],
+                                execution_time_ms: start.elapsed().as_millis() as u64,
+                                breakpoint: Some(bp),
+                            })
+                        } else {
+                            // Actual runtime error
+                            Json(RunResponse {
+                                success: false,
+                                output: vm.get_output().to_vec(),
+                                exit_code: None,
+                                errors: vec![CompileError {
+                                    message: e,
+                                    line: None,
+                                    column: None,
+                                    severity: ErrorSeverity::Error,
+                                }],
+                                execution_time_ms: start.elapsed().as_millis() as u64,
+                                breakpoint: None,
+                            })
+                        }
+                    }
                 }
             }
             Err(e) => Json(RunResponse {
@@ -189,9 +210,24 @@ pub async fn run(Json(req): Json<RunRequest>) -> impl IntoResponse {
                     severity: ErrorSeverity::Error,
                 }],
                 execution_time_ms: start.elapsed().as_millis() as u64,
+                breakpoint: None,
             }),
         }
     }
+}
+
+/// Parse breakpoint error message: "Breakpoint hit at line X, column Y (ip=Z)"
+fn parse_breakpoint_error(msg: &str) -> Option<BreakpointInfo> {
+    let msg = msg.strip_prefix("Breakpoint hit at line ")?;
+    let comma_idx = msg.find(", column ")?;
+    let line: u32 = msg[..comma_idx].parse().ok()?;
+    let rest = &msg[comma_idx + ", column ".len()..];
+    let paren_idx = rest.find(" (ip=")?;
+    let column: u32 = rest[..paren_idx].parse().ok()?;
+    let ip_start = paren_idx + " (ip=".len();
+    let ip_end = rest.find(')')?;
+    let ip: usize = rest[ip_start..ip_end].parse().ok()?;
+    Some(BreakpointInfo { line, column, ip })
 }
 
 /// Check endpoint - type checks without generating bytecode
