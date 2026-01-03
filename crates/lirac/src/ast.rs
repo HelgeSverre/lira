@@ -3,10 +3,14 @@
 //! Defines AST node types for the Lira parser.
 //! See docs/lira/03-syntax-constructs.md for the full specification.
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 use crate::lexer::Token;
 
 /// Source location information
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Span {
     pub line: usize,
     pub column: usize,
@@ -23,6 +27,7 @@ impl From<&Token> for Span {
 
 /// Generic type parameter (e.g., T in fn identity<T>)
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct TypeParam {
     pub name: String,
     pub bounds: Vec<String>, // Trait bounds (e.g., T: Display)
@@ -30,18 +35,22 @@ pub struct TypeParam {
 
 /// A complete Lira program
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Program {
     pub statements: Vec<Statement>,
 }
 
 /// Top-level and block statements
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Statement {
     pub kind: StatementKind,
     pub span: Span,
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(tag = "type", content = "value"))]
 pub enum StatementKind {
     /// Variable declaration: let x = expr or var x = expr
     /// Also supports destructuring: let (a, b) = tuple, let { x, y } = struct
@@ -149,6 +158,7 @@ pub enum StatementKind {
 
 /// A block of statements
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Block {
     pub statements: Vec<Statement>,
     pub span: Span,
@@ -156,6 +166,7 @@ pub struct Block {
 
 /// Function parameter
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Parameter {
     pub name: String,
     pub type_ann: TypeExpr,
@@ -165,6 +176,7 @@ pub struct Parameter {
 
 /// Struct/class field
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Field {
     pub name: String,
     pub type_ann: TypeExpr,
@@ -175,6 +187,7 @@ pub struct Field {
 
 /// Enum variant
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct EnumVariant {
     pub name: String,
     pub fields: Vec<TypeExpr>,
@@ -183,6 +196,7 @@ pub struct EnumVariant {
 
 /// Interface method signature
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct InterfaceMethod {
     pub name: String,
     pub params: Vec<Parameter>,
@@ -192,6 +206,7 @@ pub struct InterfaceMethod {
 
 /// Trait method signature (with optional default implementation)
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct TraitMethod {
     pub name: String,
     pub params: Vec<Parameter>,
@@ -203,12 +218,15 @@ pub struct TraitMethod {
 
 /// Type expression
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct TypeExpr {
     pub kind: TypeExprKind,
     pub span: Span,
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(tag = "type", content = "value"))]
 pub enum TypeExprKind {
     /// Simple type name
     Named(String),
@@ -236,12 +254,15 @@ pub enum TypeExprKind {
 
 /// Expressions
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Expression {
     pub kind: ExpressionKind,
     pub span: Span,
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(tag = "type", content = "value"))]
 pub enum ExpressionKind {
     /// Integer literal
     IntLiteral(i64),
@@ -371,6 +392,7 @@ pub enum ExpressionKind {
 
 /// Binary operators
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum BinaryOp {
     // Arithmetic
     Add,
@@ -402,6 +424,7 @@ pub enum BinaryOp {
 
 /// Unary operators
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum UnaryOp {
     Neg,
     Not,
@@ -414,6 +437,7 @@ pub enum UnaryOp {
 
 /// Match arm
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct MatchArm {
     pub pattern: Pattern,
     pub guard: Option<Expression>,
@@ -423,6 +447,7 @@ pub struct MatchArm {
 
 /// Function call argument (supports named arguments)
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Argument {
     /// Optional parameter name for named arguments (e.g., `name:` in `foo(name: "bar")`)
     pub name: Option<String>,
@@ -433,6 +458,7 @@ pub struct Argument {
 
 /// Select arm for channel select statement
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SelectArm {
     pub kind: SelectArmKind,
     pub body: Expression,
@@ -441,6 +467,8 @@ pub struct SelectArm {
 
 /// Type of select arm
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(tag = "type"))]
 pub enum SelectArmKind {
     /// Receive from channel: variable = <-channel
     Recv {
@@ -458,12 +486,15 @@ pub enum SelectArmKind {
 
 /// Pattern for match expressions
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Pattern {
     pub kind: PatternKind,
     pub span: Span,
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(tag = "type", content = "value"))]
 pub enum PatternKind {
     /// Wildcard pattern: _
     Wildcard,
