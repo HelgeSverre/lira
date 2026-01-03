@@ -33,6 +33,27 @@ pub struct RunRequest {
     pub breakpoints: Vec<u32>,
 }
 
+/// Request body for step endpoint
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StepRequest {
+    pub source: String,
+    pub current_line: u32,
+    pub step_type: StepType,
+    #[serde(default)]
+    pub breakpoints: Vec<u32>,
+}
+
+/// Step type for debugging
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StepType {
+    Into,     // Step to next line
+    Over,     // Step over (same as into for now)
+    Out,      // Step out of current context
+    Continue, // Continue to next breakpoint
+}
+
 /// Response for compile endpoint
 #[derive(Debug, Serialize)]
 pub struct CompileResponse {
@@ -240,6 +261,123 @@ pub async fn check(Json(req): Json<SourceRequest>) -> impl IntoResponse {
         Err(e) => Json(CheckResponse {
             success: false,
             errors: parse_error_message(&e),
+        }),
+    }
+}
+
+/// Step endpoint - re-run with temporary breakpoint for stepping
+pub async fn step(Json(req): Json<StepRequest>) -> impl IntoResponse {
+    let start = Instant::now();
+
+    // Compile
+    let bytecode = match compile_source(&req.source) {
+        Ok((_, bytecode)) => bytecode,
+        Err(errors) => {
+            return Json(RunResponse {
+                success: false,
+                output: vec![],
+                exit_code: None,
+                errors,
+                execution_time_ms: start.elapsed().as_millis() as u64,
+                breakpoint: None,
+            });
+        }
+    };
+
+    // Calculate effective breakpoints based on step type
+    // Key insight: since we re-run from scratch, we must only set breakpoints
+    // at lines AFTER the current line to avoid stopping at the same place again.
+    let effective_breakpoints: Vec<u32> = match req.step_type {
+        StepType::Into | StepType::Over => {
+            // Step to next executable line after current
+            // Add temporary breakpoints at next few lines (in case some are empty/comments)
+            let mut bps: Vec<u32> = vec![
+                req.current_line + 1,
+                req.current_line + 2,
+                req.current_line + 3,
+            ];
+            // Also include user breakpoints that are after current line
+            for &bp in &req.breakpoints {
+                if bp > req.current_line && !bps.contains(&bp) {
+                    bps.push(bp);
+                }
+            }
+            bps
+        }
+        StepType::Out => {
+            // Skip all breakpoints at or before current line
+            // This effectively runs to the next user breakpoint after current position
+            req.breakpoints
+                .iter()
+                .filter(|&&l| l > req.current_line)
+                .copied()
+                .collect()
+        }
+        StepType::Continue => {
+            // Run to next user breakpoint after current line
+            req.breakpoints
+                .iter()
+                .filter(|&&l| l > req.current_line)
+                .copied()
+                .collect()
+        }
+    };
+
+    // Run with calculated breakpoints
+    match liravm::create_vm(&bytecode) {
+        Ok(mut vm) => {
+            vm.set_capture_output(true);
+            vm.set_breakpoints(effective_breakpoints);
+
+            match vm.run() {
+                Ok(exit_code) => Json(RunResponse {
+                    success: true,
+                    output: vm.get_output().to_vec(),
+                    exit_code: Some(exit_code),
+                    errors: vec![],
+                    execution_time_ms: start.elapsed().as_millis() as u64,
+                    breakpoint: None,
+                }),
+                Err(e) => {
+                    if let Some(bp) = parse_breakpoint_error(&e) {
+                        Json(RunResponse {
+                            success: true,
+                            output: vm.get_output().to_vec(),
+                            exit_code: None,
+                            errors: vec![],
+                            execution_time_ms: start.elapsed().as_millis() as u64,
+                            breakpoint: Some(bp),
+                        })
+                    } else {
+                        Json(RunResponse {
+                            success: false,
+                            output: vm.get_output().to_vec(),
+                            exit_code: None,
+                            errors: vec![CompileError {
+                                message: e,
+                                line: None,
+                                column: None,
+                                severity: ErrorSeverity::Error,
+                            }],
+                            execution_time_ms: start.elapsed().as_millis() as u64,
+                            breakpoint: None,
+                        })
+                    }
+                }
+            }
+        }
+        Err(e) => Json(RunResponse {
+            success: false,
+            output: vec![],
+            exit_code: None,
+            errors: vec![CompileError {
+                message: e,
+                line: None,
+                column: None,
+                severity: ErrorSeverity::Error,
+            }],
+            execution_time_ms: start.elapsed().as_millis() as u64,
+            breakpoint: None,
         }),
     }
 }

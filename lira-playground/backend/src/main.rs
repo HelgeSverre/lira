@@ -51,6 +51,7 @@ async fn main() {
         .route("/api/compile", post(handlers::compile))
         .route("/api/run", post(handlers::run))
         .route("/api/check", post(handlers::check))
+        .route("/api/step", post(handlers::step))
         .route("/ws", get(handlers::websocket))
         .layer(cors)
         // Serve frontend static files with SPA fallback

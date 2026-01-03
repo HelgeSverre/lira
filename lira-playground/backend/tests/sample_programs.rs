@@ -322,3 +322,151 @@ if true {
     let json = serde_json::to_value(&ast);
     assert!(json.is_ok(), "AST serialization failed: {:?}", json.err());
 }
+
+// ===== Breakpoint/Stepping Tests =====
+
+/// Helper to run with breakpoints and return the breakpoint hit (if any)
+fn run_with_breakpoints(source: &str, breakpoints: Vec<u32>) -> Result<(Option<u32>, Vec<String>), String> {
+    let bytecode = compile(source)?;
+    let mut vm = liravm::create_vm(&bytecode).map_err(|e| e.to_string())?;
+    vm.set_capture_output(true);
+    vm.set_breakpoints(breakpoints);
+
+    match vm.run() {
+        Ok(_exit_code) => Ok((None, vm.get_output().to_vec())),
+        Err(e) => {
+            if e.starts_with("Breakpoint hit at line ") {
+                // Parse breakpoint line from error message
+                let line = e
+                    .strip_prefix("Breakpoint hit at line ")
+                    .and_then(|s| s.split(',').next())
+                    .and_then(|s| s.parse::<u32>().ok());
+                Ok((line, vm.get_output().to_vec()))
+            } else {
+                Err(e)
+            }
+        }
+    }
+}
+
+#[test]
+fn test_breakpoint_stops_at_first_breakpoint() {
+    // Line numbers (1-based):
+    // 1: (empty)
+    // 2: println("line 2")
+    // 3: println("line 3")
+    // 4: println("line 4")
+    let source = r#"
+println("line 2")
+println("line 3")
+println("line 4")
+"#;
+
+    // Set breakpoint at line 3
+    let result = run_with_breakpoints(source, vec![3]);
+    assert!(result.is_ok(), "Failed: {:?}", result);
+    let (bp_line, output) = result.unwrap();
+
+    // Should stop at line 3
+    assert_eq!(bp_line, Some(3), "Should stop at line 3");
+    // Should have output from line 2 only
+    assert_eq!(output, vec!["line 2"]);
+}
+
+#[test]
+fn test_breakpoint_stops_at_first_of_two() {
+    let source = r#"
+println("line 2")
+println("line 3")
+println("line 4")
+println("line 5")
+"#;
+
+    // Set breakpoints at lines 3 and 5
+    let result = run_with_breakpoints(source, vec![3, 5]);
+    assert!(result.is_ok(), "Failed: {:?}", result);
+    let (bp_line, output) = result.unwrap();
+
+    // Should stop at line 3 (first breakpoint)
+    assert_eq!(bp_line, Some(3), "Should stop at first breakpoint (line 3)");
+    // Should have output from line 2 only
+    assert_eq!(output, vec!["line 2"]);
+}
+
+#[test]
+fn test_continue_to_second_breakpoint() {
+    let source = r#"
+println("line 2")
+println("line 3")
+println("line 4")
+println("line 5")
+"#;
+
+    // Simulate "continue" from line 3 to line 5:
+    // We only set breakpoint at line 5 (filtering out line 3)
+    let result = run_with_breakpoints(source, vec![5]);
+    assert!(result.is_ok(), "Failed: {:?}", result);
+    let (bp_line, output) = result.unwrap();
+
+    // Should stop at line 5
+    assert_eq!(bp_line, Some(5), "Should stop at line 5");
+    // Should have output from lines 2, 3, 4
+    assert_eq!(output, vec!["line 2", "line 3", "line 4"]);
+}
+
+#[test]
+fn test_step_into_skips_current_line() {
+    let source = r#"
+println("line 2")
+println("line 3")
+println("line 4")
+println("line 5")
+"#;
+
+    // Simulate "step into" from line 3:
+    // Set breakpoints at lines 4, 5, 6 (current_line + 1, +2, +3)
+    // This should stop at line 4
+    let result = run_with_breakpoints(source, vec![4, 5, 6]);
+    assert!(result.is_ok(), "Failed: {:?}", result);
+    let (bp_line, output) = result.unwrap();
+
+    // Should stop at line 4
+    assert_eq!(bp_line, Some(4), "Should stop at next line (4)");
+    // Should have output from lines 2, 3
+    assert_eq!(output, vec!["line 2", "line 3"]);
+}
+
+#[test]
+fn test_no_breakpoint_runs_to_completion() {
+    let source = r#"
+println("line 2")
+println("line 3")
+println("line 4")
+"#;
+
+    // No breakpoints
+    let result = run_with_breakpoints(source, vec![]);
+    assert!(result.is_ok(), "Failed: {:?}", result);
+    let (bp_line, output) = result.unwrap();
+
+    // Should complete (no breakpoint hit)
+    assert_eq!(bp_line, None, "Should run to completion");
+    assert_eq!(output, vec!["line 2", "line 3", "line 4"]);
+}
+
+#[test]
+fn test_breakpoint_after_last_line_runs_to_completion() {
+    let source = r#"
+println("line 2")
+println("line 3")
+"#;
+
+    // Breakpoint after all code
+    let result = run_with_breakpoints(source, vec![100]);
+    assert!(result.is_ok(), "Failed: {:?}", result);
+    let (bp_line, output) = result.unwrap();
+
+    // Should complete (breakpoint never reached)
+    assert_eq!(bp_line, None, "Should run to completion");
+    assert_eq!(output, vec!["line 2", "line 3"]);
+}
