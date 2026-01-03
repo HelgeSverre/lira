@@ -61,12 +61,20 @@ export interface CompileResponse {
   compileTimeMs: number;
 }
 
+export interface BreakpointInfo {
+  line: number;
+  column: number;
+  ip: number;
+}
+
 export interface RunResponse {
   success: boolean;
   output: string[];
   exitCode: number | null;
   errors: CompileError[];
   executionTimeMs: number;
+  /** If execution paused at a breakpoint, this contains the location */
+  breakpoint?: BreakpointInfo;
 }
 
 export interface CheckResponse {
