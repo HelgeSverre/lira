@@ -5,105 +5,203 @@ default:
     @just --list
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Development
+# Build - Core compilation targets
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Build compiler and VM
-[group('dev')]
+[group('build')]
 build:
     cargo build --package lirac --package liravm
 
-# Build all including LSP and doc generator
-[group('dev')]
+# Build all packages (compiler, VM, LSP, doc generator)
+[group('build')]
 build-all:
-    cargo build --package lirac --package liravm --package lira-lsp --package lira-doc
+    cargo build --package lirac --package liravm --package lira-lsp --package lira-doc --package lira-playground
 
 # Build in release mode
-[group('dev')]
+[group('build')]
 release:
     cargo build --package lirac --package liravm --release
 
 # Build all in release mode
-[group('dev')]
+[group('build')]
 release-all:
-    cargo build --package lirac --package liravm --package lira-lsp --package lira-doc --release
+    cargo build --package lirac --package liravm --package lira-lsp --package lira-doc --package lira-playground --release
 
-# Run all tests
-[group('dev')]
-test:
-    cargo test --package lirac --package liravm --package lira-core
-    cargo test --package lirac --test integration
+# Clean build artifacts
+[group('build')]
+clean:
+    cargo clean
 
-# Run all tests with output
-[group('dev')]
-test-verbose:
-    cargo test --package lirac --package liravm --package lira-core -- --nocapture
-    cargo test --package lirac --test integration -- --nocapture
+# Run the LSP server
+[group('build')]
+lsp:
+    cargo run --package lira-lsp
 
-# Type check without building
-[group('dev')]
-check:
-    cargo check --package lirac --package liravm --package lira-core
+# ─────────────────────────────────────────────────────────────────────────────
+# Dev - Development workflow commands
+# ─────────────────────────────────────────────────────────────────────────────
 
 # Compile and run a Lira file
 [group('dev')]
 run file:
     cargo build --package lirac --package liravm --release
-    ./target/release/lirac compile {{file}} -o /tmp/out.lic
+    ./target/release/lirac compile {{ file }} -o /tmp/out.lic
     ./target/release/liravm run /tmp/out.lic
+
+# Run all tests
+[group('dev')]
+test:
+    cargo test --package lirac --package liravm --package lira-core --package lira-playground
+    cargo test --package lirac --test integration
+
+# Run all tests with output
+[group('dev')]
+test-verbose:
+    cargo test --package lirac --package liravm --package lira-core --package lira-playground -- --nocapture
+    cargo test --package lirac --test integration -- --nocapture
+
+# Type check without building
+[group('dev')]
+check:
+    cargo check --workspace
 
 # Run clippy lints
 [group('dev')]
 clippy:
-    cargo clippy --package lirac --package liravm --package lira-core -- -D warnings
+    cargo clippy --workspace -- -D warnings
 
 # Format code
 [group('dev')]
 fmt:
     cargo fmt --all
 
-# Clean build artifacts
+# Check formatting without modifying
 [group('dev')]
-clean:
-    cargo clean
+fmt-check:
+    cargo fmt --all -- --check
 
-# Run the LSP server (for testing)
+# Run all checks (fmt, clippy, test)
 [group('dev')]
-lsp:
-    cargo run --package lira-lsp
+ci: fmt-check clippy test
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Docs - Documentation generation
+# ─────────────────────────────────────────────────────────────────────────────
 
 # Generate documentation for stdlib
-[group('dev')]
+[group('docs')]
 doc:
     cargo run --package lira-doc -- generate stdlib/ -o docs/stdlib/
 
 # Generate documentation for a specific file
-[group('dev')]
+[group('docs')]
 doc-file file:
-    cargo run --package lira-doc -- generate {{file}}
+    cargo run --package lira-doc -- generate {{ file }}
 
 # Generate combined mdBook (stdlib + examples)
-[group('dev')]
+[group('docs')]
 doc-book:
     cargo run --package lira-doc -- book -o docs/book/
 
 # Build mdBook documentation (requires mdbook)
-[group('dev')]
+[group('docs')]
 doc-build: doc-book
     cd docs/book && mdbook build
 
 # Serve mdBook documentation locally (requires mdbook)
-[group('dev')]
+[group('docs')]
 doc-serve: doc-book
     cd docs/book && mdbook serve
 
 # Generate stdlib-only mdBook
-[group('dev')]
+[group('docs')]
 doc-stdlib:
     cargo run --package lira-doc -- generate stdlib/ --mdbook --title "Lira Standard Library" -o docs/stdlib-book/
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Installation
+# Playground - Web playground commands
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Build playground backend
+[group('playground')]
+playground-build:
+    cargo build --package lira-playground --release
+
+# Run playground backend server
+[group('playground')]
+playground-server port="3001":
+    PORT={{ port }} cargo run --package lira-playground --release
+
+# Run playground tests
+[group('playground')]
+playground-test:
+    cargo test --package lira-playground
+
+# Install playground frontend dependencies
+[group('playground')]
+playground-frontend-install:
+    cd lira-playground/frontend && pnpm install
+
+# Build playground frontend
+[group('playground')]
+playground-frontend-build:
+    cd lira-playground/frontend && pnpm build
+
+# Run playground frontend dev server
+[group('playground')]
+playground-frontend-dev:
+    cd lira-playground/frontend && pnpm dev
+
+# Run playground in development mode (hot-reload, React DevTools, sourcemaps)
+[group('playground')]
+playground-dev port="3001":
+    #!/usr/bin/env bash
+    set -e
+
+    # Trap to kill both processes on exit
+    trap 'kill $(jobs -p) 2>/dev/null' EXIT
+
+    echo "Starting Lira Playground (dev mode)..."
+    echo ""
+    echo "  Frontend: http://localhost:5173 (with hot-reload)"
+    echo "  Backend:  http://localhost:{{ port }} (API only)"
+    echo ""
+    echo "Open http://localhost:5173 in your browser"
+    echo "Press Ctrl+C to stop both servers"
+    echo ""
+
+    # Build and start backend in background
+    cargo build --package lira-playground --release
+    PORT={{ port }} ./target/release/lira-playground &
+
+    # Start frontend dev server (this blocks)
+    cd lira-playground/frontend && pnpm install --silent && VITE_API_URL=http://localhost:{{ port }} pnpm dev
+
+# Build and serve playground (production preview)
+[group('playground')]
+playground port="3001":
+    #!/usr/bin/env bash
+    set -e
+
+    echo "Building Lira Playground..."
+
+    # Ensure frontend deps are installed and build
+    cd lira-playground/frontend && pnpm install --silent && pnpm build && cd ../..
+
+    # Build backend
+    cargo build --package lira-playground --release
+
+    echo ""
+    echo "Lira Playground running at http://localhost:{{ port }}"
+    echo "Press Ctrl+C to stop"
+    echo ""
+
+    # Run backend (serves frontend from dist/)
+    PORT={{ port }} ./target/release/lira-playground
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Install - Binary and extension installation
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Build and install binaries to ~/.local/bin
@@ -114,6 +212,7 @@ install: release-all
     cp target/release/liravm ~/.local/bin/
     cp target/release/lira-lsp ~/.local/bin/
     cp target/release/lira-doc ~/.local/bin/
+    cp target/release/lira-playground ~/.local/bin/
 
 # Install Vim/Neovim syntax highlighting
 [group('install')]
@@ -175,87 +274,78 @@ editors-install: vim-install nvim-install zed-install helix-install
     @echo "  just intellij-build  - Build IntelliJ plugin"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Editor Extensions
+# Editor - Editor extension testing
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Build tree-sitter grammar
-[group('editors')]
-ts-build:
-    cd editors/tree-sitter-lira && npm install && npx tree-sitter generate
-
-# Test tree-sitter grammar
-[group('editors')]
-ts-test:
-    cd editors/tree-sitter-lira && npx tree-sitter test
-
-# Parse a file with tree-sitter (for debugging)
-[group('editors')]
-ts-parse file:
-    cd editors/tree-sitter-lira && npx tree-sitter parse {{file}}
-
-# Highlight a file with tree-sitter (for debugging)
-[group('editors')]
-ts-highlight file:
-    cd editors/tree-sitter-lira && npx tree-sitter highlight {{file}}
-
 # Open a test file in Vim to verify highlighting
-[group('editors')]
+[group('editor')]
 vim-test:
     vim examples/hello.li
 
 # Open a test file in Neovim to verify highlighting
-[group('editors')]
+[group('editor')]
 nvim-test:
     nvim examples/hello.li
 
 # Open Zed with a test file
-[group('editors')]
+[group('editor')]
 zed-test:
     zed examples/hello.li
 
 # Open Helix with a test file
-[group('editors')]
+[group('editor')]
 helix-test:
     hx examples/hello.li
 
 # Build IntelliJ plugin
-[group('editors')]
+[group('editor')]
 intellij-build:
     @echo "Building IntelliJ plugin..."
     cd editors/intellij-lira && ./gradlew buildPlugin
     @echo "Plugin built: editors/intellij-lira/build/distributions/"
 
 # Open IntelliJ with the plugin (dev mode)
-[group('editors')]
+[group('editor')]
 intellij-test:
     cd editors/intellij-lira && ./gradlew runIde
 
 # Build VS Code extension
-[group('editors')]
+[group('editor')]
 vscode-build:
     @echo "Building VS Code extension..."
     cd editors/vscode-lira && npm install && npm run compile && npm run package
     @echo "Extension built: editors/vscode-lira/*.vsix"
 
 # Open VS Code with a test file
-[group('editors')]
+[group('editor')]
 vscode-test:
     code examples/hello.li
 
 # Open VS Code in extension development mode
-[group('editors')]
+[group('editor')]
 vscode-dev:
     cd editors/vscode-lira && code --extensionDevelopmentPath=$(pwd) ../../examples/hello.li
 
-# Test all editor installations by opening files
-[group('editors')]
-editors-test-vim: vim-test
+# ─────────────────────────────────────────────────────────────────────────────
+# Tree-sitter - Grammar development
+# ─────────────────────────────────────────────────────────────────────────────
 
-[group('editors')]
-editors-test-nvim: nvim-test
+# Build tree-sitter grammar
+[group('treesitter')]
+ts-build:
+    cd editors/tree-sitter-lira && npm install && npx tree-sitter generate
 
-[group('editors')]
-editors-test-zed: zed-test
+# Test tree-sitter grammar
+[group('treesitter')]
+ts-test:
+    cd editors/tree-sitter-lira && npx tree-sitter test
 
-[group('editors')]
-editors-test-helix: helix-test
+# Parse a file with tree-sitter (for debugging)
+[group('treesitter')]
+ts-parse file:
+    cd editors/tree-sitter-lira && npx tree-sitter parse {{ file }}
+
+# Highlight a file with tree-sitter (for debugging)
+[group('treesitter')]
+ts-highlight file:
+    cd editors/tree-sitter-lira && npx tree-sitter highlight {{ file }}
