@@ -18,6 +18,7 @@ pub mod vm;
 
 // Re-export commonly used types
 pub use value::{ChannelId, FiberId, Value};
+pub use vm::{ChannelSnapshot, FiberSnapshot, StepResult, VmSnapshot, VM};
 
 use std::fs;
 
@@ -68,4 +69,36 @@ pub fn run_with_debug(bytecode: &[u8]) -> Result<i32, String> {
 
     // Execute
     vm.run()
+}
+
+/// Run bytecode with output streaming callback
+/// Returns (exit_code, final_snapshot)
+pub fn run_with_streaming<F>(
+    bytecode: &[u8],
+    on_output: F,
+) -> Result<(i32, VmSnapshot), String>
+where
+    F: FnMut(&str) + 'static,
+{
+    // Load bytecode
+    let program = bytecode::load(bytecode)?;
+
+    // Create VM with output callback
+    let mut vm = vm::VM::new(program);
+    vm.set_capture_output(true);
+    vm.set_output_callback(on_output);
+
+    // Execute
+    let exit_code = vm.run()?;
+
+    // Get final snapshot
+    let snapshot = vm.get_snapshot();
+
+    Ok((exit_code, snapshot))
+}
+
+/// Create a VM for manual stepping/control
+pub fn create_vm(bytecode: &[u8]) -> Result<VM, String> {
+    let program = bytecode::load(bytecode)?;
+    Ok(vm::VM::new(program))
 }
