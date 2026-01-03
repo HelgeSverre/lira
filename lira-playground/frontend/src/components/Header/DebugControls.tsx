@@ -1,36 +1,62 @@
+import { step } from '../../api/client';
+import type { StepType } from '../../api/client';
+import { useEditorStore } from '../../stores/editorStore';
 import { useVmStore } from '../../stores/vmStore';
 import './DebugControls.css';
 
 export function DebugControls() {
-  const { executionStatus } = useVmStore();
+  const { sourceCode, breakpoints, highlightedLine, setHighlightedLine } = useEditorStore();
+  const { executionStatus, setPaused, setFinished, appendOutput, reset, clearOutput } = useVmStore();
 
   const isPaused = executionStatus === 'paused';
   const isRunning = executionStatus === 'running';
   const canStep = isPaused;
+  const currentLine = highlightedLine ?? 1;
 
-  // These will be connected to actual functionality later
-  const handleContinue = () => {
-    console.log('Continue');
+  const handleStep = async (stepType: StepType) => {
+    if (!isPaused && stepType !== 'continue') return;
+
+    try {
+      // Clear previous output when stepping (since we re-run from start)
+      clearOutput();
+
+      const result = await step({
+        source: sourceCode,
+        currentLine,
+        stepType,
+        breakpoints: Array.from(breakpoints),
+      });
+
+      // Handle output
+      for (const line of result.output) {
+        appendOutput(line);
+      }
+
+      if (result.breakpoint) {
+        setPaused();
+        setHighlightedLine(result.breakpoint.line);
+      } else if (result.success) {
+        setHighlightedLine(null);
+        setFinished(result.exitCode ?? 0, result.executionTimeMs);
+      }
+    } catch (error) {
+      console.error('Step failed:', error);
+    }
   };
+
+  const handleContinue = () => handleStep('continue');
+  const handleStepInto = () => handleStep('into');
+  const handleStepOver = () => handleStep('over');
+  const handleStepOut = () => handleStep('out');
 
   const handlePause = () => {
-    console.log('Pause');
-  };
-
-  const handleStep = () => {
-    console.log('Step');
-  };
-
-  const handleStepOver = () => {
-    console.log('Step Over');
-  };
-
-  const handleStepOut = () => {
-    console.log('Step Out');
+    // Pause not implemented yet (would need WebSocket for async interruption)
+    console.log('Pause not implemented');
   };
 
   const handleReset = () => {
-    console.log('Reset');
+    reset();
+    setHighlightedLine(null);
   };
 
   return (
@@ -39,7 +65,7 @@ export function DebugControls() {
         <button
           className="icon-button"
           onClick={handlePause}
-          title="Pause (F6)"
+          title="Pause execution (F6)"
         >
           <PauseIcon />
         </button>
@@ -48,7 +74,7 @@ export function DebugControls() {
           className="icon-button"
           onClick={handleContinue}
           disabled={!isPaused}
-          title="Continue (F5)"
+          title="Continue to next breakpoint (F5)"
         >
           <PlayIcon />
         </button>
@@ -56,9 +82,9 @@ export function DebugControls() {
 
       <button
         className="icon-button"
-        onClick={handleStep}
+        onClick={handleStepInto}
         disabled={!canStep}
-        title="Step Into (F11)"
+        title="Step to next line (F11)"
       >
         <StepIntoIcon />
       </button>
@@ -67,7 +93,7 @@ export function DebugControls() {
         className="icon-button"
         onClick={handleStepOver}
         disabled={!canStep}
-        title="Step Over (F10)"
+        title="Step over function call (F10)"
       >
         <StepOverIcon />
       </button>
@@ -76,7 +102,7 @@ export function DebugControls() {
         className="icon-button"
         onClick={handleStepOut}
         disabled={!canStep}
-        title="Step Out (Shift+F11)"
+        title="Step out of current function (Shift+F11)"
       >
         <StepOutIcon />
       </button>
@@ -84,7 +110,7 @@ export function DebugControls() {
       <button
         className="icon-button"
         onClick={handleReset}
-        title="Reset (Ctrl+Shift+F5)"
+        title="Stop debugging and reset (Ctrl+Shift+F5)"
       >
         <ResetIcon />
       </button>

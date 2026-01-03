@@ -82,6 +82,15 @@ export interface CheckResponse {
   errors: CompileError[];
 }
 
+export type StepType = 'into' | 'over' | 'out' | 'continue';
+
+export interface StepRequest {
+  source: string;
+  currentLine: number;
+  stepType: StepType;
+  breakpoints: number[];
+}
+
 /**
  * Compile source code and get the AST
  */
@@ -143,6 +152,26 @@ export async function check(source: string): Promise<CheckResponse> {
 
   if (!response.ok) {
     throw new Error(`Check request failed: ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
+/**
+ * Step through code (for debugging)
+ * Re-runs the code with a temporary breakpoint at the next line
+ */
+export async function step(request: StepRequest): Promise<RunResponse> {
+  const response = await fetch(`${API_BASE}/api/step`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Step request failed: ${response.statusText}`);
   }
 
   return response.json();
