@@ -1,12 +1,11 @@
 import { useEditorStore } from '../../stores/editorStore';
 import { useCompilerStore } from '../../stores/compilerStore';
 import { useVmStore } from '../../stores/vmStore';
-import { mockCompile } from '../../mocks/mockCompiler';
-import { MockVm } from '../../mocks/mockVm';
+import { compile as compileCode, run as runCode } from '../../api/client';
 import { useRef } from 'react';
 
 export function RunButton() {
-  const { sourceCode, markClean } = useEditorStore();
+  const { sourceCode, markClean, breakpoints } = useEditorStore();
   const { startCompilation, setCompilationSuccess, setCompilationError } = useCompilerStore();
   const {
     executionStatus,
@@ -15,58 +14,74 @@ export function RunButton() {
     setFinished,
     setError,
     appendOutput,
-    updateVmState,
+    reset,
   } = useVmStore();
 
-  const vmRef = useRef<MockVm | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const isRunning = executionStatus === 'running';
   const isCompiling = executionStatus === 'compiling';
 
   const handleRun = async () => {
-    // Start execution (shows compiling state)
+    // Reset previous state
+    reset();
     startExecution();
     startCompilation();
 
-    // Compile first
-    await new Promise(resolve => setTimeout(resolve, 100));
-    const result = mockCompile(sourceCode);
+    try {
+      abortControllerRef.current = new AbortController();
 
-    if (result.errors.length > 0) {
-      setCompilationError(result.errors);
-      setError('Compilation failed');
-      return;
+      // Step 1: Compile first to get AST and check for errors
+      const compileResult = await compileCode(sourceCode);
+
+      if (!compileResult.success || compileResult.errors.length > 0) {
+        setCompilationError(compileResult.errors);
+        setError(compileResult.errors[0]?.message || 'Compilation failed');
+        return;
+      }
+
+      // Update AST in compiler store
+      if (compileResult.ast) {
+        setCompilationSuccess(compileResult.ast);
+      }
+
+      // Step 2: Now run the code (pass breakpoints from editor)
+      setRunning();
+      const breakpointLines = Array.from(breakpoints);
+      const result = await runCode(sourceCode, breakpointLines);
+
+      if (result.success) {
+        markClean();
+
+        // Output each line
+        for (const line of result.output) {
+          appendOutput(line);
+        }
+
+        // Finished
+        setFinished(result.exitCode ?? 0, result.executionTimeMs);
+      } else {
+        setCompilationError(result.errors);
+        setError(result.errors[0]?.message || 'Execution failed');
+      }
+    } catch (error) {
+      console.error('Run failed:', error);
+      if (error instanceof Error && error.name !== 'AbortError') {
+        setError(error.message);
+      } else {
+        setError('An unexpected error occurred');
+      }
+    } finally {
+      abortControllerRef.current = null;
     }
-
-    setCompilationSuccess(result.ast);
-    markClean();
-
-    // Create and run VM
-    setRunning();
-    const startTime = Date.now();
-
-    vmRef.current = new MockVm({
-      onOutput: (line) => appendOutput(line),
-      onStateUpdate: (state) => updateVmState(state),
-      onFinished: (exitCode) => {
-        const duration = Date.now() - startTime;
-        setFinished(exitCode, duration);
-        vmRef.current = null;
-      },
-      onError: (error) => {
-        setError(error);
-        vmRef.current = null;
-      },
-    });
-
-    vmRef.current.run();
   };
 
   const handleStop = () => {
-    if (vmRef.current) {
-      vmRef.current.stop();
-      vmRef.current = null;
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
     }
+    reset();
   };
 
   if (isRunning) {

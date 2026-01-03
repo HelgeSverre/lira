@@ -1,6 +1,6 @@
 import { useEditorStore } from '../../stores/editorStore';
 import { useCompilerStore } from '../../stores/compilerStore';
-import { mockCompile } from '../../mocks/mockCompiler';
+import { compile } from '../../api/client';
 
 export function CompileButton() {
   const { sourceCode, markClean } = useEditorStore();
@@ -11,16 +11,22 @@ export function CompileButton() {
   const handleCompile = async () => {
     startCompilation();
 
-    // Simulate async compilation
-    await new Promise(resolve => setTimeout(resolve, 100));
+    try {
+      const result = await compile(sourceCode);
 
-    const result = mockCompile(sourceCode);
-
-    if (result.errors.length > 0) {
-      setCompilationError(result.errors);
-    } else {
-      setCompilationSuccess(result.ast);
-      markClean();
+      if (result.success && result.ast) {
+        setCompilationSuccess(result.ast);
+        markClean();
+      } else {
+        setCompilationError(result.errors);
+      }
+    } catch (error) {
+      setCompilationError([{
+        message: error instanceof Error ? error.message : 'Compilation failed',
+        line: null,
+        column: null,
+        severity: 'error',
+      }]);
     }
   };
 

@@ -75,13 +75,15 @@ function StatementNode({ statement }: StatementNodeProps) {
         );
 
       case 'Expression':
-        return <ExpressionNode expression={kind.expr} />;
+        // Tuple variant: inner Expression fields (kind, span) are spread onto the StatementKind
+        return <ExpressionNode expression={{ kind: kind.kind, span: kind.span }} />;
 
       case 'Return':
+        // Tuple variant with Option: Some(expr) has spread fields, None has no expression
         return (
           <>
             <span className="ast-keyword">return</span>
-            {kind.value && <ExpressionNode expression={kind.value} />}
+            {kind.kind && <ExpressionNode expression={{ kind: kind.kind, span: kind.span! }} />}
           </>
         );
 
@@ -124,7 +126,13 @@ function StatementNode({ statement }: StatementNodeProps) {
         );
 
       case 'Break':
-        return <span className="ast-keyword">break</span>;
+        // Tuple variant with Option: Some(expr) has spread fields, None has no expression
+        return (
+          <>
+            <span className="ast-keyword">break</span>
+            {kind.kind && <ExpressionNode expression={{ kind: kind.kind, span: kind.span! }} />}
+          </>
+        );
 
       case 'Continue':
         return <span className="ast-keyword">continue</span>;

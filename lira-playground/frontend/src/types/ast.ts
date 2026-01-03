@@ -26,6 +26,16 @@ export interface Statement {
   span: Span;
 }
 
+/**
+ * StatementKind types.
+ *
+ * Note: Some Rust variants are tuple variants (e.g., `Expression(Expression)`).
+ * With serde's `tag = "type", content = "value"` and our normalizeAst() function,
+ * tuple variants containing objects have their fields spread directly:
+ * - Expression(expr) → {type: "Expression", kind: ExpressionKind, span: Span}
+ * - Return(Some(expr)) → {type: "Return", kind: ExpressionKind, span: Span}
+ * - Return(None) → {type: "Return", value: null}
+ */
 export type StatementKind =
   | { type: 'VarDecl'; pattern: Pattern; mutable: boolean; typeAnn: TypeExpr | null; initializer: Expression | null }
   | { type: 'ConstDecl'; name: string; typeAnn: TypeExpr | null; initializer: Expression }
@@ -35,13 +45,16 @@ export type StatementKind =
   | { type: 'EnumDecl'; name: string; variants: EnumVariant[] }
   | { type: 'InterfaceDecl'; name: string; methods: InterfaceMethod[] }
   | { type: 'TypeAlias'; name: string; typeExpr: TypeExpr }
-  | { type: 'Expression'; expr: Expression }
-  | { type: 'Return'; value: Expression | null }
+  // Tuple variant: inner Expression fields are spread (kind, span)
+  | { type: 'Expression'; kind: ExpressionKind; span: Span }
+  // Tuple variant with Option: Some case has spread fields, None case has value: null
+  | { type: 'Return'; kind?: ExpressionKind; span?: Span; value?: null }
   | { type: 'If'; condition: Expression; thenBranch: Block; elseBranch: Block | null }
   | { type: 'While'; condition: Expression; body: Block }
   | { type: 'For'; variable: string; iterable: Expression; body: Block }
   | { type: 'Loop'; body: Block }
-  | { type: 'Break'; value: Expression | null }
+  // Tuple variant with Option: Some case has spread fields, None case has value: null
+  | { type: 'Break'; kind?: ExpressionKind; span?: Span; value?: null }
   | { type: 'Continue' }
   | { type: 'Import'; path: string[]; items: string[] | null }
   | { type: 'Use'; path: string[]; alias: string | null; items: string[] | null }

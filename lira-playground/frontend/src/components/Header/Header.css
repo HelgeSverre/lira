@@ -38,9 +38,9 @@
   color: var(--text-primary);
 }
 
-.logo-text::first-letter {
-  color: var(--accent);
-}
+/*.logo-text::first-letter {*/
+/*  color: var(--accent);*/
+/*}*/
 
 .header-divider {
   width: 1px;

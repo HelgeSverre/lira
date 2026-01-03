@@ -2,6 +2,9 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 
+// Backend URL from env or default to 3001
+const backendUrl = process.env.VITE_API_URL || 'http://localhost:3001'
+
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -12,8 +15,16 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      '/api': {
+        target: backendUrl,
+        changeOrigin: true,
+      },
+      '/health': {
+        target: backendUrl,
+        changeOrigin: true,
+      },
       '/ws': {
-        target: 'ws://localhost:3000',
+        target: backendUrl.replace('http', 'ws'),
         ws: true,
       },
     },

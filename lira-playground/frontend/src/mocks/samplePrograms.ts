@@ -1,16 +1,16 @@
 /**
  * Sample Lira programs for the playground
+ * These programs are tested against the actual compiler.
  */
 
 export const SAMPLE_PROGRAMS = {
   helloWorld: `// Hello World in Lira
-fn main() {
-    println("Hello, Lira!")
-}
+println("Hello, Lira!")
+println("Welcome to the Lira Playground!")`,
 
-main()`,
+  fibonacci: `// Fibonacci Sequence
+// Demonstrates recursion and functions
 
-  fibonacci: `// Fibonacci sequence
 fn fib(n: int) -> int {
     if n <= 1 {
         return n
@@ -18,188 +18,248 @@ fn fib(n: int) -> int {
     return fib(n - 1) + fib(n - 2)
 }
 
-fn main() {
-    for i in 0..10 {
-        println("fib(" + i + ") = " + fib(i))
+// Print first 10 fibonacci numbers
+var i = 0
+while i < 10 {
+    let result = fib(i)
+    println("fib(" + i + ") = " + result)
+    i = i + 1
+}`,
+
+  arrays: `// Array Operations
+// Demonstrates arrays, loops, and iteration
+
+println("=== Array Basics ===")
+
+let numbers = [1, 2, 3, 4, 5]
+var sum = 0
+for n in numbers {
+    sum = sum + n
+}
+println("Sum: " + sum)
+
+// Array of strings
+let fruits = ["apple", "banana", "cherry"]
+for fruit in fruits {
+    println("Fruit: " + fruit)
+}
+
+// Nested arrays
+let matrix = [[1, 2], [3, 4], [5, 6]]
+var total = 0
+for row in matrix {
+    for val in row {
+        total = total + val
+    }
+}
+println("Matrix total: " + total)
+
+// Break and continue
+var even_sum = 0
+for n in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] {
+    if n % 2 != 0 {
+        continue
+    }
+    even_sum = even_sum + n
+}
+println("Even sum: " + even_sum)`,
+
+  patternMatching: `// Pattern Matching
+// Demonstrates match expressions
+
+fn grade(score: int) -> string {
+    return match score {
+        100 => "Perfect!",
+        90 => "A",
+        80 => "B",
+        70 => "C",
+        60 => "D",
+        _ => "F"
     }
 }
 
-main()`,
+println("Testing grades:")
+println("100: " + grade(100))
+println("90: " + grade(90))
+println("80: " + grade(80))
+println("75: " + grade(75))
+println("50: " + grade(50))
 
-  fibers: `// Fiber concurrency example
-fn worker(id: int, ch: Channel<int>) {
-    for i in 0..5 {
-        ch <- (id * 10 + i)
-        fiber_yield()
+// Variable binding in pattern
+fn double_it(x: int) -> int {
+    return match x {
+        n => n * 2
     }
 }
 
-fn main() {
-    let ch = chan(10)
+println("double(5) = " + double_it(5))
+println("double(21) = " + double_it(21))`,
 
-    spawn worker(1, ch)
-    spawn worker(2, ch)
-    spawn worker(3, ch)
+  enums: `// Enums
+// Demonstrates enum definitions and usage
 
-    for _ in 0..15 {
-        let val = <-ch
-        println("Received: " + val)
-    }
+enum Color {
+    Red,
+    Green,
+    Blue
 }
 
-main()`,
+// Create enum variants
+let red = Color::Red
+let green = Color::Green
+let blue = Color::Blue
 
-  patternMatching: `// Pattern matching with enums
-enum Option {
-    None,
-    Some(int)
+println("Created Color variants")
+println("red.__variant: " + red.__variant)
+println("green.__variant: " + green.__variant)
+println("blue.__variant: " + blue.__variant)
+
+// Compare variants
+let c1 = Color::Red
+let c2 = Color::Red
+let c3 = Color::Blue
+
+println("c1 == c2: " + (c1.__variant == c2.__variant))
+println("c1 == c3: " + (c1.__variant == c3.__variant))
+
+enum Status {
+    Active,
+    Inactive,
+    Pending
 }
 
-fn maybe_double(opt: Option) -> Option {
-    match opt {
-        Option::None => Option::None
-        Option::Some(x) => Option::Some(x * 2)
-    }
-}
+let s = Status::Active
+println("Status: " + s.__variant)`,
 
-fn main() {
-    let a = Option::Some(21)
-    let b = Option::None
+  structs: `// Structs and Methods
+// Demonstrates struct definitions with inline methods
 
-    match maybe_double(a) {
-        Option::Some(n) => println("Result: " + n)
-        Option::None => println("No result")
-    }
-
-    match maybe_double(b) {
-        Option::Some(n) => println("Result: " + n)
-        Option::None => println("No result")
-    }
-}
-
-main()`,
-
-  channels: `// Channel communication
-fn producer(ch: Channel<string>) {
-    let items = ["apple", "banana", "cherry", "date"]
-    for item in items {
-        println("Sending: " + item)
-        ch <- item
-    }
-    close(ch)
-}
-
-fn consumer(ch: Channel<string>) {
-    loop {
-        select {
-            msg = <-ch => {
-                println("Received: " + msg)
-            }
-            default => {
-                println("Channel closed or empty")
-                break
-            }
-        }
-    }
-}
-
-fn main() {
-    let ch = chan(2)
-
-    spawn producer(ch)
-    consumer(ch)
-}
-
-main()`,
-
-  structs: `// Structs and methods
 struct Point {
-    x: float,
-    y: float
-}
+    x: int
+    y: int
 
-impl Point {
-    fn new(x: float, y: float) -> Point {
-        Point { x: x, y: y }
+    fn sum(self) -> int {
+        return self.x + self.y
     }
 
-    fn distance(self, other: Point) -> float {
-        let dx = self.x - other.x
-        let dy = self.y - other.y
-        (dx * dx + dy * dy).sqrt()
-    }
-
-    fn to_string(self) -> string {
-        "(" + self.x + ", " + self.y + ")"
-    }
-}
-
-fn main() {
-    let p1 = Point::new(0.0, 0.0)
-    let p2 = Point::new(3.0, 4.0)
-
-    println("p1 = " + p1.to_string())
-    println("p2 = " + p2.to_string())
-    println("Distance: " + p1.distance(p2))
-}
-
-main()`,
-
-  errorHandling: `// Error handling with Result
-fn divide(a: int, b: int) -> Result<float, string> {
-    if b == 0 {
-        return Err("Division by zero")
-    }
-    return Ok(a as float / b as float)
-}
-
-fn main() {
-    let results = [
-        divide(10, 2),
-        divide(5, 0),
-        divide(15, 3)
-    ]
-
-    for result in results {
-        match result {
-            Ok(value) => println("Result: " + value)
-            Err(msg) => println("Error: " + msg)
+    fn add(self, other: Point) -> Point {
+        return Point {
+            x: self.x + other.x,
+            y: self.y + other.y
         }
     }
 }
 
-main()`,
+struct Person {
+    name: string
+    age: int
 
-  closures: `// Closures and higher-order functions
-fn make_counter(start: int) -> fn() -> int {
-    var count = start
-    return || {
-        let current = count
-        count = count + 1
-        current
+    fn greet(self) -> string {
+        return "Hello, " + self.name
     }
 }
 
-fn map_array(arr: [int], f: fn(int) -> int) -> [int] {
-    var result = []
-    for item in arr {
-        result.push(f(item))
+// Create struct instances
+let point = Point { x: 10, y: 20 }
+println("Point x: " + point.x)
+println("Point y: " + point.y)
+println("Point sum: " + point.sum())
+
+let person = Person { name: "Alice", age: 30 }
+println(person.greet())
+
+// Add two points
+let p1 = Point { x: 1, y: 2 }
+let p2 = Point { x: 3, y: 4 }
+let p3 = p1.add(p2)
+println("Added point: (" + p3.x + ", " + p3.y + ")")`,
+
+  closures: `// Closures and Higher-Order Functions
+// Demonstrates lambdas and closures
+
+println("=== Basic Lambdas ===")
+
+let double = |x: int| x * 2
+println("double(5) = " + double(5))
+println("double(21) = " + double(21))
+
+let add = |a: int, b: int| a + b
+println("add(3, 4) = " + add(3, 4))
+
+println("=== Higher-Order Functions ===")
+
+fn apply_twice(f: fn(int) -> int, x: int) -> int {
+    return f(f(x))
+}
+
+println("apply_twice(double, 3) = " + apply_twice(double, 3))
+
+println("=== Closures ===")
+
+fn make_adder(n: int) -> fn(int) -> int {
+    return |x: int| x + n
+}
+
+let add5 = make_adder(5)
+let add10 = make_adder(10)
+
+println("add5(3) = " + add5(3))
+println("add10(3) = " + add10(3))
+
+fn make_multiplier(n: int) -> fn(int) -> int {
+    return |x: int| x * n
+}
+
+let times3 = make_multiplier(3)
+let times7 = make_multiplier(7)
+
+println("times3(4) = " + times3(4))
+println("times7(4) = " + times7(4))`,
+
+  controlFlow: `// Control Flow
+// Demonstrates if/else, while, and loops
+
+println("=== If/Else ===")
+
+fn abs(x: int) -> int {
+    if x < 0 {
+        return -x
+    } else {
+        return x
     }
-    result
 }
 
-fn main() {
-    let counter = make_counter(1)
-    println(counter())  // 1
-    println(counter())  // 2
-    println(counter())  // 3
+println("abs(-5) = " + abs(-5))
+println("abs(5) = " + abs(5))
 
-    let numbers = [1, 2, 3, 4, 5]
-    let doubled = map_array(numbers, |x| x * 2)
-    println("Doubled: " + doubled)
+fn max(a: int, b: int) -> int {
+    if a > b {
+        return a
+    }
+    return b
 }
 
-main()`,
+println("max(3, 7) = " + max(3, 7))
+
+println("=== While Loop ===")
+
+var count = 0
+while count < 5 {
+    println("Count: " + count)
+    count = count + 1
+}
+
+println("=== Factorial ===")
+
+fn factorial(n: int) -> int {
+    if n <= 1 {
+        return 1
+    }
+    return n * factorial(n - 1)
+}
+
+println("5! = " + factorial(5))
+println("10! = " + factorial(10))`,
 } as const;
 
 export type SampleProgramName = keyof typeof SAMPLE_PROGRAMS;
@@ -207,10 +267,10 @@ export type SampleProgramName = keyof typeof SAMPLE_PROGRAMS;
 export const SAMPLE_PROGRAM_LABELS: Record<SampleProgramName, string> = {
   helloWorld: 'Hello World',
   fibonacci: 'Fibonacci',
-  fibers: 'Fibers & Concurrency',
+  arrays: 'Arrays & Loops',
   patternMatching: 'Pattern Matching',
-  channels: 'Channels',
+  enums: 'Enums',
   structs: 'Structs & Methods',
-  errorHandling: 'Error Handling',
   closures: 'Closures',
+  controlFlow: 'Control Flow',
 };
