@@ -5,13 +5,14 @@ import { compile as compileCode, run as runCode } from '../../api/client';
 import { useRef } from 'react';
 
 export function RunButton() {
-  const { sourceCode, markClean, breakpoints } = useEditorStore();
+  const { sourceCode, markClean, breakpoints, setHighlightedLine } = useEditorStore();
   const { startCompilation, setCompilationSuccess, setCompilationError } = useCompilerStore();
   const {
     executionStatus,
     startExecution,
     setRunning,
     setFinished,
+    setPaused,
     setError,
     appendOutput,
     reset,
@@ -21,6 +22,7 @@ export function RunButton() {
 
   const isRunning = executionStatus === 'running';
   const isCompiling = executionStatus === 'compiling';
+  const isPaused = executionStatus === 'paused';
 
   const handleRun = async () => {
     // Reset previous state
@@ -50,17 +52,23 @@ export function RunButton() {
       const breakpointLines = Array.from(breakpoints);
       const result = await runCode(sourceCode, breakpointLines);
 
-      if (result.success) {
+      // Output lines (whether finished or paused at breakpoint)
+      for (const line of result.output) {
+        appendOutput(line);
+      }
+
+      if (result.breakpoint) {
+        // Execution paused at a breakpoint
+        setPaused();
+        setHighlightedLine(result.breakpoint.line);
+      } else if (result.success) {
+        // Execution completed successfully
         markClean();
-
-        // Output each line
-        for (const line of result.output) {
-          appendOutput(line);
-        }
-
-        // Finished
+        setHighlightedLine(null);
         setFinished(result.exitCode ?? 0, result.executionTimeMs);
       } else {
+        // Actual error occurred
+        setHighlightedLine(null);
         setCompilationError(result.errors);
         setError(result.errors[0]?.message || 'Execution failed');
       }
@@ -97,6 +105,19 @@ export function RunButton() {
     );
   }
 
+  if (isPaused) {
+    return (
+      <button
+        className="action-button warning"
+        onClick={handleRun}
+        title="Continue (F5)"
+      >
+        <PauseIcon />
+        Paused
+      </button>
+    );
+  }
+
   return (
     <button
       className="action-button primary"
@@ -116,6 +137,15 @@ export function RunButton() {
         </>
       )}
     </button>
+  );
+}
+
+function PauseIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+      <rect x="4" y="3" width="3" height="10" rx="0.5" />
+      <rect x="9" y="3" width="3" height="10" rx="0.5" />
+    </svg>
   );
 }
 
