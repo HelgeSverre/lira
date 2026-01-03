@@ -6,11 +6,75 @@
 use crate::bytecode::Program;
 use crate::fiber::Scheduler;
 use crate::runtime::Runtime;
-use crate::value::{ClosureData, IString, Value};
+use crate::value::{ChannelId, ClosureData, FiberId, IString, Value};
 use lira_core::opcode::Opcode;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+
+/// Result of executing a single instruction
+#[derive(Debug, Clone)]
+pub enum StepResult {
+    /// Execution continues (more instructions to run)
+    Continue,
+    /// Program halted normally with exit code
+    Halted(i32),
+    /// Runtime error occurred
+    Error(String),
+    /// Execution paused at a breakpoint
+    BreakpointHit {
+        /// Source line number (1-based)
+        line: u32,
+        /// Source column number (1-based)
+        column: u32,
+        /// Instruction pointer where we stopped
+        ip: usize,
+    },
+    /// Execution stopped by user
+    Stopped,
+}
+
+/// Snapshot of VM state for debugging/visualization
+#[derive(Debug, Clone)]
+pub struct VmSnapshot {
+    /// Current instruction pointer
+    pub ip: usize,
+    /// Current stack values (formatted as strings)
+    pub stack: Vec<String>,
+    /// Local variable values (formatted as strings)
+    pub locals: Vec<String>,
+    /// Call stack depth
+    pub call_stack_depth: usize,
+    /// Program output so far
+    pub output: Vec<String>,
+    /// All fibers with their states
+    pub fibers: Vec<FiberSnapshot>,
+    /// All channels with their states
+    pub channels: Vec<ChannelSnapshot>,
+    /// Current fiber ID (if in fiber mode)
+    pub current_fiber_id: Option<FiberId>,
+}
+
+/// Snapshot of a single fiber
+#[derive(Debug, Clone)]
+pub struct FiberSnapshot {
+    pub id: FiberId,
+    pub state: String,
+    pub ip: usize,
+    pub stack_size: usize,
+    pub locals_count: usize,
+}
+
+/// Snapshot of a channel
+#[derive(Debug, Clone)]
+pub struct ChannelSnapshot {
+    pub id: ChannelId,
+    pub capacity: usize,
+    pub buffer_size: usize,
+    pub closed: bool,
+    pub waiting_receivers: usize,
+    pub waiting_senders: usize,
+}
 
 /// Call frame for function calls
 #[derive(Debug, Clone)]
@@ -52,6 +116,14 @@ pub struct VM {
     output: Vec<String>,
     /// Whether to capture output instead of printing
     capture_output: bool,
+    /// Callback for streaming output
+    output_callback: Option<Box<dyn FnMut(&str)>>,
+    /// Callback to check if execution should stop (for cooperative stopping)
+    stop_check: Option<Box<dyn Fn() -> bool>>,
+    /// Breakpoint line numbers (1-based)
+    breakpoints: HashSet<u32>,
+    /// Track the last line we checked to avoid hitting same breakpoint repeatedly
+    last_breakpoint_line: Option<u32>,
     /// String intern pool for memory efficiency
     #[allow(dead_code)]
     string_pool: HashMap<String, IString>,
@@ -72,6 +144,10 @@ impl VM {
             runtime: Runtime::new(),
             output: Vec::new(),
             capture_output: false,
+            output_callback: None,
+            stop_check: None,
+            breakpoints: HashSet::new(),
+            last_breakpoint_line: None,
             string_pool: HashMap::new(),
         }
     }
@@ -119,12 +195,133 @@ impl VM {
         self.fiber_mode = enabled;
     }
 
+    /// Set an output callback for streaming output during execution
+    /// The callback is called with each output line as it's produced
+    pub fn set_output_callback<F>(&mut self, callback: F)
+    where
+        F: FnMut(&str) + 'static,
+    {
+        self.output_callback = Some(Box::new(callback));
+    }
+
+    /// Clear the output callback
+    pub fn clear_output_callback(&mut self) {
+        self.output_callback = None;
+    }
+
+    /// Set a callback to check if execution should stop
+    /// The callback is called at the start of each instruction.
+    /// If it returns true, execution stops with an error.
+    pub fn set_stop_check<F>(&mut self, callback: F)
+    where
+        F: Fn() -> bool + 'static,
+    {
+        self.stop_check = Some(Box::new(callback));
+    }
+
+    /// Clear the stop check callback
+    pub fn clear_stop_check(&mut self) {
+        self.stop_check = None;
+    }
+
+    /// Set breakpoint line numbers (1-based)
+    pub fn set_breakpoints(&mut self, lines: Vec<u32>) {
+        self.breakpoints = lines.into_iter().collect();
+    }
+
+    /// Add a single breakpoint at the given line (1-based)
+    pub fn add_breakpoint(&mut self, line: u32) {
+        self.breakpoints.insert(line);
+    }
+
+    /// Remove a breakpoint at the given line
+    pub fn remove_breakpoint(&mut self, line: u32) {
+        self.breakpoints.remove(&line);
+    }
+
+    /// Clear all breakpoints
+    pub fn clear_breakpoints(&mut self) {
+        self.breakpoints.clear();
+    }
+
+    /// Get the current source location (line, column) from the instruction pointer
+    /// Uses the debug info embedded in the bytecode
+    pub fn get_current_location(&self) -> Option<(u32, u32)> {
+        self.program.debug_info.lookup(self.ip as u32)
+    }
+
+    /// Get a snapshot of the current VM state
+    pub fn get_snapshot(&self) -> VmSnapshot {
+        let fibers: Vec<FiberSnapshot> = self
+            .scheduler
+            .fibers
+            .values()
+            .map(|f| FiberSnapshot {
+                id: f.id,
+                state: format!("{:?}", f.state),
+                ip: f.ip,
+                stack_size: f.stack.len(),
+                locals_count: f.locals.len(),
+            })
+            .collect();
+
+        let channels: Vec<ChannelSnapshot> = self
+            .scheduler
+            .channels
+            .values()
+            .map(|c| ChannelSnapshot {
+                id: c.id,
+                capacity: c.capacity,
+                buffer_size: c.buffer.len(),
+                closed: c.closed,
+                waiting_receivers: c.receivers.len(),
+                waiting_senders: c.senders.len(),
+            })
+            .collect();
+
+        VmSnapshot {
+            ip: self.ip,
+            stack: self.stack.iter().map(|v| format!("{:?}", v)).collect(),
+            locals: self.locals.iter().map(|v| format!("{:?}", v)).collect(),
+            call_stack_depth: self.call_stack.len(),
+            output: self.output.clone(),
+            fibers,
+            channels,
+            current_fiber_id: self.scheduler.current,
+        }
+    }
+
     /// Run the program and return exit code
     pub fn run(&mut self) -> Result<i32, String> {
         // Start at entry point
         self.ip = self.program.entry_point;
 
         loop {
+            // Check if we should stop (cooperative stopping)
+            if let Some(ref check) = self.stop_check {
+                if check() {
+                    return Err("Execution stopped by user".to_string());
+                }
+            }
+
+            // Check breakpoints (only if we have any set)
+            if !self.breakpoints.is_empty() {
+                if let Some((line, column)) = self.get_current_location() {
+                    // Only trigger if we're on a breakpoint line AND it's different from last hit
+                    // (to avoid stopping on the same breakpoint repeatedly)
+                    if self.breakpoints.contains(&line) && self.last_breakpoint_line != Some(line) {
+                        self.last_breakpoint_line = Some(line);
+                        return Err(format!(
+                            "Breakpoint hit at line {}, column {} (ip={})",
+                            line, column, self.ip
+                        ));
+                    } else if !self.breakpoints.contains(&line) {
+                        // Clear last breakpoint line when we move to a different line
+                        self.last_breakpoint_line = None;
+                    }
+                }
+            }
+
             if self.ip >= self.program.code.len() {
                 return Ok(0);
             }
@@ -742,6 +939,12 @@ impl VM {
                 Opcode::Print => {
                     let value = self.pop()?;
                     let output_str = value.to_string();
+
+                    // Call output callback if set
+                    if let Some(ref mut callback) = self.output_callback {
+                        callback(&output_str);
+                    }
+
                     if self.capture_output {
                         self.output.push(output_str);
                     } else {
