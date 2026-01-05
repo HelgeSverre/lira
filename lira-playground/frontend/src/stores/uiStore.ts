@@ -38,7 +38,7 @@ export const useUiStore = create<UiState>()(
       autoScrollOutput: true,
       theme: 'dark',
       fontSize: 14,
-      selectedSample: 'helloWorld',
+      selectedSample: 'hello-world',
 
       setActiveOutputTab: (tab) => set({ activeOutputTab: tab }),
 

@@ -100,6 +100,12 @@ export const useVmStore = create<VmStoreState>((set) => ({
   }),
 }));
 
+// Expose store on window for E2E testing
+if (typeof window !== 'undefined') {
+  (window as unknown as { __VM_STORE__: typeof useVmStore }).
+    __VM_STORE__ = useVmStore;
+}
+
 // Selectors
 export const selectFibers = (state: VmStoreState): Fiber[] => {
   if (!state.vmState) return [];

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { SAMPLE_PROGRAMS } from '../mocks/samplePrograms';
+import { getSampleSource, getDefaultSampleId } from '../samples';
 
 export interface EditorState {
   /** Current source code */
@@ -21,15 +21,17 @@ export interface EditorState {
   setCursorPosition: (line: number, column: number) => void;
   setHighlightedLine: (line: number | null) => void;
   markClean: () => void;
-  loadSample: (name: keyof typeof SAMPLE_PROGRAMS) => void;
+  loadSample: (id: string) => void;
 }
 
 export const useEditorStore = create<EditorState>((set) => ({
-  sourceCode: SAMPLE_PROGRAMS.helloWorld,
+  sourceCode: getSampleSource(getDefaultSampleId()),
   breakpoints: new Set(),
   cursorPosition: { line: 1, column: 1 },
   highlightedLine: null,
   isDirty: false,
+
+  // Note: Store is exposed on window for E2E testing (see bottom of file)
 
   setSourceCode: (code) => set({ sourceCode: code, isDirty: true }),
 
@@ -53,10 +55,16 @@ export const useEditorStore = create<EditorState>((set) => ({
 
   markClean: () => set({ isDirty: false }),
 
-  loadSample: (name) => set({
-    sourceCode: SAMPLE_PROGRAMS[name],
+  loadSample: (id) => set({
+    sourceCode: getSampleSource(id),
     isDirty: false,
     breakpoints: new Set(),
     highlightedLine: null,
   }),
 }));
+
+// Expose store on window for E2E testing
+if (typeof window !== 'undefined') {
+  (window as unknown as { __EDITOR_STORE__: typeof useEditorStore }).
+    __EDITOR_STORE__ = useEditorStore;
+}
