@@ -775,6 +775,84 @@ fn reverse_num(n: int) -> int {
 
 println("reverse(12345) = " + reverse_num(12345))
 println("reverse(9876) = " + reverse_num(9876))`,
+
+  taskManager: `// Task Manager
+// Demonstrates static methods with parameters, impl blocks, and immutable patterns
+
+struct Task {
+    name: string
+    priority: int
+    completed: bool
+}
+
+impl Task {
+    // Static method (no self) - constructor pattern
+    fn new(name: string, priority: int) -> Task {
+        return Task {
+            name: name,
+            priority: priority,
+            completed: false
+        }
+    }
+
+    // Instance method (takes self)
+    fn describe(self) -> string {
+        let status = if self.completed { "✓" } else { "○" }
+        return status + " [P" + self.priority + "] " + self.name
+    }
+
+    // Method returning new instance (immutable pattern)
+    fn complete(self) -> Task {
+        return Task {
+            name: self.name,
+            priority: self.priority,
+            completed: true
+        }
+    }
+
+    fn is_high_priority(self) -> bool {
+        return self.priority >= 3
+    }
+}
+
+fn main() {
+    println("=== Task Manager ===")
+
+    // Create tasks using static constructor
+    let task1 = Task.new("Deploy to production", 5)
+    let task2 = Task.new("Write documentation", 2)
+    let task3 = Task.new("Fix critical bug", 4)
+
+    println("Pending tasks:")
+    println("  " + task1.describe())
+    println("  " + task2.describe())
+    println("  " + task3.describe())
+
+    // Complete some tasks (creates new instances)
+    let done1 = task1.complete()
+    let done3 = task3.complete()
+
+    println("")
+    println("After completing high-priority tasks:")
+    println("  " + done1.describe())
+    println("  " + task2.describe())
+    println("  " + done3.describe())
+
+    // Check priority
+    println("")
+    println("High priority tasks:")
+    if task1.is_high_priority() {
+        println("  - " + task1.name)
+    }
+    if task2.is_high_priority() {
+        println("  - " + task2.name)
+    }
+    if task3.is_high_priority() {
+        println("  - " + task3.name)
+    }
+}
+
+main()`,
 } as const;
 
 export type SampleProgramName = keyof typeof SAMPLE_PROGRAMS;
@@ -797,4 +875,5 @@ export const SAMPLE_PROGRAM_LABELS: Record<SampleProgramName, string> = {
   implBlocks: 'Impl Blocks',
   nullCoalescing: 'Null & Coalescing',
   recursion: 'Advanced Recursion',
+  taskManager: 'Task Manager',
 };
