@@ -85,17 +85,13 @@ pub enum ServerMessage {
         value_type: String,
     },
     /// Local variables
-    Locals { variables: Vec<VariableInfo> },
+    Locals { locals: Vec<VariableInfo> },
     /// Stack state
-    Stack {
-        values: Vec<String>,
-        #[serde(rename = "callStack")]
-        call_stack: Vec<CallFrameInfo>,
-    },
+    Stack { stack: Vec<String> },
     /// AST response
     Ast { ast: serde_json::Value },
     /// VM state update
-    VmStateUpdate { state: VmStateJson },
+    VmStateUpdate { state: VmState },
     /// Fiber spawned
     FiberSpawned { fiber: FiberInfo },
     /// Fiber state changed
@@ -123,6 +119,15 @@ pub enum ServerMessage {
     },
     /// Execution stopped
     Stopped,
+    /// Step completed (for stepping operations)
+    StepCompleted { line: u32, column: u32, ip: usize },
+    /// Variable value response
+    VariableValue {
+        name: String,
+        value: String,
+        #[serde(rename = "typeName")]
+        type_name: String,
+    },
 }
 
 /// Compilation error
@@ -156,9 +161,23 @@ pub struct SourceLocation {
 pub struct VariableInfo {
     pub name: String,
     pub value: String,
-    #[serde(rename = "valueType")]
-    pub value_type: String,
-    pub slot: usize,
+    #[serde(rename = "typeName")]
+    pub type_name: String,
+}
+
+/// VM state for debug updates
+#[derive(Debug, Clone, Serialize)]
+pub struct VmState {
+    #[serde(rename = "executionState")]
+    pub execution_state: String,
+    pub ip: usize,
+    pub line: Option<u32>,
+    pub column: Option<u32>,
+    pub stack: Vec<String>,
+    pub locals: Vec<VariableInfo>,
+    #[serde(rename = "callStack")]
+    pub call_stack: Vec<String>,
+    pub output: Vec<String>,
 }
 
 /// Call frame info for stack trace
