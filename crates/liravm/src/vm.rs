@@ -16,6 +16,9 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
+/// Type alias for output callback function
+pub type OutputCallback = Box<dyn FnMut(&str) + Send>;
+
 /// Result of executing a single instruction
 #[derive(Debug, Clone)]
 pub enum StepResult {
@@ -121,7 +124,7 @@ pub struct VM {
     /// Whether to capture output instead of printing
     capture_output: bool,
     /// Callback for streaming output
-    output_callback: Option<Box<dyn FnMut(&str) + Send>>,
+    output_callback: Option<OutputCallback>,
     /// Callback to check if execution should stop (for cooperative stopping)
     stop_check: Option<Box<dyn Fn() -> bool + Send>>,
     /// Breakpoint line numbers (1-based)
@@ -482,7 +485,7 @@ impl VM {
         }
 
         // Execute the opcode and return whether we should halt
-        self.execute_opcode(opcode.clone())
+        self.execute_opcode(opcode)
     }
 
     /// Get a detailed debug snapshot with type information
@@ -596,9 +599,8 @@ impl VM {
             }
 
             // Execute the opcode
-            match self.execute_opcode(opcode)? {
-                Some(exit_code) => return Ok(exit_code),
-                None => {} // Continue to next iteration
+            if let Some(exit_code) = self.execute_opcode(opcode)? {
+                return Ok(exit_code);
             }
         }
     }
