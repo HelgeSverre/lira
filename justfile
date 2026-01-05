@@ -133,10 +133,35 @@ playground-build:
 playground-server port="3001":
     PORT={{ port }} cargo run --package lira-playground --release
 
-# Run playground tests
+# Run playground unit tests
 [group('playground')]
 playground-test:
     cargo test --package lira-playground
+
+# Run playground E2E tests (requires frontend deps installed)
+[group('playground')]
+playground-e2e:
+    cd lira-playground/frontend && npx playwright test
+
+# Run playground E2E tests with UI
+[group('playground')]
+playground-e2e-ui:
+    cd lira-playground/frontend && npx playwright test --ui
+
+# Run playground E2E tests in headed mode (visible browser)
+[group('playground')]
+playground-e2e-headed:
+    cd lira-playground/frontend && npx playwright test --headed
+
+# Run playground E2E tests in debug mode
+[group('playground')]
+playground-e2e-debug:
+    cd lira-playground/frontend && npx playwright test --debug
+
+# Show last playground E2E test report
+[group('playground')]
+playground-e2e-report:
+    cd lira-playground/frontend && npx playwright show-report
 
 # Install playground frontend dependencies
 [group('playground')]

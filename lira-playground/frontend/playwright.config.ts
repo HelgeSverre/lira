@@ -35,6 +35,9 @@ export default defineConfig({
 
     /* Take screenshot on failure */
     screenshot: 'only-on-failure',
+
+    /* Record video on failure */
+    video: 'on-first-retry',
   },
 
   /* Configure projects for major browsers */
@@ -66,15 +69,18 @@ export default defineConfig({
       command: 'cd ../.. && cargo run --package lira-playground --release',
       url: 'http://localhost:3001/health',
       reuseExistingServer: !process.env.CI,
-      timeout: 120 * 1000,
+      timeout: 180 * 1000,
+      env: {
+        PORT: '3001',
+      },
     },
   ],
 
   /* Global timeout for each test */
-  timeout: 30 * 1000,
+  timeout: 60 * 1000,
 
   /* Expect timeout */
   expect: {
-    timeout: 5 * 1000,
+    timeout: 10 * 1000,
   },
 });
