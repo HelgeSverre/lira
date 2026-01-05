@@ -1,0 +1,56 @@
+// @title: Traits
+// @description: Demonstrates trait definitions and implementations
+// @order: 10
+// @category: Advanced
+
+// Define a trait for things that can speak
+trait Speak {
+    fn speak(self) -> string
+}
+
+// Define structs that implement the trait
+struct Dog {
+    name: string
+}
+
+struct Cat {
+    name: string
+}
+
+struct Parrot {
+    name: string
+    phrase: string
+}
+
+// Implement Speak trait for each struct
+impl Speak for Dog {
+    fn speak(self) -> string {
+        return self.name + " says: Woof!"
+    }
+}
+
+impl Speak for Cat {
+    fn speak(self) -> string {
+        return self.name + " says: Meow!"
+    }
+}
+
+impl Speak for Parrot {
+    fn speak(self) -> string {
+        return self.name + " says: " + self.phrase
+    }
+}
+
+fn main() {
+    println("=== Animal Sounds ===")
+
+    let dog = Dog { name: "Buddy" }
+    let cat = Cat { name: "Whiskers" }
+    let parrot = Parrot { name: "Polly", phrase: "Hello there!" }
+
+    println(dog.speak())
+    println(cat.speak())
+    println(parrot.speak())
+}
+
+main()

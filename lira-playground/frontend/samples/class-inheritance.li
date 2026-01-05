@@ -1,0 +1,53 @@
+// @title: Class Inheritance
+// @description: Demonstrates extends keyword and field inheritance
+// @order: 11
+// @category: Advanced
+
+// Base class
+class Vehicle {
+    brand: string
+    year: int
+}
+
+// Derived classes inherit parent fields
+class Car extends Vehicle {
+    doors: int
+}
+
+class Motorcycle extends Vehicle {
+    engineCC: int
+}
+
+class Truck extends Vehicle {
+    payload: int
+}
+
+fn main() {
+    println("=== Vehicle Inventory ===")
+
+    // Create instances with inherited + own fields
+    let car = Car {
+        brand: "Toyota",
+        year: 2023,
+        doors: 4
+    }
+
+    let bike = Motorcycle {
+        brand: "Honda",
+        year: 2022,
+        engineCC: 650
+    }
+
+    let truck = Truck {
+        brand: "Ford",
+        year: 2021,
+        payload: 2000
+    }
+
+    // Access inherited fields
+    println("Car: " + car.brand + " (" + car.year + "), " + car.doors + " doors")
+    println("Motorcycle: " + bike.brand + " (" + bike.year + "), " + bike.engineCC + "cc")
+    println("Truck: " + truck.brand + " (" + truck.year + "), " + truck.payload + "kg payload")
+}
+
+main()

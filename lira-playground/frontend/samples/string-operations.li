@@ -1,0 +1,65 @@
+// @title: String Operations
+// @description: Demonstrates string manipulation and operations
+// @order: 14
+// @category: Fundamentals
+
+println("=== String Concatenation ===")
+
+let hello = "Hello"
+let world = "World"
+let greeting = hello + ", " + world + "!"
+println(greeting)
+
+// Concatenation with numbers
+let count = 42
+let msg = "The answer is " + count
+println(msg)
+
+println("=== String Length ===")
+
+let text = "Lira Programming Language"
+println("Text: " + text)
+println("Length: " + len(text))
+
+println("=== String Indexing ===")
+
+let word = "HELLO"
+println("word[0] = " + word[0])
+println("word[1] = " + word[1])
+println("word[4] = " + word[4])
+
+println("=== String Comparison ===")
+
+let a = "apple"
+let b = "apple"
+let c = "banana"
+
+if a == b {
+    println("apple == apple: true")
+}
+if a != c {
+    println("apple != banana: true")
+}
+
+println("=== String in Pattern Matching ===")
+
+fn describe_fruit(fruit: string) -> string {
+    match fruit {
+        "apple" => "A red fruit",
+        "banana" => "A yellow fruit",
+        "orange" => "An orange fruit",
+        _ => "Unknown fruit"
+    }
+}
+
+println(describe_fruit("apple"))
+println(describe_fruit("banana"))
+println(describe_fruit("kiwi"))
+
+println("=== Building Strings ===")
+
+var result = ""
+for i in [1, 2, 3, 4, 5] {
+    result = result + i + " "
+}
+println("Built: " + result)

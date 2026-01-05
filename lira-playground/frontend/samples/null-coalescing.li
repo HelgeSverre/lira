@@ -1,0 +1,55 @@
+// @title: Null & Coalescing
+// @description: Demonstrates null handling and coalescing operator
+// @order: 16
+// @category: Fundamentals
+
+println("=== Null Basics ===")
+
+let nothing = null
+println("null value: " + nothing)
+
+// Null equality
+println("null == null: " + (null == null))
+println("null != null: " + (null != null))
+
+println("=== Null Coalescing (??) ===")
+
+// Use ?? to provide default values
+let val1 = null ?? 42
+println("null ?? 42 = " + val1)
+
+let val2 = 100 ?? 42
+println("100 ?? 42 = " + val2)
+
+// Chained coalescing
+let a = null
+let b = null
+let c = 30
+let result = a ?? b ?? c
+println("null ?? null ?? 30 = " + result)
+
+println("=== Safe Division Pattern ===")
+
+fn safe_divide(x: int, y: int) -> int {
+    if y == 0 {
+        return 0  // Return 0 for division by zero
+    }
+    return x / y
+}
+
+println("10 / 2 = " + safe_divide(10, 2))
+println("10 / 0 = " + safe_divide(10, 0) + " (safe!)")
+
+println("=== Null Checks ===")
+
+let maybe_value = null
+
+if maybe_value == null {
+    println("Value is null")
+} else {
+    println("Value is: " + maybe_value)
+}
+
+// Use coalescing for safe access
+let display = maybe_value ?? "default"
+println("Display: " + display)

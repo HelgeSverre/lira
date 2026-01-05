@@ -1,0 +1,46 @@
+// @title: Control Flow
+// @description: Demonstrates if/else, while, and loops
+// @order: 8
+// @category: Getting Started
+
+println("=== If/Else ===")
+
+fn abs(x: int) -> int {
+    if x < 0 {
+        return -x
+    } else {
+        return x
+    }
+}
+
+println("abs(-5) = " + abs(-5))
+println("abs(5) = " + abs(5))
+
+fn max(a: int, b: int) -> int {
+    if a > b {
+        return a
+    }
+    return b
+}
+
+println("max(3, 7) = " + max(3, 7))
+
+println("=== While Loop ===")
+
+var count = 0
+while count < 5 {
+    println("Count: " + count)
+    count = count + 1
+}
+
+println("=== Factorial ===")
+
+fn factorial(n: int) -> int {
+    if n <= 1 {
+        return 1
+    }
+    return n * factorial(n - 1)
+}
+
+println("5! = " + factorial(5))
+println("10! = " + factorial(10))

@@ -1,0 +1,37 @@
+// @title: Enums
+// @description: Demonstrates enum definitions and usage
+// @order: 5
+// @category: Fundamentals
+
+enum Color {
+    Red,
+    Green,
+    Blue
+}
+
+// Create enum variants
+let red = Color::Red
+let green = Color::Green
+let blue = Color::Blue
+
+println("Created Color variants")
+println("red.__variant: " + red.__variant)
+println("green.__variant: " + green.__variant)
+println("blue.__variant: " + blue.__variant)
+
+// Compare variants
+let c1 = Color::Red
+let c2 = Color::Red
+let c3 = Color::Blue
+
+println("c1 == c2: " + (c1.__variant == c2.__variant))
+println("c1 == c3: " + (c1.__variant == c3.__variant))
+
+enum Status {
+    Active,
+    Inactive,
+    Pending
+}
+
+let s = Status::Active
+println("Status: " + s.__variant)

@@ -1,0 +1,67 @@
+// @title: Advanced Recursion
+// @description: Demonstrates various recursive patterns
+// @order: 17
+// @category: Advanced
+
+println("=== Mutual Recursion ===")
+
+// Two functions that call each other
+fn is_even(n: int) -> bool {
+    if n == 0 { return true }
+    return is_odd(n - 1)
+}
+
+fn is_odd(n: int) -> bool {
+    if n == 0 { return false }
+    return is_even(n - 1)
+}
+
+println("is_even(10): " + is_even(10))
+println("is_odd(7): " + is_odd(7))
+println("is_even(15): " + is_even(15))
+
+println("=== Ackermann Function ===")
+
+// Famous recursive function that grows very fast
+fn ackermann(m: int, n: int) -> int {
+    if m == 0 {
+        return n + 1
+    }
+    if n == 0 {
+        return ackermann(m - 1, 1)
+    }
+    return ackermann(m - 1, ackermann(m, n - 1))
+}
+
+println("ackermann(0, 5) = " + ackermann(0, 5))
+println("ackermann(1, 3) = " + ackermann(1, 3))
+println("ackermann(2, 3) = " + ackermann(2, 3))
+println("ackermann(3, 2) = " + ackermann(3, 2))
+
+println("=== Sum of Digits ===")
+
+fn sum_digits(n: int) -> int {
+    if n < 10 {
+        return n
+    }
+    return n % 10 + sum_digits(n / 10)
+}
+
+println("sum_digits(12345) = " + sum_digits(12345))
+println("sum_digits(9999) = " + sum_digits(9999))
+
+println("=== Reverse Number ===")
+
+fn reverse_helper(n: int, acc: int) -> int {
+    if n == 0 {
+        return acc
+    }
+    return reverse_helper(n / 10, acc * 10 + n % 10)
+}
+
+fn reverse_num(n: int) -> int {
+    return reverse_helper(n, 0)
+}
+
+println("reverse(12345) = " + reverse_num(12345))
+println("reverse(9876) = " + reverse_num(9876))
