@@ -10,6 +10,8 @@
 //! - Value: Runtime value types
 
 pub mod bytecode;
+pub mod debug;
+pub mod debug_session;
 pub mod fiber;
 pub mod memory;
 pub mod runtime;
@@ -17,6 +19,11 @@ pub mod value;
 pub mod vm;
 
 // Re-export commonly used types
+pub use debug::{
+    CallFrameInfo, DebugSnapshot, ExecutionState, LocalInfo, PauseFlag, StepContext, StepMode,
+    StepOutcome, ValueInfo,
+};
+pub use debug_session::{DebugEvent, DebugSession, SessionState};
 pub use value::{ChannelId, FiberId, Value};
 pub use vm::{ChannelSnapshot, FiberSnapshot, StepResult, VmSnapshot, VM};
 
@@ -78,7 +85,7 @@ pub fn run_with_streaming<F>(
     on_output: F,
 ) -> Result<(i32, VmSnapshot), String>
 where
-    F: FnMut(&str) + 'static,
+    F: FnMut(&str) + Send + 'static,
 {
     // Load bytecode
     let program = bytecode::load(bytecode)?;
