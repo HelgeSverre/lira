@@ -1,6 +1,7 @@
 import { useEditorStore } from '../../stores/editorStore';
 import { useCompilerStore } from '../../stores/compilerStore';
 import { useVmStore } from '../../stores/vmStore';
+import { useWebSocketStore } from '../../stores/websocketStore';
 import { compile as compileCode, run as runCode } from '../../api/client';
 import { useRef } from 'react';
 
@@ -17,12 +18,14 @@ export function RunButton() {
     appendOutput,
     reset,
   } = useVmStore();
+  const { startDebug, stop: wsStop, connectionStatus } = useWebSocketStore();
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const isRunning = executionStatus === 'running';
   const isCompiling = executionStatus === 'compiling';
   const isPaused = executionStatus === 'paused';
+  const hasBreakpoints = breakpoints.size > 0;
 
   const handleRun = async () => {
     // Reset previous state
@@ -30,6 +33,16 @@ export function RunButton() {
     startExecution();
     startCompilation();
 
+    const breakpointLines = Array.from(breakpoints);
+
+    // Use WebSocket for debug mode (when breakpoints are set)
+    if (hasBreakpoints) {
+      // WebSocket-based debug execution
+      startDebug(sourceCode, breakpointLines);
+      return;
+    }
+
+    // HTTP-based simple execution (no breakpoints)
     try {
       abortControllerRef.current = new AbortController();
 
@@ -47,27 +60,22 @@ export function RunButton() {
         setCompilationSuccess(compileResult.ast);
       }
 
-      // Step 2: Now run the code (pass breakpoints from editor)
+      // Step 2: Now run the code
       setRunning();
-      const breakpointLines = Array.from(breakpoints);
-      const result = await runCode(sourceCode, breakpointLines);
+      const result = await runCode(sourceCode, []);
 
-      // Output lines (whether finished or paused at breakpoint)
+      // Output lines
       for (const line of result.output) {
         appendOutput(line);
       }
 
-      if (result.breakpoint) {
-        // Execution paused at a breakpoint
-        setPaused();
-        setHighlightedLine(result.breakpoint.line);
-      } else if (result.success) {
+      if (result.success) {
         // Execution completed successfully
         markClean();
         setHighlightedLine(null);
         setFinished(result.exitCode ?? 0, result.executionTimeMs);
       } else {
-        // Actual error occurred
+        // Error occurred
         setHighlightedLine(null);
         setCompilationError(result.errors);
         setError(result.errors[0]?.message || 'Execution failed');
@@ -85,11 +93,17 @@ export function RunButton() {
   };
 
   const handleStop = () => {
+    // Stop WebSocket execution if connected
+    if (connectionStatus === 'connected') {
+      wsStop();
+    }
+    // Also abort any HTTP request
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
     reset();
+    setHighlightedLine(null);
   };
 
   if (isRunning) {
