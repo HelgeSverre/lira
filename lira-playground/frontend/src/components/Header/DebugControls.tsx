@@ -1,62 +1,63 @@
-import { step } from '../../api/client';
-import type { StepType } from '../../api/client';
 import { useEditorStore } from '../../stores/editorStore';
 import { useVmStore } from '../../stores/vmStore';
+import { useWebSocketStore } from '../../stores/websocketStore';
 import './DebugControls.css';
 
 export function DebugControls() {
-  const { sourceCode, breakpoints, highlightedLine, setHighlightedLine } = useEditorStore();
-  const { executionStatus, setPaused, setFinished, appendOutput, reset, clearOutput } = useVmStore();
+  const { setHighlightedLine } = useEditorStore();
+  const { executionStatus, reset } = useVmStore();
+  const {
+    continueExecution,
+    stepLine,
+    stepInto,
+    stepOut,
+    pause,
+    stop,
+    connectionStatus,
+  } = useWebSocketStore();
 
   const isPaused = executionStatus === 'paused';
   const isRunning = executionStatus === 'running';
   const canStep = isPaused;
-  const currentLine = highlightedLine ?? 1;
+  const isConnected = connectionStatus === 'connected';
 
-  const handleStep = async (stepType: StepType) => {
-    if (!isPaused && stepType !== 'continue') return;
-
-    try {
-      // Clear previous output when stepping (since we re-run from start)
-      clearOutput();
-
-      const result = await step({
-        source: sourceCode,
-        currentLine,
-        stepType,
-        breakpoints: Array.from(breakpoints),
-      });
-
-      // Handle output
-      for (const line of result.output) {
-        appendOutput(line);
-      }
-
-      if (result.breakpoint) {
-        setPaused();
-        setHighlightedLine(result.breakpoint.line);
-      } else if (result.success) {
-        setHighlightedLine(null);
-        setFinished(result.exitCode ?? 0, result.executionTimeMs);
-      }
-    } catch (error) {
-      console.error('Step failed:', error);
+  const handleContinue = () => {
+    if (isPaused && isConnected) {
+      continueExecution();
     }
   };
 
-  const handleContinue = () => handleStep('continue');
-  const handleStepInto = () => handleStep('into');
-  const handleStepOver = () => handleStep('over');
-  const handleStepOut = () => handleStep('out');
+  const handleStepInto = () => {
+    if (canStep && isConnected) {
+      stepInto();
+    }
+  };
+
+  const handleStepOver = () => {
+    if (canStep && isConnected) {
+      stepLine(); // stepLine is "step over" behavior
+    }
+  };
+
+  const handleStepOut = () => {
+    if (canStep && isConnected) {
+      stepOut();
+    }
+  };
 
   const handlePause = () => {
-    // Pause not implemented yet (would need WebSocket for async interruption)
-    console.log('Pause not implemented');
+    if (isRunning && isConnected) {
+      pause();
+    }
   };
 
   const handleReset = () => {
-    reset();
-    setHighlightedLine(null);
+    if (isConnected) {
+      stop();
+    } else {
+      reset();
+      setHighlightedLine(null);
+    }
   };
 
   return (
