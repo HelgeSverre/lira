@@ -6,9 +6,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 /// Execution state of the VM during debugging
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum ExecutionState {
     /// VM is ready to execute (not started or after reset)
+    #[default]
     Ready,
     /// Currently running
     Running,
@@ -35,11 +36,6 @@ pub enum ExecutionState {
     },
 }
 
-impl Default for ExecutionState {
-    fn default() -> Self {
-        ExecutionState::Ready
-    }
-}
 
 /// Step mode for single-stepping execution
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
