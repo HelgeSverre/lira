@@ -10,9 +10,10 @@ use crate::vm::VM;
 use std::sync::{Mutex, RwLock};
 
 /// Session state for tracking what phase we're in
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum SessionState {
     /// No program loaded
+    #[default]
     Empty,
     /// Program loaded, ready to run
     Ready,
@@ -26,11 +27,6 @@ pub enum SessionState {
     Error { message: String },
 }
 
-impl Default for SessionState {
-    fn default() -> Self {
-        SessionState::Empty
-    }
-}
 
 /// Debug event emitted during execution
 #[derive(Debug, Clone)]
