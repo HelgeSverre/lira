@@ -17,9 +17,13 @@ pub enum ClientMessage {
     Check { source: String },
     /// Compile and run source code
     Run { source: String },
-    /// Compile and run in debug mode
-    Debug { source: String },
-    /// Set breakpoints
+    /// Compile and run in debug mode (breakpoints included to avoid race condition)
+    Debug {
+        source: String,
+        #[serde(default)]
+        breakpoints: Vec<u32>,
+    },
+    /// Set breakpoints (for updating during debug session)
     SetBreakpoints { breakpoints: Vec<u32> },
     /// Continue execution
     Continue,
@@ -121,6 +125,11 @@ pub enum ServerMessage {
     },
     /// Execution stopped
     Stopped,
+    /// Breakpoints were set successfully
+    BreakpointsSet {
+        /// Breakpoint lines that were successfully applied
+        breakpoints: Vec<u32>,
+    },
     /// Step completed (for stepping operations)
     StepCompleted { line: u32, column: u32, ip: usize },
     /// Variable value response
