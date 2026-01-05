@@ -43,23 +43,23 @@ export function StatusBar() {
   ).length;
 
   return (
-    <footer className="status-bar">
+    <footer className="status-bar" data-testid="status-bar">
       <div className="status-bar-left">
-        <span className={`status-indicator ${getStatusClass()}`}>
+        <span className={`status-indicator ${getStatusClass()}`} data-testid="status-indicator" data-status={executionStatus}>
           {getStatusText()}
         </span>
         {activeFiberCount > 0 && (
-          <span className="fiber-count">
+          <span className="fiber-count" data-testid="fiber-count">
             Fibers: {activeFiberCount}
           </span>
         )}
       </div>
 
       <div className="status-bar-right">
-        <span className="cursor-position">
+        <span className="cursor-position" data-testid="cursor-position">
           Ln {cursorPosition.line}, Col {cursorPosition.column}
         </span>
-        <span className="language">Lira</span>
+        <span className="language" data-testid="language-indicator">Lira</span>
       </div>
     </footer>
   );

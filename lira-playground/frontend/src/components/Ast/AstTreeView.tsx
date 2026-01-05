@@ -27,19 +27,40 @@ interface StatementNodeProps {
 }
 
 function StatementNode({ statement }: StatementNodeProps) {
+  // Defensive checks to prevent crashes
+  if (!statement) {
+    return null;
+  }
+
   const { kind, span } = statement;
 
+  if (!kind || typeof kind !== 'object') {
+    return (
+      <AstNode label="Unknown" nodeType="statement" span={span}>
+        <span className="ast-error">Invalid statement</span>
+      </AstNode>
+    );
+  }
+
   const renderContent = () => {
+    try {
     switch (kind.type) {
       case 'VarDecl':
         return (
           <>
             <span className="ast-keyword">{kind.mutable ? 'var' : 'let'}</span>
-            {kind.pattern.kind.type === 'Variable' && (
+            {/* Handle different AST structures */}
+            {kind.pattern?.kind?.type === 'Variable' && (
               <span className="ast-name">{kind.pattern.kind.name}</span>
             )}
+            {/* New structure: pattern might be directly a name or in a value field */}
+            {kind.name && <span className="ast-name">{kind.name}</span>}
             {kind.initializer && (
               <ExpressionNode expression={kind.initializer} label="init" />
+            )}
+            {/* Handle value field for simpler AST structure */}
+            {kind.value && !kind.initializer && (
+              <ExpressionNode expression={kind.value} label="value" />
             )}
           </>
         );
@@ -162,11 +183,15 @@ function StatementNode({ statement }: StatementNodeProps) {
       default:
         return <span className="ast-type">{kind.type}</span>;
     }
+    } catch (error) {
+      console.error('Error rendering statement:', kind, error);
+      return <span className="ast-error">Error rendering: {String(error)}</span>;
+    }
   };
 
   return (
     <AstNode
-      label={kind.type}
+      label={kind.type || 'Unknown'}
       nodeType="statement"
       span={span}
     >
@@ -181,6 +206,9 @@ interface ExpressionNodeProps {
 }
 
 function ExpressionNode({ expression, label }: ExpressionNodeProps) {
+  if (!expression || !expression.kind) {
+    return null;
+  }
   const { kind, span } = expression;
 
   const renderContent = () => {
@@ -312,13 +340,16 @@ interface BlockNodeProps {
 }
 
 function BlockNode({ block, label }: BlockNodeProps) {
+  if (!block) {
+    return null;
+  }
   return (
     <AstNode
       label={`${label}: Block`}
       nodeType="block"
       span={block.span}
     >
-      {block.statements.map((stmt, i) => (
+      {block.statements?.map((stmt, i) => (
         <StatementNode key={i} statement={stmt} />
       ))}
     </AstNode>

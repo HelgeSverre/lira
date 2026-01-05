@@ -36,6 +36,7 @@ export function CompileButton() {
       onClick={handleCompile}
       disabled={isCompiling}
       title="Compile (Ctrl+Enter)"
+      data-testid="compile-button"
     >
       {isCompiling ? (
         <>

@@ -111,6 +111,8 @@ export function RunButton() {
         className="action-button secondary"
         onClick={handleStop}
         title="Stop (Escape)"
+        data-testid="run-button"
+        data-state="running"
       >
         <StopIcon />
         Stop
@@ -124,6 +126,8 @@ export function RunButton() {
         className="action-button warning"
         onClick={handleRun}
         title="Continue (F5)"
+        data-testid="run-button"
+        data-state="paused"
       >
         <PauseIcon />
         Paused
@@ -137,6 +141,8 @@ export function RunButton() {
       onClick={handleRun}
       disabled={isCompiling}
       title="Run (Ctrl+Shift+Enter)"
+      data-testid="run-button"
+      data-state={isCompiling ? 'compiling' : 'idle'}
     >
       {isCompiling ? (
         <>
