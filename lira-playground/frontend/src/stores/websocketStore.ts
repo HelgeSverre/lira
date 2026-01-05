@@ -135,22 +135,16 @@ export const useWebSocketStore = create<WebSocketStoreState>((set, get) => ({
       const checkAndSend = () => {
         const { connectionStatus: status, send: sendFn } = get();
         if (status === 'connected') {
-          // Set breakpoints first, then start debug
-          if (breakpoints.length > 0) {
-            sendFn({ type: 'setBreakpoints', breakpoints });
-          }
-          sendFn({ type: 'debug', source });
+          // Send debug message with breakpoints included (no race condition)
+          sendFn({ type: 'debug', source, breakpoints });
         } else if (status === 'connecting') {
           setTimeout(checkAndSend, 100);
         }
       };
       setTimeout(checkAndSend, 100);
     } else {
-      // Already connected
-      if (breakpoints.length > 0) {
-        send({ type: 'setBreakpoints', breakpoints });
-      }
-      send({ type: 'debug', source });
+      // Already connected - send debug message with breakpoints included
+      send({ type: 'debug', source, breakpoints });
     }
   },
 
@@ -307,6 +301,11 @@ function handleServerMessage(
     case 'ast':
       // AST response for getAst request
       compilerStore.setCompilationSuccess(message.ast);
+      break;
+
+    case 'breakpointsSet':
+      // Breakpoints were successfully applied
+      console.log('Breakpoints set:', message.breakpoints);
       break;
 
     default:
