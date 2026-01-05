@@ -51,6 +51,7 @@ pub enum VmError {
     /// Response channel was closed
     ResponseChannelClosed,
     /// Channel is full (backpressure)
+    #[allow(dead_code)]
     ChannelFull,
 }
 
@@ -145,12 +146,13 @@ fn vm_thread_main(mut command_rx: mpsc::Receiver<VmCommand>) {
     let mut session = DebugSession::new();
 
     rt.block_on(async {
-        loop {
-            match command_rx.recv().await {
-                Some(VmCommand::Execute {
+        // Process commands until shutdown or channel close
+        while let Some(command) = command_rx.recv().await {
+            match command {
+                VmCommand::Execute {
                     message,
                     response_tx,
-                }) => {
+                } => {
                     // Handle the message with panic recovery
                     let response =
                         match std::panic::catch_unwind(AssertUnwindSafe(|| {
@@ -185,8 +187,8 @@ fn vm_thread_main(mut command_rx: mpsc::Receiver<VmCommand>) {
                     // Send response (ignore error if receiver dropped)
                     let _ = response_tx.send(response);
                 }
-                Some(VmCommand::Shutdown) | None => {
-                    // Shutdown requested or channel closed
+                VmCommand::Shutdown => {
+                    // Shutdown requested
                     break;
                 }
             }
@@ -206,9 +208,11 @@ fn handle_client_message(session: &mut DebugSession, msg: ClientMessage) -> VmRe
 
         ClientMessage::GetAst { source } => handle_get_ast(&source),
 
-        ClientMessage::Run { source } => handle_run(session, &source, false),
+        ClientMessage::Run { source } => handle_run(session, &source, false, &[]),
 
-        ClientMessage::Debug { source } => handle_run(session, &source, true),
+        ClientMessage::Debug { source, breakpoints } => {
+            handle_run(session, &source, true, &breakpoints)
+        }
 
         ClientMessage::Stop => {
             session.stop();
@@ -239,9 +243,9 @@ fn handle_client_message(session: &mut DebugSession, msg: ClientMessage) -> VmRe
         ClientMessage::StepOut => handle_step_out(session),
 
         ClientMessage::SetBreakpoints { breakpoints } => {
-            session.set_breakpoints(breakpoints);
+            session.set_breakpoints(breakpoints.clone());
             VmResponse {
-                messages: vec![],
+                messages: vec![ServerMessage::BreakpointsSet { breakpoints }],
                 terminate: false,
             }
         }
@@ -299,9 +303,22 @@ fn handle_get_ast(source: &str) -> VmResponse {
 }
 
 /// Handle run/debug request
-fn handle_run(session: &mut DebugSession, source: &str, debug_mode: bool) -> VmResponse {
+fn handle_run(
+    session: &mut DebugSession,
+    source: &str,
+    debug_mode: bool,
+    breakpoints: &[u32],
+) -> VmResponse {
     let mut messages = Vec::new();
     let start = std::time::Instant::now();
+
+    // Set breakpoints BEFORE compilation/loading to ensure they're applied
+    if !breakpoints.is_empty() {
+        session.set_breakpoints(breakpoints.to_vec());
+        messages.push(ServerMessage::BreakpointsSet {
+            breakpoints: breakpoints.to_vec(),
+        });
+    }
 
     // Compile source
     let bytecode = match compile_source(source) {
@@ -321,7 +338,7 @@ fn handle_run(session: &mut DebugSession, source: &str, debug_mode: bool) -> VmR
         }
     };
 
-    // Load bytecode into session
+    // Load bytecode into session (this will also apply the breakpoints)
     if let Err(e) = session.load(source, bytecode) {
         return VmResponse {
             messages: vec![ServerMessage::RuntimeError {
