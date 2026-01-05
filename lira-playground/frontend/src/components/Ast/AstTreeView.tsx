@@ -49,10 +49,10 @@ function StatementNode({ statement }: StatementNodeProps) {
           <>
             <span className="ast-keyword">fn</span>
             <span className="ast-name">{kind.name}</span>
-            {kind.params.length > 0 && (
+            {kind.params && kind.params.length > 0 && (
               <span className="ast-info">({kind.params.length} params)</span>
             )}
-            <BlockNode block={kind.body} label="body" />
+            {kind.body && <BlockNode block={kind.body} label="body" />}
           </>
         );
 
@@ -61,7 +61,7 @@ function StatementNode({ statement }: StatementNodeProps) {
           <>
             <span className="ast-keyword">struct</span>
             <span className="ast-name">{kind.name}</span>
-            <span className="ast-info">({kind.fields.length} fields)</span>
+            {kind.fields && <span className="ast-info">({kind.fields.length} fields)</span>}
           </>
         );
 
@@ -70,7 +70,7 @@ function StatementNode({ statement }: StatementNodeProps) {
           <>
             <span className="ast-keyword">enum</span>
             <span className="ast-name">{kind.name}</span>
-            <span className="ast-info">({kind.variants.length} variants)</span>
+            {kind.variants && <span className="ast-info">({kind.variants.length} variants)</span>}
           </>
         );
 
@@ -227,7 +227,7 @@ function ExpressionNode({ expression, label }: ExpressionNodeProps) {
         return (
           <>
             <ExpressionNode expression={kind.callee} label="callee" />
-            {kind.args.length > 0 && (
+            {kind.args && kind.args.length > 0 && (
               <span className="ast-info">({kind.args.length} args)</span>
             )}
           </>
@@ -251,14 +251,14 @@ function ExpressionNode({ expression, label }: ExpressionNodeProps) {
         );
 
       case 'Array':
-        return <span className="ast-info">[{kind.elements.length} elements]</span>;
+        return <span className="ast-info">[{kind.elements?.length ?? 0} elements]</span>;
 
       case 'Match':
         return (
           <>
             <span className="ast-keyword">match</span>
             <ExpressionNode expression={kind.subject} label="subject" />
-            <span className="ast-info">({kind.arms.length} arms)</span>
+            {kind.arms && <span className="ast-info">({kind.arms.length} arms)</span>}
           </>
         );
 
@@ -274,7 +274,7 @@ function ExpressionNode({ expression, label }: ExpressionNodeProps) {
         return (
           <>
             <span className="ast-operator">|</span>
-            <span className="ast-info">{kind.params.length} params</span>
+            <span className="ast-info">{kind.params?.length ?? 0} params</span>
             <span className="ast-operator">|</span>
           </>
         );
