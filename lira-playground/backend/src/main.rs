@@ -4,7 +4,6 @@
 
 mod handlers;
 mod protocol;
-mod session;
 mod vm_thread;
 
 use axum::{
