@@ -1,7 +1,44 @@
+import * as Tooltip from '@radix-ui/react-tooltip';
+import {
+  Play,
+  Pause,
+  ArrowDownToLine,
+  ArrowRightToLine,
+  ArrowUpFromLine,
+  Square,
+  type LucideIcon,
+} from 'lucide-react';
 import { useEditorStore } from '../../stores/editorStore';
 import { useVmStore } from '../../stores/vmStore';
 import { useWebSocketStore } from '../../stores/websocketStore';
 import './DebugControls.css';
+
+interface IconButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  icon: LucideIcon;
+  label: string;
+  shortcut?: string;
+}
+
+function IconButton({ icon: Icon, label, shortcut, ...props }: IconButtonProps) {
+  // Convert label to kebab-case for test id (e.g., "Step Into" -> "step-into")
+  const testId = `debug-${label.toLowerCase().replace(/\s+/g, '-')}`;
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger asChild>
+        <button className="icon-button" aria-label={label} data-testid={testId} {...props}>
+          <Icon size={16} />
+        </button>
+      </Tooltip.Trigger>
+      <Tooltip.Portal>
+        <Tooltip.Content className="tooltip-content" sideOffset={5}>
+          {label}
+          {shortcut && <span className="tooltip-shortcut">{shortcut}</span>}
+          <Tooltip.Arrow className="tooltip-arrow" />
+        </Tooltip.Content>
+      </Tooltip.Portal>
+    </Tooltip.Root>
+  );
+}
 
 export function DebugControls() {
   const { setHighlightedLine } = useEditorStore();
@@ -61,113 +98,56 @@ export function DebugControls() {
   };
 
   return (
-    <div className="debug-controls">
-      {isRunning ? (
-        <button
-          className="icon-button"
-          onClick={handlePause}
-          title="Pause execution (F6)"
-        >
-          <PauseIcon />
-        </button>
-      ) : (
-        <button
-          className="icon-button"
-          onClick={handleContinue}
-          disabled={!isPaused}
-          title="Continue to next breakpoint (F5)"
-        >
-          <PlayIcon />
-        </button>
-      )}
+    <Tooltip.Provider delayDuration={200}>
+      <div className="debug-controls" data-testid="debug-controls">
+        {isRunning ? (
+          <IconButton
+            icon={Pause}
+            label="Pause"
+            shortcut="F6"
+            onClick={handlePause}
+          />
+        ) : (
+          <IconButton
+            icon={Play}
+            label="Continue"
+            shortcut="F5"
+            onClick={handleContinue}
+            disabled={!isPaused}
+          />
+        )}
 
-      <button
-        className="icon-button"
-        onClick={handleStepInto}
-        disabled={!canStep}
-        title="Step to next line (F11)"
-      >
-        <StepIntoIcon />
-      </button>
+        <IconButton
+          icon={ArrowDownToLine}
+          label="Step Into"
+          shortcut="F11"
+          onClick={handleStepInto}
+          disabled={!canStep}
+        />
 
-      <button
-        className="icon-button"
-        onClick={handleStepOver}
-        disabled={!canStep}
-        title="Step over function call (F10)"
-      >
-        <StepOverIcon />
-      </button>
+        <IconButton
+          icon={ArrowRightToLine}
+          label="Step Over"
+          shortcut="F10"
+          onClick={handleStepOver}
+          disabled={!canStep}
+        />
 
-      <button
-        className="icon-button"
-        onClick={handleStepOut}
-        disabled={!canStep}
-        title="Step out of current function (Shift+F11)"
-      >
-        <StepOutIcon />
-      </button>
+        <IconButton
+          icon={ArrowUpFromLine}
+          label="Step Out"
+          shortcut="Shift+F11"
+          onClick={handleStepOut}
+          disabled={!canStep}
+        />
 
-      <button
-        className="icon-button"
-        onClick={handleReset}
-        title="Stop debugging and reset (Ctrl+Shift+F5)"
-      >
-        <ResetIcon />
-      </button>
-    </div>
-  );
-}
-
-function PlayIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-      <path d="M4 2.5v11l9-5.5L4 2.5z" />
-    </svg>
-  );
-}
-
-function PauseIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-      <rect x="4" y="3" width="3" height="10" rx="0.5" />
-      <rect x="9" y="3" width="3" height="10" rx="0.5" />
-    </svg>
-  );
-}
-
-function StepIntoIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-      <path d="M8 2v8M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx="8" cy="13" r="1.5" />
-    </svg>
-  );
-}
-
-function StepOverIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-      <path d="M2 8h8M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx="13" cy="8" r="1.5" />
-    </svg>
-  );
-}
-
-function StepOutIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-      <path d="M8 14V6M4 10l4-4 4 4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx="8" cy="3" r="1.5" />
-    </svg>
-  );
-}
-
-function ResetIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-      <path d="M3 8a5 5 0 019.584-2M13 8a5 5 0 01-9.584 2" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" />
-      <path d="M13 3v3h-3M3 13v-3h3" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
+        <IconButton
+          icon={Square}
+          label="Stop"
+          shortcut="Ctrl+Shift+F5"
+          onClick={handleReset}
+        />
+      </div>
+    </Tooltip.Provider>
   );
 }

@@ -26,3 +26,43 @@
   width: 16px;
   height: 16px;
 }
+
+/* Tooltip styles */
+.tooltip-content {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-family: var(--font-sans);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 1000;
+  animation: tooltip-fade-in 0.15s ease-out;
+}
+
+.tooltip-shortcut {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  background: var(--bg-secondary);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+}
+
+.tooltip-arrow {
+  fill: var(--bg-elevated);
+}
+
+@keyframes tooltip-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
