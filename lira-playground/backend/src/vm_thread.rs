@@ -234,6 +234,8 @@ fn handle_client_message(session: &mut DebugSession, msg: ClientMessage) -> VmRe
 
         ClientMessage::StepInto => handle_step_into(session),
 
+        ClientMessage::StepOver => handle_step_over(session),
+
         ClientMessage::StepOut => handle_step_out(session),
 
         ClientMessage::SetBreakpoints { breakpoints } => {
@@ -426,6 +428,23 @@ fn handle_step_line(session: &mut DebugSession) -> VmResponse {
 /// Handle step into
 fn handle_step_into(session: &mut DebugSession) -> VmResponse {
     match session.step_into() {
+        Ok(event) => VmResponse {
+            messages: debug_event_to_messages(event, session, std::time::Instant::now()),
+            terminate: false,
+        },
+        Err(e) => VmResponse {
+            messages: vec![ServerMessage::RuntimeError {
+                message: e,
+                location: None,
+            }],
+            terminate: false,
+        },
+    }
+}
+
+/// Handle step over
+fn handle_step_over(session: &mut DebugSession) -> VmResponse {
+    match session.step_over() {
         Ok(event) => VmResponse {
             messages: debug_event_to_messages(event, session, std::time::Instant::now()),
             terminate: false,

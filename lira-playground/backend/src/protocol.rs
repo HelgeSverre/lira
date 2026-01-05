@@ -29,6 +29,8 @@ pub enum ClientMessage {
     StepLine,
     /// Step into function
     StepInto,
+    /// Step over function call
+    StepOver,
     /// Step out of function
     StepOut,
     /// Inspect a variable

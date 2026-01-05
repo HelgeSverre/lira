@@ -8,8 +8,8 @@ export function DebugControls() {
   const { executionStatus, reset } = useVmStore();
   const {
     continueExecution,
-    stepLine,
     stepInto,
+    stepOver,
     stepOut,
     pause,
     stop,
@@ -35,7 +35,7 @@ export function DebugControls() {
 
   const handleStepOver = () => {
     if (canStep && isConnected) {
-      stepLine(); // stepLine is "step over" behavior
+      stepOver();
     }
   };
 

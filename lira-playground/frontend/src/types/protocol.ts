@@ -16,6 +16,7 @@ export type ClientMessage =
   | { type: 'stepInstruction' }
   | { type: 'stepLine' }
   | { type: 'stepInto' }
+  | { type: 'stepOver' }
   | { type: 'stepOut' }
   | { type: 'inspectVariable'; name: string }
   | { type: 'inspectLocals' }
@@ -117,6 +118,7 @@ export const createClientMessage = {
   stepInstruction: (): ClientMessage => ({ type: 'stepInstruction' }),
   stepLine: (): ClientMessage => ({ type: 'stepLine' }),
   stepInto: (): ClientMessage => ({ type: 'stepInto' }),
+  stepOver: (): ClientMessage => ({ type: 'stepOver' }),
   stepOut: (): ClientMessage => ({ type: 'stepOut' }),
   inspectVariable: (name: string): ClientMessage => ({ type: 'inspectVariable', name }),
   inspectLocals: (): ClientMessage => ({ type: 'inspectLocals' }),

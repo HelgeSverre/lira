@@ -39,6 +39,7 @@ export interface WebSocketStoreState {
   /** Step operations */
   stepLine: () => void;
   stepInto: () => void;
+  stepOver: () => void;
   stepOut: () => void;
   stepInstruction: () => void;
   /** Pause execution */
@@ -163,6 +164,10 @@ export const useWebSocketStore = create<WebSocketStoreState>((set, get) => ({
 
   stepInto: () => {
     get().send({ type: 'stepInto' });
+  },
+
+  stepOver: () => {
+    get().send({ type: 'stepOver' });
   },
 
   stepOut: () => {
