@@ -10,7 +10,7 @@ import type { FiberId, ChannelId } from './vm';
 export type ClientMessage =
   | { type: 'check'; source: string }
   | { type: 'run'; source: string }
-  | { type: 'debug'; source: string }
+  | { type: 'debug'; source: string; breakpoints: number[] }
   | { type: 'setBreakpoints'; breakpoints: number[] }
   | { type: 'continue' }
   | { type: 'stepInstruction' }
@@ -47,7 +47,8 @@ export type ServerMessage =
   | { type: 'channelMessage'; channelId: ChannelId; operation: 'send' | 'receive'; value: string }
   | { type: 'pong' }
   | { type: 'timeoutWarning'; secondsRemaining: number }
-  | { type: 'stopped' };
+  | { type: 'stopped' }
+  | { type: 'breakpointsSet'; breakpoints: number[] };
 
 /** Compilation error */
 export interface CompileError {
@@ -112,7 +113,7 @@ export interface ChannelInfo {
 export const createClientMessage = {
   check: (source: string): ClientMessage => ({ type: 'check', source }),
   run: (source: string): ClientMessage => ({ type: 'run', source }),
-  debug: (source: string): ClientMessage => ({ type: 'debug', source }),
+  debug: (source: string, breakpoints: number[] = []): ClientMessage => ({ type: 'debug', source, breakpoints }),
   setBreakpoints: (breakpoints: number[]): ClientMessage => ({ type: 'setBreakpoints', breakpoints }),
   continue: (): ClientMessage => ({ type: 'continue' }),
   stepInstruction: (): ClientMessage => ({ type: 'stepInstruction' }),
