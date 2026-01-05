@@ -13,7 +13,6 @@ export function RunButton() {
     startExecution,
     setRunning,
     setFinished,
-    setPaused,
     setError,
     appendOutput,
     reset,
