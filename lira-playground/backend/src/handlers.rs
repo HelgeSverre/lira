@@ -11,8 +11,8 @@ use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
 
-use crate::protocol::{ClientMessage, CompileError, ErrorSeverity};
-use crate::session::Session;
+use crate::protocol::{ClientMessage, CompileError, ErrorSeverity, ServerMessage};
+use crate::vm_thread::VmThreadHandle;
 
 /// Health check endpoint
 pub async fn health() -> &'static str {
@@ -391,8 +391,8 @@ pub async fn websocket(ws: WebSocketUpgrade) -> Response {
 async fn handle_websocket(socket: WebSocket) {
     let (mut sender, mut receiver) = socket.split();
 
-    // Create session
-    let mut session = Session::new();
+    // Spawn dedicated VM thread for this session
+    let mut vm_handle = VmThreadHandle::spawn();
 
     while let Some(msg) = receiver.next().await {
         let msg = match msg {
@@ -411,20 +411,39 @@ async fn handle_websocket(socket: WebSocket) {
             }
         };
 
-        // Handle message
-        let responses = session.handle_message(client_msg);
+        // Send to VM thread and get response
+        match vm_handle.send_command(client_msg).await {
+            Ok(response) => {
+                // Send all response messages
+                for msg in response.messages {
+                    let json = serde_json::to_string(&msg).unwrap();
+                    if sender.send(Message::Text(json.into())).await.is_err() {
+                        break;
+                    }
+                }
 
-        // Send responses
-        for response in responses {
-            let json = serde_json::to_string(&response).unwrap();
-            if sender.send(Message::Text(json.into())).await.is_err() {
-                break;
+                // Check if we should terminate
+                if response.terminate {
+                    break;
+                }
+            }
+            Err(e) => {
+                tracing::error!("VM thread error: {}", e);
+                // Send error to client
+                let error_msg = ServerMessage::RuntimeError {
+                    message: format!("VM error: {}", e),
+                    location: None,
+                };
+                let json = serde_json::to_string(&error_msg).unwrap();
+                let _ = sender.send(Message::Text(json.into())).await;
+
+                // Continue trying - the VM thread might recover or be restarted
             }
         }
     }
 
-    // Clean up session
-    session.stop();
+    // Clean up VM thread
+    vm_handle.shutdown().await;
 }
 
 /// Compile source code and return AST + bytecode

@@ -1,6 +1,13 @@
-//! WebSocket Session Management
+//! WebSocket Session Management (DEPRECATED)
 //!
-//! Handles stateful WebSocket sessions for real-time code execution.
+//! This module has been superseded by `vm_thread.rs` which implements
+//! a dedicated thread + channels pattern for persistent VM debugging.
+//!
+//! The old approach created a fresh VM for each Run/Debug command.
+//! The new approach spawns a dedicated std::thread per WebSocket session
+//! that owns the non-Send VM, communicating via tokio::sync::mpsc channels.
+//!
+//! This file is kept for reference but is no longer used.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -46,7 +53,7 @@ impl Session {
             ClientMessage::Run { source } => self.handle_run(&source),
 
             ClientMessage::Debug { source } => {
-                // For now, debug mode is same as run
+                // Debug mode: run to first breakpoint or completion
                 self.handle_run(&source)
             }
 
@@ -58,7 +65,7 @@ impl Session {
             }
 
             ClientMessage::Pause => {
-                // Not implemented yet
+                // Not implemented - would need persistent VM
                 vec![]
             }
 
@@ -67,7 +74,8 @@ impl Session {
             | ClientMessage::StepLine
             | ClientMessage::StepInto
             | ClientMessage::StepOut => {
-                // Debug stepping not implemented yet
+                // Stepping not implemented - would need persistent VM
+                // For now, these are no-ops
                 vec![]
             }
 
@@ -79,7 +87,7 @@ impl Session {
             ClientMessage::InspectVariable { .. }
             | ClientMessage::InspectLocals
             | ClientMessage::InspectStack => {
-                // Inspection not implemented yet
+                // Inspection not implemented - would need persistent VM
                 vec![]
             }
         }
@@ -246,6 +254,12 @@ impl Session {
 
         self.running = false;
         responses
+    }
+}
+
+impl Default for Session {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
