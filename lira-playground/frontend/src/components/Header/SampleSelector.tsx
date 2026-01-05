@@ -1,31 +1,38 @@
 import { useEditorStore } from '../../stores/editorStore';
 import { useUiStore } from '../../stores/uiStore';
-import { SAMPLE_PROGRAM_LABELS, SampleProgramName } from '../../mocks/samplePrograms';
+import { getSamplesByCategory } from '../../samples';
 import './SampleSelector.css';
 
 export function SampleSelector() {
   const { loadSample } = useEditorStore();
   const { selectedSample, setSelectedSample } = useUiStore();
 
+  const samplesByCategory = getSamplesByCategory();
+
   const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const name = e.target.value as SampleProgramName;
-    setSelectedSample(name);
-    loadSample(name);
+    const id = e.target.value;
+    setSelectedSample(id);
+    loadSample(id);
   };
 
   return (
-    <div className="sample-selector">
+    <div className="sample-selector" data-testid="sample-selector">
       <label htmlFor="sample-select">Examples:</label>
       <select
         id="sample-select"
         value={selectedSample}
         onChange={handleChange}
         className="sample-select"
+        data-testid="sample-select"
       >
-        {Object.entries(SAMPLE_PROGRAM_LABELS).map(([key, label]) => (
-          <option key={key} value={key}>
-            {label}
-          </option>
+        {Array.from(samplesByCategory).map(([category, samples]) => (
+          <optgroup key={category} label={category}>
+            {samples.map((sample) => (
+              <option key={sample.metadata.id} value={sample.metadata.id}>
+                {sample.metadata.title}
+              </option>
+            ))}
+          </optgroup>
         ))}
       </select>
     </div>
