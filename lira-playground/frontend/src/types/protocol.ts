@@ -4,7 +4,7 @@
  */
 
 import type { Program } from './ast';
-import type { VmState, FiberId, ChannelId } from './vm';
+import type { FiberId, ChannelId } from './vm';
 
 /** Messages sent from client to server */
 export type ClientMessage =
@@ -34,11 +34,12 @@ export type ServerMessage =
   | { type: 'runtimeError'; message: string; location: SourceLocation | null }
   | { type: 'breakpointHit'; line: number; column: number; ip: number }
   | { type: 'paused'; line: number; column: number; ip: number }
-  | { type: 'variable'; name: string; value: string; valueType: string }
-  | { type: 'locals'; variables: VariableInfo[] }
-  | { type: 'stack'; values: string[]; callStack: CallFrameInfo[] }
+  | { type: 'stepCompleted'; line: number; column: number; ip: number }
+  | { type: 'variableValue'; name: string; value: string; typeName: string }
+  | { type: 'locals'; locals: VariableInfo[] }
+  | { type: 'stack'; stack: string[] }
   | { type: 'ast'; ast: Program }
-  | { type: 'vmStateUpdate'; state: VmState }
+  | { type: 'vmStateUpdate'; state: DebugVmState }
   | { type: 'fiberSpawned'; fiber: FiberInfo }
   | { type: 'fiberStateChanged'; fiberId: FiberId; newState: string }
   | { type: 'channelCreated'; channel: ChannelInfo }
@@ -69,8 +70,7 @@ export interface SourceLocation {
 export interface VariableInfo {
   name: string;
   value: string;
-  valueType: string;
-  slot: number;
+  typeName: string;
 }
 
 /** Call frame info for stack trace */
@@ -78,6 +78,18 @@ export interface CallFrameInfo {
   functionName: string | null;
   line: number | null;
   ip: number;
+}
+
+/** Debug VM state for vmStateUpdate messages */
+export interface DebugVmState {
+  executionState: string;
+  ip: number;
+  line: number | null;
+  column: number | null;
+  stack: string[];
+  locals: VariableInfo[];
+  callStack: string[];
+  output: string[];
 }
 
 /** Fiber info for state updates */
