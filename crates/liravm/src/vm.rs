@@ -8,13 +8,14 @@ use crate::debug::{
     CallFrameInfo, DebugSnapshot, ExecutionState, LocalInfo, PauseFlag, StepContext, StepMode,
     StepOutcome, ValueInfo,
 };
-use crate::fiber::Scheduler;
+use crate::fiber::{FiberEvent, Scheduler};
 use crate::runtime::Runtime;
 use crate::value::{ChannelId, ClosureData, FiberId, IString, Value};
 use lira_core::opcode::Opcode;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+use std::sync::mpsc::{channel, Receiver};
 
 /// Type alias for output callback function
 pub type OutputCallback = Box<dyn FnMut(&str) + Send>;
@@ -140,11 +141,18 @@ pub struct VM {
     step_context: StepContext,
     /// Pause request flag (thread-safe)
     pause_flag: PauseFlag,
+    /// Receiver for fiber/channel events
+    fiber_event_rx: Option<Receiver<FiberEvent>>,
 }
 
 impl VM {
     /// Create a new VM with the given program
     pub fn new(program: Program) -> Self {
+        // Set up fiber event channel
+        let (tx, rx) = channel();
+        let mut scheduler = Scheduler::new();
+        scheduler.set_event_sender(tx);
+
         Self {
             program,
             stack: Vec::with_capacity(1024),
@@ -152,7 +160,7 @@ impl VM {
             ip: 0,
             locals: Vec::with_capacity(256),
             debug: false,
-            scheduler: Scheduler::new(),
+            scheduler,
             fiber_mode: false,
             runtime: Runtime::new(),
             output: Vec::new(),
@@ -165,6 +173,7 @@ impl VM {
             execution_state: ExecutionState::Ready,
             step_context: StepContext::new(),
             pause_flag: PauseFlag::new(),
+            fiber_event_rx: Some(rx),
         }
     }
 
@@ -258,6 +267,17 @@ impl VM {
     /// Clear all breakpoints
     pub fn clear_breakpoints(&mut self) {
         self.breakpoints.clear();
+    }
+
+    /// Drain all pending fiber/channel events
+    pub fn drain_fiber_events(&self) -> Vec<FiberEvent> {
+        let mut events = Vec::new();
+        if let Some(ref rx) = self.fiber_event_rx {
+            while let Ok(event) = rx.try_recv() {
+                events.push(event);
+            }
+        }
+        events
     }
 
     /// Get the current source location (line, column) from the instruction pointer
@@ -490,15 +510,25 @@ impl VM {
 
     /// Get a detailed debug snapshot with type information
     pub fn get_debug_snapshot(&self) -> DebugSnapshot {
+        use crate::debug::RichValue;
+
         let stack: Vec<ValueInfo> = self.stack.iter().map(|v| {
-            ValueInfo::new(format!("{:?}", v), self.value_type_name(v))
+            ValueInfo::with_rich_value(
+                format!("{:?}", v),
+                self.value_type_name(v),
+                RichValue::from_value(v),
+            )
         }).collect();
 
         let locals: Vec<LocalInfo> = self.locals.iter().enumerate().map(|(i, v)| {
             LocalInfo {
                 slot: i,
                 name: None, // TODO: Get from debug info if available
-                value: ValueInfo::new(format!("{:?}", v), self.value_type_name(v)),
+                value: ValueInfo::with_rich_value(
+                    format!("{:?}", v),
+                    self.value_type_name(v),
+                    RichValue::from_value(v),
+                ),
             }
         }).collect();
 

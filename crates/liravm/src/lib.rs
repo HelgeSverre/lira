@@ -20,10 +20,11 @@ pub mod vm;
 
 // Re-export commonly used types
 pub use debug::{
-    CallFrameInfo, DebugSnapshot, ExecutionState, LocalInfo, PauseFlag, StepContext, StepMode,
-    StepOutcome, ValueInfo,
+    CallFrameInfo, DebugSnapshot, ExecutionState, LocalInfo, PauseFlag, RichValue, StepContext,
+    StepMode, StepOutcome, ValueInfo,
 };
 pub use debug_session::{DebugEvent, DebugSession, SessionState};
+pub use fiber::FiberEvent;
 pub use value::{ChannelId, FiberId, Value};
 pub use vm::{ChannelSnapshot, FiberSnapshot, StepResult, VmSnapshot, VM};
 

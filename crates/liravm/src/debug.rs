@@ -2,6 +2,8 @@
 //!
 //! Types for debugging execution: stepping, state inspection, and pause/resume.
 
+use crate::value::Value;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -242,11 +244,25 @@ pub struct ValueInfo {
     pub display: String,
     /// Type name
     pub type_name: String,
+    /// Rich structured value (for frontend inspection)
+    pub rich_value: Option<RichValue>,
 }
 
 impl ValueInfo {
     pub fn new(display: String, type_name: String) -> Self {
-        Self { display, type_name }
+        Self {
+            display,
+            type_name,
+            rich_value: None,
+        }
+    }
+
+    pub fn with_rich_value(display: String, type_name: String, rich_value: RichValue) -> Self {
+        Self {
+            display,
+            type_name,
+            rich_value: Some(rich_value),
+        }
     }
 }
 
@@ -270,6 +286,55 @@ pub struct CallFrameInfo {
     pub return_addr: usize,
     /// Source location of the call
     pub source_location: Option<(u32, u32)>,
+}
+
+/// Rich value representation for serialization
+/// This is a serializable representation of Value that doesn't use Rc/RefCell
+#[derive(Debug, Clone)]
+pub enum RichValue {
+    Null,
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    String(String),
+    Array(Vec<RichValue>),
+    Object(HashMap<String, RichValue>),
+    Function { code_offset: usize },
+    Closure { code_offset: usize, captures: Vec<RichValue> },
+    Fiber { id: u64 },
+    Channel { id: u64 },
+}
+
+impl RichValue {
+    /// Convert a VM Value to a RichValue
+    pub fn from_value(value: &Value) -> Self {
+        match value {
+            Value::Null => RichValue::Null,
+            Value::Bool(b) => RichValue::Bool(*b),
+            Value::Int(n) => RichValue::Int(*n),
+            Value::Float(f) => RichValue::Float(*f),
+            Value::String(s) => RichValue::String((**s).clone()),
+            Value::Array(arr) => {
+                let elements = arr.borrow().iter().map(RichValue::from_value).collect();
+                RichValue::Array(elements)
+            }
+            Value::Object(obj) => {
+                let fields = obj
+                    .borrow()
+                    .iter()
+                    .map(|(k, v)| (k.clone(), RichValue::from_value(v)))
+                    .collect();
+                RichValue::Object(fields)
+            }
+            Value::Function(offset) => RichValue::Function { code_offset: *offset },
+            Value::Closure(c) => RichValue::Closure {
+                code_offset: c.code_offset,
+                captures: c.captures.iter().map(RichValue::from_value).collect(),
+            },
+            Value::Fiber(id) => RichValue::Fiber { id: *id },
+            Value::Channel(id) => RichValue::Channel { id: *id },
+        }
+    }
 }
 
 #[cfg(test)]

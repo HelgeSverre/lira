@@ -6,6 +6,7 @@
 
 use crate::bytecode::load;
 use crate::debug::{DebugSnapshot, PauseFlag, StepOutcome};
+use crate::fiber::FiberEvent;
 use crate::vm::VM;
 use std::sync::{Mutex, RwLock};
 
@@ -280,6 +281,16 @@ impl DebugSession {
     /// Get the pause flag for external use
     pub fn get_pause_flag(&self) -> PauseFlag {
         self.pause_flag.clone()
+    }
+
+    /// Drain all pending fiber/channel events from the VM
+    pub fn drain_fiber_events(&self) -> Vec<FiberEvent> {
+        let vm_guard = self.vm.lock().unwrap();
+        if let Some(ref vm) = *vm_guard {
+            vm.drain_fiber_events()
+        } else {
+            Vec::new()
+        }
     }
 
     // Private helper methods
