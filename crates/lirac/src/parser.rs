@@ -1846,17 +1846,21 @@ impl Parser {
             let arm_span = self.span();
 
             // Check for default case: _ => ...
-            if self.check(&TokenKind::Identifier("_".to_string())) {
-                self.advance();
-                self.consume(&TokenKind::FatArrow, "Expected '=>' after '_'")?;
-                let body = self.expression()?;
-                arms.push(SelectArm {
-                    kind: SelectArmKind::Default,
-                    body,
-                    span: arm_span,
-                });
-                self.match_token(&TokenKind::Comma);
-                continue;
+            // Note: We must check the actual identifier value, not just the variant,
+            // because check() uses discriminant comparison which matches any identifier
+            if let TokenKind::Identifier(name) = &self.peek().kind {
+                if name == "_" {
+                    self.advance();
+                    self.consume(&TokenKind::FatArrow, "Expected '=>' after '_'")?;
+                    let body = self.expression()?;
+                    arms.push(SelectArm {
+                        kind: SelectArmKind::Default,
+                        body,
+                        span: arm_span,
+                    });
+                    self.match_token(&TokenKind::Comma);
+                    continue;
+                }
             }
 
             // Check for receive: <-channel or variable = <-channel
@@ -1878,6 +1882,36 @@ impl Parser {
             }
 
             // Could be: variable = <-channel => ... or value -> channel => ...
+            // We need to detect the `identifier = <-channel` pattern before calling expression(),
+            // because expression() will consume `=` as an assignment operator
+            if let TokenKind::Identifier(name) = &self.peek().kind {
+                // Look ahead to check if this is `identifier = <-`
+                let name = name.clone();
+                if self.tokens.get(self.current + 1).map(|t| &t.kind) == Some(&TokenKind::Eq)
+                    && self.tokens.get(self.current + 2).map(|t| &t.kind)
+                        == Some(&TokenKind::LtMinus)
+                {
+                    // This is `variable = <-channel => ...`
+                    self.advance(); // consume identifier
+                    self.advance(); // consume =
+                    self.advance(); // consume <-
+                    let channel = self.expression()?;
+                    self.consume(&TokenKind::FatArrow, "Expected '=>' after channel")?;
+                    let body = self.expression()?;
+                    arms.push(SelectArm {
+                        kind: SelectArmKind::Recv {
+                            variable: Some(name),
+                            channel,
+                        },
+                        body,
+                        span: arm_span,
+                    });
+                    self.match_token(&TokenKind::Comma);
+                    continue;
+                }
+            }
+
+            // Otherwise parse as send: value -> channel => ...
             let first_expr = self.expression()?;
 
             if self.match_token(&TokenKind::Arrow) {
@@ -1893,35 +1927,9 @@ impl Parser {
                     body,
                     span: arm_span,
                 });
-            } else if self.match_token(&TokenKind::Eq) {
-                // variable = <-channel => ...
-                self.consume(&TokenKind::LtMinus, "Expected '<-' after '='")?;
-                let channel = self.expression()?;
-
-                // Extract variable name from expression
-                let variable = match first_expr.kind {
-                    ExpressionKind::Identifier(name) => name,
-                    _ => {
-                        return Err(format!(
-                            "{}:{}: Expected identifier before '='",
-                            arm_span.line, arm_span.column
-                        ));
-                    }
-                };
-
-                self.consume(&TokenKind::FatArrow, "Expected '=>' after channel")?;
-                let body = self.expression()?;
-                arms.push(SelectArm {
-                    kind: SelectArmKind::Recv {
-                        variable: Some(variable),
-                        channel,
-                    },
-                    body,
-                    span: arm_span,
-                });
             } else {
                 return Err(format!(
-                    "{}:{}: Expected '->' or '=' in select arm",
+                    "{}:{}: Expected '->' in select arm (for send: value -> channel =>)",
                     arm_span.line, arm_span.column
                 ));
             }
@@ -2950,6 +2958,102 @@ mod tests {
             }
         } else {
             panic!("Expected FnDecl");
+        }
+    }
+
+    #[test]
+    fn test_select_with_send_variable() {
+        // Test that select parses `variable -> channel =>` correctly
+        // This was a bug where any identifier was matched as `_` (default case)
+        let source = r#"
+            select {
+                value -> ch => println("sent")
+            }
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let mut parser = Parser::new(tokens);
+        let expr = parser.expression().unwrap();
+
+        if let ExpressionKind::Select(arms) = expr.kind {
+            assert_eq!(arms.len(), 1);
+            assert!(
+                matches!(arms[0].kind, SelectArmKind::Send { .. }),
+                "Expected Send arm, got {:?}",
+                arms[0].kind
+            );
+        } else {
+            panic!("Expected select expression");
+        }
+    }
+
+    #[test]
+    fn test_select_with_recv_variable() {
+        // Test that select parses `variable = <-channel =>` correctly
+        let source = r#"
+            select {
+                result = <-ch => println("received")
+            }
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let mut parser = Parser::new(tokens);
+        let expr = parser.expression().unwrap();
+
+        if let ExpressionKind::Select(arms) = expr.kind {
+            assert_eq!(arms.len(), 1);
+            if let SelectArmKind::Recv { variable, .. } = &arms[0].kind {
+                assert_eq!(variable.as_deref(), Some("result"));
+            } else {
+                panic!("Expected Recv arm with variable");
+            }
+        } else {
+            panic!("Expected select expression");
+        }
+    }
+
+    #[test]
+    fn test_select_default_case() {
+        // Test that _ => still works as default case
+        let source = r#"
+            select {
+                _ => println("default")
+            }
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let mut parser = Parser::new(tokens);
+        let expr = parser.expression().unwrap();
+
+        if let ExpressionKind::Select(arms) = expr.kind {
+            assert_eq!(arms.len(), 1);
+            assert!(
+                matches!(arms[0].kind, SelectArmKind::Default),
+                "Expected Default arm"
+            );
+        } else {
+            panic!("Expected select expression");
+        }
+    }
+
+    #[test]
+    fn test_select_mixed_arms() {
+        // Test select with send, receive, and default arms together
+        let source = r#"
+            select {
+                x -> ch1 => println("sent"),
+                <-ch2 => println("received"),
+                _ => println("default")
+            }
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let mut parser = Parser::new(tokens);
+        let expr = parser.expression().unwrap();
+
+        if let ExpressionKind::Select(arms) = expr.kind {
+            assert_eq!(arms.len(), 3);
+            assert!(matches!(arms[0].kind, SelectArmKind::Send { .. }));
+            assert!(matches!(arms[1].kind, SelectArmKind::Recv { variable: None, .. }));
+            assert!(matches!(arms[2].kind, SelectArmKind::Default));
+        } else {
+            panic!("Expected select expression");
         }
     }
 }
