@@ -224,6 +224,22 @@ impl CodeGenerator {
             }
         }
 
+        // Auto-invoke main() if it exists and takes no arguments
+        if let Some(main_func) = self.functions.iter().find(|f| f.name == "main") {
+            if main_func.param_count == 0 {
+                let offset = main_func.code_offset;
+                let idx = self.add_constant_internal(Constant::Function(offset));
+                if offset == 0 {
+                    self.pending_func_patches.push((idx, "main".to_string()));
+                }
+                self.emit_opcode(Opcode::LoadConst);
+                self.emit_u16(idx);
+                self.emit_opcode(Opcode::Call);
+                self.emit_u8(0); // No arguments
+                self.emit_opcode(Opcode::Pop); // Discard return value
+            }
+        }
+
         // Add halt at end
         self.emit_opcode(Opcode::Halt);
 

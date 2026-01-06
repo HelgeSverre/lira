@@ -1,0 +1,10 @@
+// main_entry_point.li - Tests automatic main() invocation
+// The main function should be called automatically as the entry point
+
+// @expect: Hello from main!
+// @expect: Program executed successfully
+
+fn main() {
+    println("Hello from main!")
+    println("Program executed successfully")
+}
