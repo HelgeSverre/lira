@@ -76,6 +76,22 @@ pub struct LineInfo {
     pub column: u32,
 }
 
+/// Local variable symbol information
+/// Maps a local slot to its source name within a scope
+#[derive(Debug, Clone)]
+pub struct LocalSymbol {
+    /// Local variable slot index
+    pub slot: u16,
+    /// Variable name in source code
+    pub name: String,
+    /// Scope depth (0 = function top-level)
+    pub scope_depth: u16,
+    /// Bytecode offset where this variable becomes valid
+    pub start_offset: u32,
+    /// Bytecode offset where this variable goes out of scope (0 = until function end)
+    pub end_offset: u32,
+}
+
 /// Debug information section
 #[derive(Debug, Clone, Default)]
 pub struct DebugInfo {
@@ -83,6 +99,8 @@ pub struct DebugInfo {
     pub source_file: Option<String>,
     /// Line number table
     pub line_table: Vec<LineInfo>,
+    /// Local variable symbols
+    pub local_symbols: Vec<LocalSymbol>,
 }
 
 impl DebugInfo {
@@ -108,5 +126,41 @@ impl DebugInfo {
             }
         }
         None
+    }
+
+    /// Add a local symbol entry
+    pub fn add_local_symbol(&mut self, slot: u16, name: String, scope_depth: u16, start_offset: u32) {
+        self.local_symbols.push(LocalSymbol {
+            slot,
+            name,
+            scope_depth,
+            start_offset,
+            end_offset: 0, // Will be patched when scope ends
+        });
+    }
+
+    /// Look up the name for a local slot at a given bytecode offset
+    pub fn lookup_local_name(&self, slot: u16, offset: u32) -> Option<&str> {
+        // Find the most recent symbol for this slot that's valid at this offset
+        self.local_symbols
+            .iter()
+            .rev()
+            .find(|sym| {
+                sym.slot == slot
+                    && offset >= sym.start_offset
+                    && (sym.end_offset == 0 || offset < sym.end_offset)
+            })
+            .map(|sym| sym.name.as_str())
+    }
+
+    /// Get all local names valid at a given offset, returning a map of slot -> name
+    pub fn get_local_names_at(&self, offset: u32) -> std::collections::HashMap<u16, &str> {
+        let mut names = std::collections::HashMap::new();
+        for sym in &self.local_symbols {
+            if offset >= sym.start_offset && (sym.end_offset == 0 || offset < sym.end_offset) {
+                names.insert(sym.slot, sym.name.as_str());
+            }
+        }
+        names
     }
 }

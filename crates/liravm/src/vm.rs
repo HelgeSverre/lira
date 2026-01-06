@@ -520,10 +520,12 @@ impl VM {
             )
         }).collect();
 
+        // Get local names from debug info at current IP
+        let local_names = self.program.debug_info.get_local_names_at(self.ip as u32);
         let locals: Vec<LocalInfo> = self.locals.iter().enumerate().map(|(i, v)| {
             LocalInfo {
                 slot: i,
-                name: None, // TODO: Get from debug info if available
+                name: local_names.get(&(i as u16)).map(|s| s.to_string()),
                 value: ValueInfo::with_rich_value(
                     format!("{:?}", v),
                     self.value_type_name(v),

@@ -31,6 +31,8 @@ pub struct CodeGenerator {
     local_types: Vec<HashMap<String, String>>,
     /// Next local slot
     next_local: u16,
+    /// Current scope depth (for debug symbols)
+    scope_depth: u16,
     /// Loop context for break/continue
     loop_stack: Vec<LoopContext>,
     /// Errors during code generation
@@ -89,6 +91,7 @@ impl CodeGenerator {
             locals: vec![HashMap::new()],
             local_types: vec![HashMap::new()],
             next_local: 0,
+            scope_depth: 0,
             loop_stack: Vec::new(),
             errors: Vec::new(),
             debug_info: DebugInfo::new(),
@@ -289,6 +292,20 @@ impl CodeGenerator {
             output.extend_from_slice(&0u32.to_le_bytes());
         }
 
+        // Local symbols section
+        // Format: symbol_count (u32), then for each symbol:
+        //   slot (u16), scope_depth (u16), start_offset (u32), end_offset (u32), name_len (u32), name (bytes)
+        output.extend_from_slice(&(self.debug_info.local_symbols.len() as u32).to_le_bytes());
+        for sym in &self.debug_info.local_symbols {
+            output.extend_from_slice(&sym.slot.to_le_bytes());
+            output.extend_from_slice(&sym.scope_depth.to_le_bytes());
+            output.extend_from_slice(&sym.start_offset.to_le_bytes());
+            output.extend_from_slice(&sym.end_offset.to_le_bytes());
+            let name_bytes = sym.name.as_bytes();
+            output.extend_from_slice(&(name_bytes.len() as u32).to_le_bytes());
+            output.extend_from_slice(name_bytes);
+        }
+
         output
     }
 
@@ -372,11 +389,13 @@ impl CodeGenerator {
     fn push_scope(&mut self) {
         self.locals.push(HashMap::new());
         self.local_types.push(HashMap::new());
+        self.scope_depth += 1;
     }
 
     fn pop_scope(&mut self) {
         self.locals.pop();
         self.local_types.pop();
+        self.scope_depth = self.scope_depth.saturating_sub(1);
     }
 
     fn define_local(&mut self, name: &str) -> u16 {
@@ -384,6 +403,15 @@ impl CodeGenerator {
         self.next_local += 1;
         if let Some(scope) = self.locals.last_mut() {
             scope.insert(name.to_string(), slot);
+        }
+        // Emit debug symbol for this local (skip internal/generated names)
+        if !name.starts_with("__") {
+            self.debug_info.add_local_symbol(
+                slot,
+                name.to_string(),
+                self.scope_depth,
+                self.current_offset() as u32,
+            );
         }
         slot
     }
