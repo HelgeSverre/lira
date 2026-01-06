@@ -114,7 +114,7 @@ export function getOrderedSampleIds(): string[] {
 }
 
 /** Category display order */
-const CATEGORY_ORDER = ['Getting Started', 'Fundamentals', 'Advanced'];
+const CATEGORY_ORDER = ['Getting Started', 'Fundamentals', 'Advanced', 'Concurrency'];
 
 /**
  * Get samples grouped by category, maintaining order within each category
