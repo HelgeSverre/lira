@@ -239,6 +239,216 @@ test.describe('AST Panel', () => {
     // Check for FnDecl in the AST tree
     await expect(astPanel).toContainText('FnDecl', { timeout: 5000 });
   });
+
+  test('5.3 AST Shows Identifier Names', async ({ page }) => {
+    // Enter code with identifiers
+    await typeInEditor(page, 'println("Hello")');
+
+    // Run to generate AST
+    await clickRun(page);
+
+    // Wait for AST to populate
+    const astPanel = page.locator('.ast-tree');
+    await expect(astPanel).toBeVisible({ timeout: 10000 });
+
+    // Expand Expression node to see Call details
+    await astPanel.locator('.tree-node-header:has-text("Expression")').click();
+    await page.waitForTimeout(100);
+
+    // Expand Call node to see callee (Identifier)
+    await astPanel.locator('.tree-node-header:has-text("Call")').click();
+    await page.waitForTimeout(100);
+
+    // Expand Identifier node to see the name
+    await astPanel.locator('.tree-node-header:has-text("callee")').click();
+    await page.waitForTimeout(100);
+
+    // The identifier name should be rendered in an .ast-name element
+    await expect(astPanel.locator('.ast-name:has-text("println")')).toBeVisible({ timeout: 5000 });
+  });
+
+  test('5.4 AST Shows String Literal Values', async ({ page }) => {
+    // Enter code with string literal
+    await typeInEditor(page, 'println("Hello, Lira!")');
+
+    // Run to generate AST
+    await clickRun(page);
+
+    // Wait for AST to populate
+    const astPanel = page.locator('.ast-tree');
+    await expect(astPanel).toBeVisible({ timeout: 10000 });
+
+    // Expand nodes to see the string literal
+    await astPanel.locator('.tree-node-header:has-text("Expression")').click();
+    await page.waitForTimeout(100);
+    await astPanel.locator('.tree-node-header:has-text("Call")').click();
+    await page.waitForTimeout(100);
+
+    // Expand args to see the string argument
+    await astPanel.locator('.tree-node-header:has-text("args")').click();
+    await page.waitForTimeout(100);
+
+    // Expand the argument node to see the StringLiteral node
+    await astPanel.locator('.tree-node-header:has-text("arg 1")').click();
+    await page.waitForTimeout(100);
+
+    // Expand the StringLiteral node to see the value
+    await astPanel.locator('.tree-node-header:has-text("StringLiteral")').click();
+    await page.waitForTimeout(100);
+
+    // String literal value should be shown in .ast-string element
+    await expect(astPanel.locator('.ast-string:has-text("Hello, Lira!")')).toBeVisible({ timeout: 5000 });
+  });
+
+  test('5.5 AST Shows Integer Literal Values', async ({ page }) => {
+    // Enter code with integer literal
+    await typeInEditor(page, 'let x = 42');
+
+    // Run to generate AST
+    await clickRun(page);
+
+    // Wait for AST to populate
+    const astPanel = page.locator('.ast-tree');
+    await expect(astPanel).toBeVisible({ timeout: 10000 });
+
+    // Expand VarDecl node to see the initializer
+    await astPanel.locator('.tree-node-header:has-text("VarDecl")').click();
+    await page.waitForTimeout(100);
+
+    // Expand the init/IntLiteral node
+    await astPanel.locator('.tree-node-header:has-text("init")').click();
+    await page.waitForTimeout(100);
+
+    // Integer literal value should be shown in .ast-number element
+    await expect(astPanel.locator('.ast-number:has-text("42")')).toBeVisible({ timeout: 5000 });
+  });
+
+  test('5.6 AST Shows Binary Operator Symbols', async ({ page }) => {
+    // Enter code with binary operators
+    await typeInEditor(page, 'let sum = 10 + 20');
+
+    // Run to generate AST
+    await clickRun(page);
+
+    // Wait for AST to populate
+    const astPanel = page.locator('.ast-tree');
+    await expect(astPanel).toBeVisible({ timeout: 10000 });
+
+    // Expand VarDecl to see the binary expression
+    await astPanel.locator('.tree-node-header:has-text("VarDecl")').click();
+    await page.waitForTimeout(100);
+
+    // Expand the init/Binary node
+    await astPanel.locator('.tree-node-header:has-text("init")').click();
+    await page.waitForTimeout(100);
+
+    // Operator should be shown as symbol (+) not name (Add)
+    await expect(astPanel.locator('.ast-operator:has-text("+")')).toBeVisible({ timeout: 5000 });
+  });
+
+  test('5.7 AST Shows Function Parameters with Types', async ({ page }) => {
+    // Enter function with typed parameters
+    await typeInEditor(page, `fn add(a: int, b: int) -> int {
+  return a + b
+}`);
+
+    // Run to generate AST
+    await clickRun(page);
+
+    // Wait for AST to populate
+    const astPanel = page.locator('.ast-tree');
+    await expect(astPanel).toBeVisible({ timeout: 10000 });
+
+    // Expand FnDecl to see function details
+    await astPanel.locator('.tree-node-header:has-text("FnDecl")').click();
+    await page.waitForTimeout(100);
+
+    // Should show function name
+    await expect(astPanel.locator('.ast-name:has-text("add")')).toBeVisible({ timeout: 5000 });
+
+    // Should show parameter types (int) - may need to expand params
+    const paramsNode = astPanel.locator('.tree-node-header:has-text("params")');
+    if (await paramsNode.isVisible()) {
+      await paramsNode.click();
+      await page.waitForTimeout(100);
+    }
+
+    await expect(astPanel.locator('.ast-type:has-text("int")')).toBeVisible({ timeout: 5000 });
+  });
+
+  test('5.8 AST Shows Class Fields with Types', async ({ page }) => {
+    // Enter class with fields
+    await typeInEditor(page, `class Person {
+  name: string
+  age: int
+}`);
+
+    // Run to generate AST
+    await clickRun(page);
+
+    // Wait for AST to populate
+    const astPanel = page.locator('.ast-tree');
+    await expect(astPanel).toBeVisible({ timeout: 10000 });
+
+    // Expand ClassDecl to see fields
+    await astPanel.locator('.tree-node-header:has-text("ClassDecl")').click();
+    await page.waitForTimeout(100);
+
+    // Should show class name
+    await expect(astPanel.locator('.ast-name:has-text("Person")')).toBeVisible({ timeout: 5000 });
+
+    // Expand fields node
+    await astPanel.locator('.tree-node-header:has-text("fields")').click();
+    await page.waitForTimeout(100);
+
+    // Expand first field node (name: string)
+    const fieldNodes = astPanel.locator('.tree-node-header.node-field');
+    if (await fieldNodes.count() > 0) {
+      await fieldNodes.first().click();
+      await page.waitForTimeout(100);
+    }
+
+    // Should show field types
+    await expect(astPanel.locator('.ast-type:has-text("string")')).toBeVisible({ timeout: 5000 });
+  });
+
+  test('5.9 AST Shows Expandable Arguments', async ({ page }) => {
+    // Enter simple function call with numeric arguments
+    await typeInEditor(page, 'println(42)');
+
+    // Run to generate AST
+    await clickRun(page);
+
+    // Wait for AST to populate
+    const astPanel = page.locator('.ast-tree');
+    await expect(astPanel).toBeVisible({ timeout: 10000 });
+
+    // Expand Expression
+    await astPanel.locator('.tree-node-header:has-text("Expression")').click();
+    await page.waitForTimeout(100);
+
+    // Expand Call node
+    await astPanel.locator('.tree-node-header:has-text("Call")').click();
+    await page.waitForTimeout(100);
+
+    // Should show args node with count
+    await expect(astPanel.locator('.tree-node-label:has-text("args")')).toBeVisible({ timeout: 5000 });
+
+    // Expand args node
+    await astPanel.locator('.tree-node-header:has-text("args")').click();
+    await page.waitForTimeout(100);
+
+    // Expand first argument
+    await astPanel.locator('.tree-node-header:has-text("arg 1")').click();
+    await page.waitForTimeout(100);
+
+    // Expand IntLiteral to see the value
+    await astPanel.locator('.tree-node-header:has-text("IntLiteral")').click();
+    await page.waitForTimeout(100);
+
+    // Should show argument value (42)
+    await expect(astPanel.locator('.ast-number:has-text("42")')).toBeVisible({ timeout: 5000 });
+  });
 });
 
 test.describe('Error Handling', () => {

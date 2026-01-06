@@ -107,3 +107,63 @@
   font-size: 11px;
   margin-left: 4px;
 }
+
+.ast-label {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.ast-type-expr {
+  display: inline;
+}
+
+/* Node type variants */
+.tree-node-label.node-pattern {
+  color: var(--syntax-variable);
+}
+
+.tree-node-label.node-params,
+.tree-node-label.node-param {
+  color: var(--syntax-variable);
+}
+
+.tree-node-label.node-args,
+.tree-node-label.node-arg {
+  color: var(--syntax-function);
+}
+
+.tree-node-label.node-match-arm,
+.tree-node-label.node-select-arm {
+  color: var(--syntax-keyword);
+}
+
+.tree-node-label.node-arms {
+  color: var(--text-secondary);
+}
+
+.tree-node-label.node-field,
+.tree-node-label.node-fields {
+  color: var(--syntax-variable);
+}
+
+.tree-node-label.node-variant,
+.tree-node-label.node-variants {
+  color: var(--syntax-type);
+}
+
+.tree-node-label.node-method,
+.tree-node-label.node-methods {
+  color: var(--syntax-function);
+}
+
+.tree-node-label.node-elements,
+.tree-node-label.node-entries,
+.tree-node-label.node-entry {
+  color: var(--text-secondary);
+}
+
+/* Error state */
+.ast-error {
+  color: var(--error-color, #ff6b6b);
+  font-style: italic;
+}

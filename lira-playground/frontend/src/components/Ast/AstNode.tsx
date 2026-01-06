@@ -2,9 +2,33 @@ import { useState, ReactNode } from 'react';
 import type { Span } from '../../types/ast';
 import { useUiStore } from '../../stores/uiStore';
 
+type NodeType =
+  | 'program'
+  | 'statement'
+  | 'expression'
+  | 'block'
+  | 'pattern'
+  | 'params'
+  | 'param'
+  | 'args'
+  | 'arg'
+  | 'match-arm'
+  | 'select-arm'
+  | 'arms'
+  | 'field'
+  | 'fields'
+  | 'variant'
+  | 'variants'
+  | 'method'
+  | 'methods'
+  | 'elements'
+  | 'entries'
+  | 'entry'
+  | 'other';
+
 interface AstNodeProps {
   label: string;
-  nodeType: 'program' | 'statement' | 'expression' | 'block' | 'other';
+  nodeType: NodeType;
   span?: Span;
   children?: ReactNode;
   defaultExpanded?: boolean;
@@ -30,13 +54,7 @@ export function AstNode({
   };
 
   const getNodeClass = () => {
-    switch (nodeType) {
-      case 'program': return 'node-program';
-      case 'statement': return 'node-statement';
-      case 'expression': return 'node-expression';
-      case 'block': return 'node-block';
-      default: return '';
-    }
+    return `node-${nodeType}`;
   };
 
   return (

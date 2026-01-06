@@ -11,8 +11,26 @@ import type { CompileError } from '../types/protocol';
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
 /**
+ * Convert snake_case to camelCase
+ */
+function snakeToCamel(str: string): string {
+  return str.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+}
+
+/**
+ * Map of AST type names to the key name their simple value should use.
+ * For example, Identifier's value should be stored as "name", not "value".
+ */
+const VALUE_KEY_MAPPING: Record<string, string> = {
+  'Identifier': 'name',
+  'Named': 'name',  // TypeExpr Named type
+  // Literals keep their value as "value" (no mapping needed)
+};
+
+/**
  * Transform AST from backend format {type, value: {...fields}} to frontend format {type, ...fields}
- * This is needed because the backend uses serde's adjacently tagged enums.
+ * Also converts snake_case keys to camelCase.
+ * This is needed because the backend uses serde's adjacently tagged enums and snake_case.
  */
 function normalizeAst(obj: unknown): unknown {
   if (obj === null || obj === undefined) {
@@ -29,23 +47,27 @@ function normalizeAst(obj: unknown): unknown {
     // Check if this is a tagged enum {type, value}
     if ('type' in record && 'value' in record && Object.keys(record).length === 2) {
       const value = record.value;
+      const typeName = record.type as string;
+
       if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
         // Flatten {type, value: {...fields}} to {type, ...fields}
-        const normalized: Record<string, unknown> = { type: record.type };
+        const normalized: Record<string, unknown> = { type: typeName };
         for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
-          normalized[key] = normalizeAst(val);
+          normalized[snakeToCamel(key)] = normalizeAst(val);
         }
         return normalized;
       } else {
-        // For simple values like {type: "IntLiteral", value: 42}
-        return { type: record.type, value: normalizeAst(value) };
+        // For simple values like {type: "Identifier", value: "println"} or {type: "IntLiteral", value: 42}
+        // Map to the appropriate key name based on type
+        const keyName = VALUE_KEY_MAPPING[typeName] || 'value';
+        return { type: typeName, [keyName]: normalizeAst(value) };
       }
     }
 
-    // Recursively normalize all object properties
+    // Recursively normalize all object properties, converting snake_case to camelCase
     const result: Record<string, unknown> = {};
     for (const [key, val] of Object.entries(record)) {
-      result[key] = normalizeAst(val);
+      result[snakeToCamel(key)] = normalizeAst(val);
     }
     return result;
   }
