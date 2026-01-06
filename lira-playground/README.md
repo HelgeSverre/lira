@@ -53,10 +53,18 @@ pnpm build
 ### Debugging
 - Set breakpoints on any line
 - Step Into, Step Over, Step Out controls
+- Step Line and Step Instruction for fine-grained control
 - Continue/Pause execution
-- Local variable inspection
-- Stack inspection
+- Local variable inspection with actual source names
+- Stack inspection with rich value display
 - Call stack display
+- Expandable values for arrays, structs, and complex types
+
+### Fiber & Channel Monitoring
+- Real-time fiber state tracking (Ready, Running, Blocked, Finished)
+- Channel buffer visualization
+- Fiber event timeline (spawn, state changes, channel operations)
+- See which fibers are waiting on which channels
 
 ### AST Visualization
 - View parsed AST tree
@@ -124,6 +132,8 @@ WebSocket endpoint for real-time debugging.
 | `stepInto` | Step into function call |
 | `stepOver` | Step over function call |
 | `stepOut` | Step out of current function |
+| `stepLine` | Step to next source line |
+| `stepInstruction` | Step single bytecode instruction |
 | `pause` | Pause running execution |
 | `stop` | Stop debug session |
 | `setBreakpoints` | Update breakpoint locations |
@@ -139,6 +149,8 @@ WebSocket endpoint for real-time debugging.
 | `finished` | Execution completed |
 | `runtimeError` | Runtime error occurred |
 | `vmStateUpdate` | Debug state update (locals, stack) |
+| `fiberEvent` | Fiber lifecycle event (spawn, state change) |
+| `timeoutWarning` | Execution approaching timeout |
 
 ## Configuration
 
@@ -202,6 +214,8 @@ The UI components expose `data-testid` attributes for reliable E2E testing.
 | Step Into button | `debug-step-into` |
 | Step Over button | `debug-step-over` |
 | Step Out button | `debug-step-out` |
+| Step Line button | `debug-step-line` |
+| Step Instruction button | `debug-step-instruction` |
 | Stop button | `debug-stop` |
 | Sample selector | `sample-selector` |
 | Sample dropdown | `sample-select` |
@@ -217,6 +231,7 @@ The UI components expose `data-testid` attributes for reliable E2E testing.
 | VM tab | `tab-vm` |
 | Fibers tab | `tab-fibers` |
 | Channels tab | `tab-channels` |
+| Events tab | `tab-events` |
 | Output console | `output-console` |
 | Console placeholder | `console-placeholder` |
 | Console line | `console-line` |
