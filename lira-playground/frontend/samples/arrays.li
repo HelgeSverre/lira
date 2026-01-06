@@ -1,0 +1,39 @@
+// @title: Arrays & Loops
+// @description: Demonstrates arrays, loops, and iteration patterns
+// @order: 3
+// @category: Getting Started
+
+println("=== Array Basics ===")
+
+let numbers = [1, 2, 3, 4, 5]
+var sum = 0
+for n in numbers {
+    sum = sum + n
+}
+println("Sum: " + sum)
+
+// Array of strings
+let fruits = ["apple", "banana", "cherry"]
+for fruit in fruits {
+    println("Fruit: " + fruit)
+}
+
+// Nested arrays
+let matrix = [[1, 2], [3, 4], [5, 6]]
+var total = 0
+for row in matrix {
+    for val in row {
+        total = total + val
+    }
+}
+println("Matrix total: " + total)
+
+// Break and continue
+var even_sum = 0
+for n in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] {
+    if n % 2 != 0 {
+        continue
+    }
+    even_sum = even_sum + n
+}
+println("Even sum: " + even_sum)

@@ -1,0 +1,11 @@
+.fiber-inspector {
+  padding: 8px;
+  height: 100%;
+  overflow: auto;
+}
+
+.fiber-placeholder {
+  color: var(--text-secondary);
+  text-align: center;
+  padding: 20px;
+}

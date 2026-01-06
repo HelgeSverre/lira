@@ -1,0 +1,67 @@
+// @title: Algorithms
+// @description: Demonstrates sorting, searching, and recursion
+// @order: 13
+// @category: Advanced
+
+println("=== Binary Search ===")
+
+fn binary_search(arr: [int], target: int) -> int {
+    var left = 0
+    var right = len(arr) - 1
+
+    while left <= right {
+        let mid = (left + right) / 2
+        if arr[mid] == target {
+            return mid
+        } else if arr[mid] < target {
+            left = mid + 1
+        } else {
+            right = mid - 1
+        }
+    }
+    return -1  // Not found
+}
+
+let numbers = [1, 3, 5, 7, 9, 11, 13, 15, 17, 19]
+println("Array: " + numbers)
+println("Index of 7: " + binary_search(numbers, 7))
+println("Index of 15: " + binary_search(numbers, 15))
+println("Index of 6: " + binary_search(numbers, 6))
+
+println("=== GCD (Euclidean Algorithm) ===")
+
+fn gcd(a: int, b: int) -> int {
+    if b == 0 {
+        return a
+    }
+    return gcd(b, a % b)
+}
+
+println("GCD(48, 18) = " + gcd(48, 18))
+println("GCD(100, 25) = " + gcd(100, 25))
+println("GCD(17, 13) = " + gcd(17, 13))
+
+println("=== Power Function ===")
+
+fn power(base: int, exp: int) -> int {
+    if exp == 0 {
+        return 1
+    }
+    return base * power(base, exp - 1)
+}
+
+println("2^10 = " + power(2, 10))
+println("3^5 = " + power(3, 5))
+
+println("=== Sum of Array ===")
+
+fn sum_array(arr: [int]) -> int {
+    var total = 0
+    for x in arr {
+        total = total + x
+    }
+    return total
+}
+
+println("Sum of [1,2,3,4,5]: " + sum_array([1, 2, 3, 4, 5]))
+println("Sum of [10,20,30]: " + sum_array([10, 20, 30]))

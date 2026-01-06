@@ -1,0 +1,60 @@
+// @title: Producer-Consumer
+// @description: Classic pattern with channels for inter-fiber communication
+// @order: 20
+// @category: Concurrency
+
+// === Observability Tips ===
+// - Events tab shows CHAN when the channel is created
+// - MSG events show each send/receive with the value
+// - SPAWN events appear when fibers start
+
+fn producer(ch: Channel<int>, count: int) {
+    println("Producer: Starting to send " + count + " items")
+    var i = 1
+    while i <= count {
+        println("Producer: Sending " + i)
+        select {
+            i -> ch => println("Producer: Sent " + i)
+        }
+        i = i + 1
+    }
+    println("Producer: Done sending")
+}
+
+fn consumer(ch: Channel<int>, count: int) {
+    println("Consumer: Ready to receive")
+    var received = 0
+    while received < count {
+        select {
+            <-ch => {
+                received = received + 1
+                println("Consumer: Received item #" + received)
+            }
+            _ => fiber_yield()
+        }
+    }
+    println("Consumer: Done receiving")
+}
+
+fn main() {
+    println("=== Producer-Consumer Demo ===")
+
+    // Create a buffered channel
+    let ch = chan(3)
+    let item_count = 5
+
+    // Spawn producer and consumer fibers
+    spawn producer(ch, item_count)
+    spawn consumer(ch, item_count)
+
+    // Wait for completion
+    var waits = 0
+    while waits < 20 {
+        fiber_yield()
+        waits = waits + 1
+    }
+
+    println("=== Demo Complete ===")
+}
+
+main()

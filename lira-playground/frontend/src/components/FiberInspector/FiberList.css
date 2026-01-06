@@ -1,0 +1,76 @@
+.fiber-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fiber-empty {
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+  padding: 20px;
+}
+
+.fiber-item {
+  background: var(--bg-tertiary);
+  border-radius: 6px;
+  padding: 10px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.fiber-item:hover {
+  background: var(--bg-hover);
+}
+
+.fiber-item.selected {
+  border-color: var(--accent);
+}
+
+.fiber-item.current {
+  border-left: 3px solid var(--success);
+}
+
+.fiber-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.fiber-id {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.fiber-current-badge {
+  font-size: 10px;
+  color: var(--success);
+  background: rgba(78, 201, 176, 0.15);
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.fiber-details {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.fiber-stat {
+  font-family: var(--font-mono);
+}
+
+.fiber-blocked-info {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--warning);
+}
+
+.fiber-error {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--error);
+}

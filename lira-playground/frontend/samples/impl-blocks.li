@@ -1,0 +1,50 @@
+// @title: Impl Blocks
+// @description: Demonstrates method implementation with impl blocks
+// @order: 15
+// @category: Advanced
+
+struct Counter {
+    value: int
+}
+
+impl Counter {
+    // Static method (no self)
+    fn new() -> Counter {
+        return Counter { value: 0 }
+    }
+
+    // Instance method
+    fn get(self) -> int {
+        return self.value
+    }
+
+    // Method that returns a new instance
+    fn increment(self) -> Counter {
+        return Counter { value: self.value + 1 }
+    }
+
+    fn add(self, amount: int) -> Counter {
+        return Counter { value: self.value + amount }
+    }
+}
+
+fn main() {
+    println("=== Counter Demo ===")
+
+    // Create using static method
+    let c = Counter.new()
+    println("Initial value: " + c.get())
+
+    // Chain increments
+    let c2 = c.increment()
+    println("After increment: " + c2.get())
+
+    let c3 = c2.increment().increment().increment()
+    println("After 3 more increments: " + c3.get())
+
+    // Add arbitrary amount
+    let c4 = Counter.new().add(100)
+    println("After add(100): " + c4.get())
+}
+
+main()

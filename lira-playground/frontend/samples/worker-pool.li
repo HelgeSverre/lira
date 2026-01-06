@@ -1,0 +1,71 @@
+// @title: Worker Pool
+// @description: Multiple worker fibers processing jobs from a shared channel
+// @order: 22
+// @category: Concurrency
+
+// === Observability Tips ===
+// - SPAWN events show all workers being created
+// - MSG events show jobs being distributed to workers
+// - Watch how different workers pick up different jobs
+
+fn worker(id: int, jobs: Channel<int>, results: Channel<int>) {
+    println("Worker " + id + ": Ready for jobs")
+    var processed = 0
+    while processed < 2 {
+        select {
+            <-jobs => {
+                processed = processed + 1
+                println("Worker " + id + ": Processing job #" + processed)
+                let result = processed * id * 10
+                select { result -> results => println("Worker " + id + ": Sent result " + result) }
+            }
+            _ => fiber_yield()
+        }
+    }
+    println("Worker " + id + ": Done")
+}
+
+fn main() {
+    println("=== Worker Pool Demo ===")
+
+    // Create channels for jobs and results
+    let jobs = chan(10)
+    let results = chan(10)
+    let num_workers = 3
+    let num_jobs = 6
+
+    // Spawn worker pool
+    println("Spawning " + num_workers + " workers...")
+    spawn worker(1, jobs, results)
+    spawn worker(2, jobs, results)
+    spawn worker(3, jobs, results)
+
+    // Submit jobs
+    println("Submitting " + num_jobs + " jobs...")
+    var job_id = 1
+    while job_id <= num_jobs {
+        select {
+            job_id -> jobs => println("Main: Submitted job " + job_id)
+        }
+        job_id = job_id + 1
+    }
+
+    // Collect results
+    println("Collecting results...")
+    var collected = 0
+    while collected < num_jobs {
+        fiber_yield()
+        select {
+            <-results => {
+                collected = collected + 1
+                println("Main: Collected result #" + collected)
+            }
+            _ => fiber_yield()
+        }
+    }
+
+    println("Collected all " + collected + " results")
+    println("=== Demo Complete ===")
+}
+
+main()

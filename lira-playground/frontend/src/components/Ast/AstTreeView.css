@@ -1,0 +1,169 @@
+.ast-tree {
+  padding: 8px;
+}
+
+.tree-node {
+  user-select: none;
+}
+
+.tree-node-header {
+  display: flex;
+  align-items: center;
+  padding: 2px 4px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  gap: 4px;
+}
+
+.tree-node-header:hover {
+  background: var(--bg-hover);
+}
+
+.tree-node-toggle {
+  width: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.toggle-icon {
+  font-size: 8px;
+  color: var(--text-secondary);
+  transition: transform 0.1s;
+}
+
+.toggle-icon.expanded {
+  /* Already showing down arrow */
+}
+
+.tree-node-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.tree-node-label.node-program {
+  color: var(--syntax-type);
+  font-weight: 600;
+}
+
+.tree-node-label.node-statement {
+  color: var(--syntax-keyword);
+}
+
+.tree-node-label.node-expression {
+  color: var(--syntax-function);
+}
+
+.tree-node-label.node-block {
+  color: var(--text-secondary);
+}
+
+.tree-node-span {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-left: 8px;
+}
+
+.tree-node-children {
+  margin-left: 16px;
+  border-left: 1px solid var(--border-color);
+  padding-left: 4px;
+}
+
+/* Value types in AST */
+.ast-keyword {
+  color: var(--syntax-keyword);
+  margin: 0 4px;
+}
+
+.ast-name {
+  color: var(--syntax-variable);
+  margin: 0 4px;
+}
+
+.ast-type {
+  color: var(--syntax-type);
+  margin: 0 4px;
+}
+
+.ast-string {
+  color: var(--syntax-string);
+  margin: 0 4px;
+}
+
+.ast-number {
+  color: var(--syntax-number);
+  margin: 0 4px;
+}
+
+.ast-operator {
+  color: var(--syntax-operator);
+  margin: 0 2px;
+}
+
+.ast-info {
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-left: 4px;
+}
+
+.ast-label {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.ast-type-expr {
+  display: inline;
+}
+
+/* Node type variants */
+.tree-node-label.node-pattern {
+  color: var(--syntax-variable);
+}
+
+.tree-node-label.node-params,
+.tree-node-label.node-param {
+  color: var(--syntax-variable);
+}
+
+.tree-node-label.node-args,
+.tree-node-label.node-arg {
+  color: var(--syntax-function);
+}
+
+.tree-node-label.node-match-arm,
+.tree-node-label.node-select-arm {
+  color: var(--syntax-keyword);
+}
+
+.tree-node-label.node-arms {
+  color: var(--text-secondary);
+}
+
+.tree-node-label.node-field,
+.tree-node-label.node-fields {
+  color: var(--syntax-variable);
+}
+
+.tree-node-label.node-variant,
+.tree-node-label.node-variants {
+  color: var(--syntax-type);
+}
+
+.tree-node-label.node-method,
+.tree-node-label.node-methods {
+  color: var(--syntax-function);
+}
+
+.tree-node-label.node-elements,
+.tree-node-label.node-entries,
+.tree-node-label.node-entry {
+  color: var(--text-secondary);
+}
+
+/* Error state */
+.ast-error {
+  color: var(--error-color, #ff6b6b);
+  font-style: italic;
+}

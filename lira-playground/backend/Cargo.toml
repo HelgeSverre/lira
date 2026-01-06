@@ -1,0 +1,31 @@
+[package]
+name = "lira-playground"
+version = "0.1.0"
+edition = "2021"
+description = "Web server for Lira Playground - compile and run Lira code in the browser"
+license = "MIT"
+
+[[bin]]
+name = "lira-playground"
+path = "src/main.rs"
+
+[dependencies]
+# Lira compiler and VM
+lirac = { path = "../../crates/lirac", features = ["serde"] }
+liravm = { path = "../../crates/liravm" }
+
+# Web framework
+axum = { version = "0.8", features = ["ws"] }
+tokio = { version = "1", features = ["full"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "fs"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Utilities
+uuid = { version = "1", features = ["v4"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+futures = "0.3"

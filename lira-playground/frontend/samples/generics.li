@@ -1,0 +1,44 @@
+// @title: Generics
+// @description: Demonstrates generic functions and structs
+// @order: 12
+// @category: Advanced
+
+println("=== Generic Functions ===")
+
+// Generic identity function
+fn identity<T>(x: T) -> T {
+    return x
+}
+
+println("identity(42) = " + identity(42))
+println("identity(\"hello\") = " + identity("hello"))
+println("identity(true) = " + identity(true))
+
+println("=== Generic Structs ===")
+
+// Generic Box that can hold any type
+struct Box<T> {
+    value: T
+}
+
+let int_box = Box { value: 100 }
+let str_box = Box { value: "treasure" }
+let bool_box = Box { value: true }
+
+println("int_box.value = " + int_box.value)
+println("str_box.value = " + str_box.value)
+println("bool_box.value = " + bool_box.value)
+
+println("=== Generic Pair ===")
+
+// Generic Pair with two type parameters
+struct Pair<A, B> {
+    first: A
+    second: B
+}
+
+let pair1 = Pair { first: "name", second: 42 }
+let pair2 = Pair { first: 3.14, second: true }
+
+println("pair1: (" + pair1.first + ", " + pair1.second + ")")
+println("pair2: (" + pair2.first + ", " + pair2.second + ")")

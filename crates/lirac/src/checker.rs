@@ -3175,8 +3175,25 @@ impl TypeChecker {
                     false
                 };
 
-                // Check if this is a method call (callee is FieldAccess)
-                let is_method_call = matches!(callee.kind, ExpressionKind::FieldAccess { .. });
+                // Check if this is an instance method call (callee is FieldAccess with implicit self)
+                // Static methods (no self) should NOT be treated as method calls for arg counting
+                let is_method_call = if let ExpressionKind::FieldAccess { object, field } =
+                    &callee.kind
+                {
+                    // Check if this is a static method call on a type name
+                    if let ExpressionKind::Identifier(type_name) = &object.kind {
+                        // If we can look up the method and it doesn't have self, it's static
+                        if let Some(impl_method) = self.env.lookup_method(type_name, field) {
+                            impl_method.has_self // Only treat as method call if it has self
+                        } else {
+                            true // Assume instance method if not found
+                        }
+                    } else {
+                        true // Instance method call on an expression (e.g., obj.method())
+                    }
+                } else {
+                    false // Not a field access, not a method call
+                };
 
                 match callee_type {
                     Type::Function {

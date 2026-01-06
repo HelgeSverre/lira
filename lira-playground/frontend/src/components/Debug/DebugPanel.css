@@ -1,0 +1,146 @@
+.debug-panel {
+  height: 100%;
+  overflow-y: auto;
+  padding: 12px;
+  background: var(--bg-secondary, #1e1e1e);
+  color: var(--text-primary, #d4d4d4);
+  font-size: 13px;
+}
+
+.debug-panel-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-secondary, #808080);
+  text-align: center;
+}
+
+.debug-panel-empty .hint {
+  font-size: 12px;
+  margin-top: 8px;
+  opacity: 0.7;
+}
+
+.debug-section {
+  margin-bottom: 16px;
+}
+
+.debug-section h3 {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-secondary, #808080);
+  margin: 0 0 8px 0;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-color, #333);
+}
+
+.debug-info {
+  display: flex;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.debug-info .label {
+  color: var(--text-secondary, #808080);
+  min-width: 50px;
+}
+
+.debug-info .value {
+  color: var(--text-primary, #d4d4d4);
+}
+
+.debug-info .value.state-paused {
+  color: var(--color-warning, #dcdcaa);
+}
+
+.debug-info .value.state-running {
+  color: var(--color-success, #4ec9b0);
+}
+
+.debug-info .value.mono {
+  font-family: var(--font-mono, 'Fira Code', monospace);
+}
+
+.debug-empty {
+  color: var(--text-secondary, #808080);
+  font-style: italic;
+  padding: 4px 0;
+}
+
+.debug-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.debug-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 8px;
+  background: var(--bg-tertiary, #252526);
+  border-radius: 4px;
+  font-family: var(--font-mono, 'Fira Code', monospace);
+  font-size: 12px;
+}
+
+.var-name {
+  color: var(--color-variable, #9cdcfe);
+  min-width: 80px;
+}
+
+.var-type {
+  color: var(--text-secondary, #808080);
+  font-size: 11px;
+}
+
+.var-value {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Local variable items need flexible layout for expandable values */
+.local-item {
+  flex-wrap: wrap;
+}
+
+.local-item .var-value {
+  flex-basis: 100%;
+  margin-top: 4px;
+}
+
+.stack-list {
+  flex-direction: column-reverse;
+}
+
+.stack-item {
+  display: flex;
+  gap: 12px;
+}
+
+.stack-index {
+  color: var(--text-secondary, #808080);
+  min-width: 20px;
+  text-align: right;
+}
+
+.stack-value {
+  color: var(--color-number, #b5cea8);
+}
+
+.call-frame {
+  display: flex;
+  gap: 8px;
+}
+
+.frame-index {
+  color: var(--text-secondary, #808080);
+  min-width: 20px;
+}
+
+.frame-name {
+  color: var(--color-function, #dcdcaa);
+}

@@ -1,0 +1,61 @@
+// @title: Countdown Timer
+// @description: Fiber-based countdown demonstrating yield behavior
+// @order: 23
+// @category: Concurrency
+
+// === Observability Tips ===
+// - Use Step Line to observe fiber_yield() pausing execution
+// - STATE events show the fiber transitioning through states
+// - Watch the Debug panel's stack as countdown progresses
+
+fn countdown(name: string, from: int) {
+    println(name + ": Starting countdown from " + from)
+    var count = from
+
+    while count > 0 {
+        println(name + ": " + count + "...")
+
+        // Yield to let other fibers run
+        fiber_yield()
+
+        count = count - 1
+    }
+
+    println(name + ": LIFTOFF!")
+}
+
+fn announcer() {
+    println("Announcer: Monitoring countdown...")
+
+    var checks = 0
+    while checks < 8 {
+        fiber_yield()
+        println("Announcer: Still counting...")
+        checks = checks + 1
+    }
+
+    println("Announcer: Countdown complete!")
+}
+
+fn main() {
+    println("=== Countdown Timer Demo ===")
+    println("")
+
+    // Spawn countdown and announcer fibers
+    spawn countdown("Rocket A", 5)
+    spawn announcer()
+
+    // Main fiber also participates
+    println("Main: Launch sequence initiated")
+
+    var ticks = 0
+    while ticks < 12 {
+        fiber_yield()
+        ticks = ticks + 1
+    }
+
+    println("")
+    println("=== Demo Complete ===")
+}
+
+main()

@@ -1,0 +1,7 @@
+// @title: Hello World
+// @description: Basic output example demonstrating println
+// @order: 1
+// @category: Getting Started
+
+println("Hello, Lira!")
+println("Welcome to the Lira Playground!")

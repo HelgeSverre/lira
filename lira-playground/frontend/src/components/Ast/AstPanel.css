@@ -1,0 +1,71 @@
+.ast-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.ast-title {
+  margin-right: auto;
+}
+
+.ast-content {
+  flex: 1;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.node-count {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-left: 8px;
+}
+
+.ast-placeholder {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.ast-error {
+  padding: 12px;
+}
+
+.error-title {
+  font-weight: 600;
+  color: var(--error);
+  margin-bottom: 12px;
+}
+
+.error-item {
+  margin-bottom: 8px;
+  padding: 8px;
+  background: rgba(232, 90, 79, 0.1);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--error);
+}
+
+.error-location {
+  color: var(--text-secondary);
+}
+
+.error-message {
+  color: var(--error);
+}
+
+.copy-json-btn {
+  font-size: 10px;
+  padding: 2px 8px;
+  margin-left: 8px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.copy-json-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}

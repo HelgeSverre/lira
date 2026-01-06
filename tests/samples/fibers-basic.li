@@ -1,0 +1,42 @@
+// @title: Fibers Basics
+// @description: Spawn fibers and observe their lifecycle in the Events tab
+// @order: 19
+// @category: Concurrency
+
+// === Observability Tips ===
+// - Watch the Events tab to see SPAWN events when fibers are created
+// - STATE events show fiber transitions (Ready -> Running -> Finished)
+// - Set a breakpoint and use Step Line to see fibers execute
+
+fn worker(id: int) {
+    println("Worker " + id + " starting")
+    // Simulate some work
+    var sum = 0
+    var i = 0
+    while i < 100 {
+        sum = sum + i
+        i = i + 1
+    }
+    println("Worker " + id + " finished with sum: " + sum)
+}
+
+fn main() {
+    println("=== Fiber Basics Demo ===")
+    println("Spawning 3 worker fibers...")
+
+    // Spawn multiple fibers
+    spawn worker(1)
+    spawn worker(2)
+    spawn worker(3)
+
+    println("Main fiber waiting for workers...")
+
+    // Give fibers time to complete
+    fiber_yield()
+    fiber_yield()
+    fiber_yield()
+
+    println("=== Demo Complete ===")
+}
+
+main()

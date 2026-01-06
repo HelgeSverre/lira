@@ -52,7 +52,6 @@ impl<'a> BytecodeReader<'a> {
         Ok(value)
     }
 
-    #[allow(dead_code)]
     fn read_u16(&mut self) -> Result<u16, String> {
         let lo = self.read_u8()? as u16;
         let hi = self.read_u8()? as u16;
@@ -177,6 +176,29 @@ pub fn load(bytes: &[u8]) -> Result<Program, String> {
     };
 
     debug_info.source_file = source_file.clone();
+
+    // Local symbols section (optional - may not be present in older bytecode)
+    // Check if there's more data to read
+    if reader.pos < reader.data.len() {
+        let symbol_count = reader.read_u32()? as usize;
+        for _ in 0..symbol_count {
+            let slot = reader.read_u16()?;
+            let scope_depth = reader.read_u16()?;
+            let start_offset = reader.read_u32()?;
+            let end_offset = reader.read_u32()?;
+            let name_len = reader.read_u32()? as usize;
+            let name_bytes = reader.read_bytes(name_len)?;
+            let name = String::from_utf8(name_bytes.to_vec())
+                .map_err(|_| "Invalid UTF-8 in local symbol name")?;
+            debug_info.add_local_symbol(slot, name, scope_depth, start_offset);
+            // Set end_offset if non-zero
+            if end_offset > 0 {
+                if let Some(sym) = debug_info.local_symbols.last_mut() {
+                    sym.end_offset = end_offset;
+                }
+            }
+        }
+    }
 
     Ok(Program {
         constants,

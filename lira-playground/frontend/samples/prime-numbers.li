@@ -1,0 +1,67 @@
+// @title: Prime Numbers
+// @description: Demonstrates functions, loops, and mathematical operations
+// @order: 9
+// @category: Advanced
+
+fn is_prime(n: int) -> bool {
+    if n <= 1 {
+        return false
+    }
+    if n <= 3 {
+        return true
+    }
+    if n % 2 == 0 {
+        return false
+    }
+
+    var i = 3
+    while i * i <= n {
+        if n % i == 0 {
+            return false
+        }
+        i = i + 2
+    }
+    return true
+}
+
+// Find all primes up to 50
+println("=== Primes up to 50 ===")
+var primes = ""
+var n = 2
+while n <= 50 {
+    if is_prime(n) {
+        primes = primes + n + " "
+    }
+    n = n + 1
+}
+println(primes)
+
+// Count primes up to 100
+var count = 0
+n = 2
+while n <= 100 {
+    if is_prime(n) {
+        count = count + 1
+    }
+    n = n + 1
+}
+println("Number of primes up to 100: " + count)
+
+// Find the nth prime
+fn nth_prime(target: int) -> int {
+    var found = 0
+    var num = 2
+    while found < target {
+        if is_prime(num) {
+            found = found + 1
+            if found == target {
+                return num
+            }
+        }
+        num = num + 1
+    }
+    return 0
+}
+
+println("10th prime: " + nth_prime(10))
+println("25th prime: " + nth_prime(25))

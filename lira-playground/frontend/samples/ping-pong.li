@@ -1,0 +1,73 @@
+// @title: Ping-Pong
+// @description: Two fibers exchanging messages via channels
+// @order: 21
+// @category: Concurrency
+
+// === Observability Tips ===
+// - Watch STATE events to see fibers switching back and forth
+// - MSG events show the ping-pong values being exchanged
+// - Step through with breakpoints to see the handoff
+
+fn ping(send_ch: Channel<int>, recv_ch: Channel<int>, rounds: int) {
+    var round = 1
+    while round <= rounds {
+        println("Ping: Sending round " + round)
+        select {
+            round -> send_ch => println("Ping: Sent!")
+        }
+
+        println("Ping: Waiting for pong...")
+        select {
+            <-recv_ch => println("Ping: Got pong!")
+            _ => fiber_yield()
+        }
+
+        round = round + 1
+    }
+    println("Ping: Done!")
+}
+
+fn pong(recv_ch: Channel<int>, send_ch: Channel<int>, rounds: int) {
+    var round = 1
+    while round <= rounds {
+        println("Pong: Waiting for ping...")
+        select {
+            <-recv_ch => println("Pong: Got ping!")
+            _ => fiber_yield()
+        }
+
+        println("Pong: Sending pong back")
+        select {
+            round -> send_ch => println("Pong: Sent!")
+        }
+
+        round = round + 1
+    }
+    println("Pong: Done!")
+}
+
+fn main() {
+    println("=== Ping-Pong Demo ===")
+
+    // Create two channels for bidirectional communication
+    let ping_ch = chan(1)
+    let pong_ch = chan(1)
+    let rounds = 3
+
+    println("Starting ping-pong with " + rounds + " rounds")
+
+    // Spawn both players
+    spawn ping(ping_ch, pong_ch, rounds)
+    spawn pong(ping_ch, pong_ch, rounds)
+
+    // Wait for game to complete
+    var waits = 0
+    while waits < 20 {
+        fiber_yield()
+        waits = waits + 1
+    }
+
+    println("=== Demo Complete ===")
+}
+
+main()

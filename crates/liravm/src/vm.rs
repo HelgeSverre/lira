@@ -4,13 +4,85 @@
 //! See docs/lira/12-vm-runtime.md for the full specification.
 
 use crate::bytecode::Program;
-use crate::fiber::Scheduler;
+use crate::debug::{
+    CallFrameInfo, DebugSnapshot, ExecutionState, LocalInfo, PauseFlag, StepContext, StepMode,
+    StepOutcome, ValueInfo,
+};
+use crate::fiber::{FiberEvent, Scheduler};
 use crate::runtime::Runtime;
-use crate::value::{ClosureData, IString, Value};
+use crate::value::{ChannelId, ClosureData, FiberId, IString, Value};
 use lira_core::opcode::Opcode;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+use std::sync::mpsc::{channel, Receiver};
+
+/// Type alias for output callback function
+pub type OutputCallback = Box<dyn FnMut(&str) + Send>;
+
+/// Result of executing a single instruction
+#[derive(Debug, Clone)]
+pub enum StepResult {
+    /// Execution continues (more instructions to run)
+    Continue,
+    /// Program halted normally with exit code
+    Halted(i32),
+    /// Runtime error occurred
+    Error(String),
+    /// Execution paused at a breakpoint
+    BreakpointHit {
+        /// Source line number (1-based)
+        line: u32,
+        /// Source column number (1-based)
+        column: u32,
+        /// Instruction pointer where we stopped
+        ip: usize,
+    },
+    /// Execution stopped by user
+    Stopped,
+}
+
+/// Snapshot of VM state for debugging/visualization
+#[derive(Debug, Clone)]
+pub struct VmSnapshot {
+    /// Current instruction pointer
+    pub ip: usize,
+    /// Current stack values (formatted as strings)
+    pub stack: Vec<String>,
+    /// Local variable values (formatted as strings)
+    pub locals: Vec<String>,
+    /// Call stack depth
+    pub call_stack_depth: usize,
+    /// Program output so far
+    pub output: Vec<String>,
+    /// All fibers with their states
+    pub fibers: Vec<FiberSnapshot>,
+    /// All channels with their states
+    pub channels: Vec<ChannelSnapshot>,
+    /// Current fiber ID (if in fiber mode)
+    pub current_fiber_id: Option<FiberId>,
+}
+
+/// Snapshot of a single fiber
+#[derive(Debug, Clone)]
+pub struct FiberSnapshot {
+    pub id: FiberId,
+    pub state: String,
+    pub ip: usize,
+    pub stack_size: usize,
+    pub locals_count: usize,
+}
+
+/// Snapshot of a channel
+#[derive(Debug, Clone)]
+pub struct ChannelSnapshot {
+    pub id: ChannelId,
+    pub capacity: usize,
+    pub buffer_size: usize,
+    pub closed: bool,
+    pub waiting_receivers: usize,
+    pub waiting_senders: usize,
+}
 
 /// Call frame for function calls
 #[derive(Debug, Clone)]
@@ -52,14 +124,35 @@ pub struct VM {
     output: Vec<String>,
     /// Whether to capture output instead of printing
     capture_output: bool,
+    /// Callback for streaming output
+    output_callback: Option<OutputCallback>,
+    /// Callback to check if execution should stop (for cooperative stopping)
+    stop_check: Option<Box<dyn Fn() -> bool + Send>>,
+    /// Breakpoint line numbers (1-based)
+    breakpoints: HashSet<u32>,
+    /// Track the last line we checked to avoid hitting same breakpoint repeatedly
+    last_breakpoint_line: Option<u32>,
     /// String intern pool for memory efficiency
     #[allow(dead_code)]
     string_pool: HashMap<String, IString>,
+    /// Current execution state for debugging
+    execution_state: ExecutionState,
+    /// Stepping context for step operations
+    step_context: StepContext,
+    /// Pause request flag (thread-safe)
+    pause_flag: PauseFlag,
+    /// Receiver for fiber/channel events
+    fiber_event_rx: Option<Receiver<FiberEvent>>,
 }
 
 impl VM {
     /// Create a new VM with the given program
     pub fn new(program: Program) -> Self {
+        // Set up fiber event channel
+        let (tx, rx) = channel();
+        let mut scheduler = Scheduler::new();
+        scheduler.set_event_sender(tx);
+
         Self {
             program,
             stack: Vec::with_capacity(1024),
@@ -67,12 +160,20 @@ impl VM {
             ip: 0,
             locals: Vec::with_capacity(256),
             debug: false,
-            scheduler: Scheduler::new(),
+            scheduler,
             fiber_mode: false,
             runtime: Runtime::new(),
             output: Vec::new(),
             capture_output: false,
+            output_callback: None,
+            stop_check: None,
+            breakpoints: HashSet::new(),
+            last_breakpoint_line: None,
             string_pool: HashMap::new(),
+            execution_state: ExecutionState::Ready,
+            step_context: StepContext::new(),
+            pause_flag: PauseFlag::new(),
+            fiber_event_rx: Some(rx),
         }
     }
 
@@ -119,12 +220,389 @@ impl VM {
         self.fiber_mode = enabled;
     }
 
+    /// Set an output callback for streaming output during execution
+    /// The callback is called with each output line as it's produced
+    pub fn set_output_callback<F>(&mut self, callback: F)
+    where
+        F: FnMut(&str) + Send + 'static,
+    {
+        self.output_callback = Some(Box::new(callback));
+    }
+
+    /// Clear the output callback
+    pub fn clear_output_callback(&mut self) {
+        self.output_callback = None;
+    }
+
+    /// Set a callback to check if execution should stop
+    /// The callback is called at the start of each instruction.
+    /// If it returns true, execution stops with an error.
+    pub fn set_stop_check<F>(&mut self, callback: F)
+    where
+        F: Fn() -> bool + Send + 'static,
+    {
+        self.stop_check = Some(Box::new(callback));
+    }
+
+    /// Clear the stop check callback
+    pub fn clear_stop_check(&mut self) {
+        self.stop_check = None;
+    }
+
+    /// Set breakpoint line numbers (1-based)
+    pub fn set_breakpoints(&mut self, lines: Vec<u32>) {
+        self.breakpoints = lines.into_iter().collect();
+    }
+
+    /// Add a single breakpoint at the given line (1-based)
+    pub fn add_breakpoint(&mut self, line: u32) {
+        self.breakpoints.insert(line);
+    }
+
+    /// Remove a breakpoint at the given line
+    pub fn remove_breakpoint(&mut self, line: u32) {
+        self.breakpoints.remove(&line);
+    }
+
+    /// Clear all breakpoints
+    pub fn clear_breakpoints(&mut self) {
+        self.breakpoints.clear();
+    }
+
+    /// Drain all pending fiber/channel events
+    pub fn drain_fiber_events(&self) -> Vec<FiberEvent> {
+        let mut events = Vec::new();
+        if let Some(ref rx) = self.fiber_event_rx {
+            while let Ok(event) = rx.try_recv() {
+                events.push(event);
+            }
+        }
+        events
+    }
+
+    /// Get the current source location (line, column) from the instruction pointer
+    /// Uses the debug info embedded in the bytecode
+    pub fn get_current_location(&self) -> Option<(u32, u32)> {
+        self.program.debug_info.lookup(self.ip as u32)
+    }
+
+    /// Get a snapshot of the current VM state
+    pub fn get_snapshot(&self) -> VmSnapshot {
+        let fibers: Vec<FiberSnapshot> = self
+            .scheduler
+            .fibers
+            .values()
+            .map(|f| FiberSnapshot {
+                id: f.id,
+                state: format!("{:?}", f.state),
+                ip: f.ip,
+                stack_size: f.stack.len(),
+                locals_count: f.locals.len(),
+            })
+            .collect();
+
+        let channels: Vec<ChannelSnapshot> = self
+            .scheduler
+            .channels
+            .values()
+            .map(|c| ChannelSnapshot {
+                id: c.id,
+                capacity: c.capacity,
+                buffer_size: c.buffer.len(),
+                closed: c.closed,
+                waiting_receivers: c.receivers.len(),
+                waiting_senders: c.senders.len(),
+            })
+            .collect();
+
+        VmSnapshot {
+            ip: self.ip,
+            stack: self.stack.iter().map(|v| format!("{:?}", v)).collect(),
+            locals: self.locals.iter().map(|v| format!("{:?}", v)).collect(),
+            call_stack_depth: self.call_stack.len(),
+            output: self.output.clone(),
+            fibers,
+            channels,
+            current_fiber_id: self.scheduler.current,
+        }
+    }
+
+    // ==================== Stepping Methods ====================
+
+    /// Initialize the VM at entry point without executing
+    pub fn prepare(&mut self) {
+        self.ip = self.program.entry_point;
+        self.execution_state = ExecutionState::Ready;
+        self.step_context.clear();
+        self.last_breakpoint_line = None;
+    }
+
+    /// Get the current execution state
+    pub fn get_execution_state(&self) -> &ExecutionState {
+        &self.execution_state
+    }
+
+    /// Get the pause flag for external pause requests
+    pub fn get_pause_flag(&self) -> PauseFlag {
+        self.pause_flag.clone()
+    }
+
+    /// Request a pause (can be called from another thread)
+    pub fn request_pause(&self) {
+        self.pause_flag.request();
+    }
+
+    /// Execute a single bytecode instruction
+    pub fn step_instruction(&mut self) -> StepOutcome {
+        // Check pause request first
+        if self.pause_flag.check_and_clear() {
+            let (line, column) = self.get_current_location().unwrap_or((0, 0));
+            self.execution_state = ExecutionState::Suspended { line, column, ip: self.ip };
+            return StepOutcome::Paused { line, column, ip: self.ip };
+        }
+
+        // Check cooperative stop
+        if let Some(ref check) = self.stop_check {
+            if check() {
+                self.execution_state = ExecutionState::Error {
+                    message: "Execution stopped by user".to_string(),
+                    location: self.get_current_location(),
+                };
+                return StepOutcome::Error {
+                    message: "Execution stopped by user".to_string(),
+                };
+            }
+        }
+
+        // Check breakpoints (only if we have any set)
+        if !self.breakpoints.is_empty() {
+            if let Some((line, column)) = self.get_current_location() {
+                if self.breakpoints.contains(&line) && self.last_breakpoint_line != Some(line) {
+                    self.last_breakpoint_line = Some(line);
+                    self.execution_state = ExecutionState::Paused { line, column, ip: self.ip };
+                    return StepOutcome::Breakpoint { line, column, ip: self.ip };
+                } else if !self.breakpoints.contains(&line) {
+                    self.last_breakpoint_line = None;
+                }
+            }
+        }
+
+        // Check if at end of program
+        if self.ip >= self.program.code.len() {
+            self.execution_state = ExecutionState::Finished { exit_code: 0 };
+            return StepOutcome::Finished { exit_code: 0 };
+        }
+
+        // Execute one instruction
+        self.execution_state = ExecutionState::Running;
+        match self.execute_one() {
+            Ok(Some(exit_code)) => {
+                self.execution_state = ExecutionState::Finished { exit_code };
+                StepOutcome::Finished { exit_code }
+            }
+            Ok(None) => StepOutcome::Continue,
+            Err(e) => {
+                self.execution_state = ExecutionState::Error {
+                    message: e.clone(),
+                    location: self.get_current_location(),
+                };
+                StepOutcome::Error { message: e }
+            }
+        }
+    }
+
+    /// Step to the next source line
+    pub fn step_line(&mut self) -> StepOutcome {
+        let start_line = self.get_current_location().map(|(l, _)| l);
+        self.step_context.start(StepMode::Line, start_line, self.call_stack.len());
+        self.run_until_step_complete()
+    }
+
+    /// Step into function calls (same as step_line, naturally enters functions)
+    pub fn step_into(&mut self) -> StepOutcome {
+        self.step_line()
+    }
+
+    /// Step over function calls (execute until same or lower call depth and line changed)
+    pub fn step_over(&mut self) -> StepOutcome {
+        let start_line = self.get_current_location().map(|(l, _)| l);
+        self.step_context.start(StepMode::Over, start_line, self.call_stack.len());
+        self.run_until_step_complete()
+    }
+
+    /// Step out of current function (execute until call depth decreases)
+    pub fn step_out(&mut self) -> StepOutcome {
+        if self.call_stack.is_empty() {
+            // At top level, run to completion
+            return self.continue_execution();
+        }
+        let start_line = self.get_current_location().map(|(l, _)| l);
+        self.step_context.start(StepMode::Out, start_line, self.call_stack.len());
+        self.run_until_step_complete()
+    }
+
+    /// Continue execution until breakpoint or completion
+    pub fn continue_execution(&mut self) -> StepOutcome {
+        self.step_context.clear();
+        // Note: Don't clear last_breakpoint_line here - we need to remember
+        // which breakpoint we just stopped at to avoid hitting it again immediately
+
+        loop {
+            match self.step_instruction() {
+                StepOutcome::Continue => continue,
+                outcome => return outcome,
+            }
+        }
+    }
+
+    /// Run until step operation completes
+    fn run_until_step_complete(&mut self) -> StepOutcome {
+        loop {
+            let outcome = self.step_instruction();
+            match &outcome {
+                StepOutcome::Continue => {
+                    // Check if step is complete
+                    let current_line = self.get_current_location().map(|(l, _)| l);
+                    let current_depth = self.call_stack.len();
+                    if self.step_context.is_complete(current_line, current_depth) {
+                        self.step_context.clear();
+                        if let Some((line, column)) = self.get_current_location() {
+                            return StepOutcome::StepCompleted { line, column, ip: self.ip };
+                        }
+                    }
+                }
+                _ => {
+                    // Breakpoint, Pause, Finished, Error - return immediately
+                    self.step_context.clear();
+                    return outcome;
+                }
+            }
+        }
+    }
+
+    /// Execute a single instruction, returning Some(exit_code) if halted
+    fn execute_one(&mut self) -> Result<Option<i32>, String> {
+        let opcode_byte = self.program.code[self.ip];
+        self.ip += 1;
+
+        let opcode = Opcode::from_byte(opcode_byte).ok_or_else(|| {
+            format!(
+                "Invalid opcode: 0x{:02X} at offset {}",
+                opcode_byte,
+                self.ip - 1
+            )
+        })?;
+
+        if self.debug {
+            let stack_repr: Vec<String> = self.stack.iter().map(|v| format!("{:?}", v)).collect();
+            eprintln!(
+                "[VM] ip={:04} {:?} stack=[{}] locals={}",
+                self.ip - 1,
+                opcode,
+                stack_repr.join(", "),
+                self.locals.len()
+            );
+        }
+
+        // Execute the opcode and return whether we should halt
+        self.execute_opcode(opcode)
+    }
+
+    /// Get a detailed debug snapshot with type information
+    pub fn get_debug_snapshot(&self) -> DebugSnapshot {
+        use crate::debug::RichValue;
+
+        let stack: Vec<ValueInfo> = self.stack.iter().map(|v| {
+            ValueInfo::with_rich_value(
+                format!("{:?}", v),
+                self.value_type_name(v),
+                RichValue::from_value(v),
+            )
+        }).collect();
+
+        // Get local names from debug info at current IP
+        let local_names = self.program.debug_info.get_local_names_at(self.ip as u32);
+        let locals: Vec<LocalInfo> = self.locals.iter().enumerate().map(|(i, v)| {
+            LocalInfo {
+                slot: i,
+                name: local_names.get(&(i as u16)).map(|s| s.to_string()),
+                value: ValueInfo::with_rich_value(
+                    format!("{:?}", v),
+                    self.value_type_name(v),
+                    RichValue::from_value(v),
+                ),
+            }
+        }).collect();
+
+        let call_stack: Vec<CallFrameInfo> = self.call_stack.iter().map(|frame| {
+            CallFrameInfo {
+                function_name: None, // TODO: Get from debug info if available
+                return_addr: frame.return_addr,
+                source_location: self.program.debug_info.lookup(frame.return_addr as u32),
+            }
+        }).collect();
+
+        DebugSnapshot {
+            state: self.execution_state.clone(),
+            ip: self.ip,
+            location: self.get_current_location(),
+            stack,
+            locals,
+            call_stack,
+            output: self.output.clone(),
+        }
+    }
+
+    /// Get the type name for a value
+    fn value_type_name(&self, value: &Value) -> String {
+        match value {
+            Value::Null => "null".to_string(),
+            Value::Bool(_) => "bool".to_string(),
+            Value::Int(_) => "int".to_string(),
+            Value::Float(_) => "float".to_string(),
+            Value::String(_) => "string".to_string(),
+            Value::Array(_) => "array".to_string(),
+            Value::Object(_) => "object".to_string(),
+            Value::Function(_) => "function".to_string(),
+            Value::Closure(_) => "closure".to_string(),
+            Value::Fiber(_) => "fiber".to_string(),
+            Value::Channel(_) => "channel".to_string(),
+        }
+    }
+
+    // ==================== End Stepping Methods ====================
+
     /// Run the program and return exit code
     pub fn run(&mut self) -> Result<i32, String> {
         // Start at entry point
         self.ip = self.program.entry_point;
 
         loop {
+            // Check if we should stop (cooperative stopping)
+            if let Some(ref check) = self.stop_check {
+                if check() {
+                    return Err("Execution stopped by user".to_string());
+                }
+            }
+
+            // Check breakpoints (only if we have any set)
+            if !self.breakpoints.is_empty() {
+                if let Some((line, column)) = self.get_current_location() {
+                    // Only trigger if we're on a breakpoint line AND it's different from last hit
+                    // (to avoid stopping on the same breakpoint repeatedly)
+                    if self.breakpoints.contains(&line) && self.last_breakpoint_line != Some(line) {
+                        self.last_breakpoint_line = Some(line);
+                        return Err(format!(
+                            "Breakpoint hit at line {}, column {} (ip={})",
+                            line, column, self.ip
+                        ));
+                    } else if !self.breakpoints.contains(&line) {
+                        // Clear last breakpoint line when we move to a different line
+                        self.last_breakpoint_line = None;
+                    }
+                }
+            }
+
             if self.ip >= self.program.code.len() {
                 return Ok(0);
             }
@@ -152,8 +630,17 @@ impl VM {
                 );
             }
 
-            match opcode {
-                Opcode::Nop => {}
+            // Execute the opcode
+            if let Some(exit_code) = self.execute_opcode(opcode)? {
+                return Ok(exit_code);
+            }
+        }
+    }
+
+    /// Execute a single opcode, returning Some(exit_code) for Halt, None otherwise
+    fn execute_opcode(&mut self, opcode: Opcode) -> Result<Option<i32>, String> {
+        match opcode {
+            Opcode::Nop => {}
 
                 // Stack operations
                 Opcode::LoadConst => {
@@ -555,7 +1042,7 @@ impl VM {
                         self.stack.push(return_value);
                     } else {
                         // Top-level return
-                        return Ok(0);
+                        return Ok(Some(0));
                     }
                 }
 
@@ -742,6 +1229,12 @@ impl VM {
                 Opcode::Print => {
                     let value = self.pop()?;
                     let output_str = value.to_string();
+
+                    // Call output callback if set
+                    if let Some(ref mut callback) = self.output_callback {
+                        callback(&output_str);
+                    }
+
                     if self.capture_output {
                         self.output.push(output_str);
                     } else {
@@ -782,7 +1275,7 @@ impl VM {
                         if let Some(_next_id) = self.scheduler.schedule() {
                             self.load_fiber_state();
                         } else {
-                            return Ok(0); // No more fibers
+                            return Ok(Some(0)); // No more fibers
                         }
                     }
                 }
@@ -929,10 +1422,10 @@ impl VM {
                 }
 
                 Opcode::Halt => {
-                    return Ok(0);
+                    return Ok(Some(0));
                 }
             }
-        }
+        Ok(None)
     }
 
     /// Save current execution state to the current fiber
@@ -3130,5 +3623,256 @@ mod tests {
 
         // Pool should have exactly 2 unique strings
         assert_eq!(vm.string_pool.len(), 2);
+    }
+
+    // ==========================================================================
+    // Stepping Tests
+    // ==========================================================================
+
+    fn make_program_with_debug(
+        constants: Vec<Value>,
+        code: Vec<u8>,
+        line_mappings: Vec<(u32, u32, u32, u32)>, // (start_offset, end_offset, line, column)
+    ) -> Program {
+        use lira_core::bytecode::DebugInfo;
+        let mut debug_info = DebugInfo::new();
+        for (start, end, line, col) in line_mappings {
+            debug_info.add_line(start, end, line, col);
+        }
+        Program {
+            constants,
+            code,
+            entry_point: 0,
+            functions: Vec::new(),
+            debug_info,
+            source_file: None,
+        }
+    }
+
+    #[test]
+    fn test_step_instruction_basic() {
+        // Simple program: LoadConst, LoadConst, Add, Halt
+        let program = make_program(
+            vec![Value::Int(10), Value::Int(20)],
+            vec![
+                Opcode::LoadConst as u8, 0, 0, // offset 0-2: Load 10
+                Opcode::LoadConst as u8, 1, 0, // offset 3-5: Load 20
+                Opcode::Add as u8,              // offset 6: Add
+                Opcode::Halt as u8,             // offset 7: Halt
+            ],
+        );
+        let mut vm = VM::new(program);
+        vm.prepare();
+
+        // Step 1: LoadConst 10
+        let outcome1 = vm.step_instruction();
+        assert!(matches!(outcome1, StepOutcome::Continue));
+        assert_eq!(vm.stack.len(), 1);
+        assert!(matches!(&vm.stack[0], Value::Int(10)));
+        assert_eq!(vm.ip, 3);
+
+        // Step 2: LoadConst 20
+        let outcome2 = vm.step_instruction();
+        assert!(matches!(outcome2, StepOutcome::Continue));
+        assert_eq!(vm.stack.len(), 2);
+        assert_eq!(vm.ip, 6);
+
+        // Step 3: Add
+        let outcome3 = vm.step_instruction();
+        assert!(matches!(outcome3, StepOutcome::Continue));
+        assert_eq!(vm.stack.len(), 1);
+        assert!(matches!(&vm.stack[0], Value::Int(30)));
+        assert_eq!(vm.ip, 7);
+
+        // Step 4: Halt
+        let outcome4 = vm.step_instruction();
+        assert!(matches!(outcome4, StepOutcome::Finished { exit_code: 0 }));
+    }
+
+    #[test]
+    fn test_step_instruction_error() {
+        // Program that causes stack underflow
+        let program = make_program(
+            vec![],
+            vec![
+                Opcode::Add as u8, // No values on stack - should error
+            ],
+        );
+        let mut vm = VM::new(program);
+        vm.prepare();
+
+        let outcome = vm.step_instruction();
+        assert!(matches!(outcome, StepOutcome::Error { .. }));
+    }
+
+    #[test]
+    fn test_step_line_basic() {
+        // Program with debug info mapping different offsets to different lines
+        let program = make_program_with_debug(
+            vec![Value::Int(10), Value::Int(20)],
+            vec![
+                Opcode::LoadConst as u8, 0, 0, // offset 0-2: Line 1
+                Opcode::LoadConst as u8, 1, 0, // offset 3-5: Line 2
+                Opcode::Add as u8,              // offset 6: Line 3
+                Opcode::Halt as u8,             // offset 7: Line 4
+            ],
+            vec![
+                (0, 3, 1, 1),  // LoadConst on line 1 (offsets 0-2)
+                (3, 6, 2, 1),  // LoadConst on line 2 (offsets 3-5)
+                (6, 7, 3, 1),  // Add on line 3 (offset 6)
+                (7, 8, 4, 1),  // Halt on line 4 (offset 7)
+            ],
+        );
+        let mut vm = VM::new(program);
+        vm.prepare();
+
+        // Step line 1 -> should stop at line 2
+        let outcome1 = vm.step_line();
+        match &outcome1 {
+            StepOutcome::StepCompleted { line, .. } => {
+                assert_eq!(*line, 2, "Should be on line 2 after stepping from line 1");
+            }
+            other => panic!("Expected StepCompleted, got {:?}", other),
+        }
+        assert_eq!(vm.ip, 3);
+
+        // Step line 2 -> should stop at line 3
+        let outcome2 = vm.step_line();
+        match &outcome2 {
+            StepOutcome::StepCompleted { line, .. } => {
+                assert_eq!(*line, 3, "Should be on line 3 after stepping from line 2");
+            }
+            other => panic!("Expected StepCompleted, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_continue_execution() {
+        let program = make_program(
+            vec![Value::Int(42)],
+            vec![
+                Opcode::LoadConst as u8, 0, 0,
+                Opcode::Pop as u8,
+                Opcode::Halt as u8,
+            ],
+        );
+        let mut vm = VM::new(program);
+        vm.prepare();
+
+        let outcome = vm.continue_execution();
+        assert!(matches!(outcome, StepOutcome::Finished { exit_code: 0 }));
+    }
+
+    #[test]
+    fn test_breakpoint_hit() {
+        // Program with debug info
+        let program = make_program_with_debug(
+            vec![Value::Int(10), Value::Int(20)],
+            vec![
+                Opcode::LoadConst as u8, 0, 0, // Line 1
+                Opcode::LoadConst as u8, 1, 0, // Line 2
+                Opcode::Add as u8,              // Line 3
+                Opcode::Halt as u8,             // Line 4
+            ],
+            vec![
+                (0, 3, 1, 1),
+                (3, 6, 2, 1),
+                (6, 7, 3, 1),
+                (7, 8, 4, 1),
+            ],
+        );
+        let mut vm = VM::new(program);
+        vm.prepare();
+
+        // Set breakpoint on line 3
+        vm.set_breakpoints(vec![3]);
+
+        // Continue execution - should stop at breakpoint
+        let outcome = vm.continue_execution();
+        match &outcome {
+            StepOutcome::Breakpoint { line, .. } => {
+                assert_eq!(*line, 3, "Should hit breakpoint on line 3");
+            }
+            other => panic!("Expected Breakpoint, got {:?}", other),
+        }
+
+        // Continue again - should finish
+        let outcome2 = vm.continue_execution();
+        assert!(matches!(outcome2, StepOutcome::Finished { exit_code: 0 }));
+    }
+
+    #[test]
+    fn test_pause_flag() {
+        let program = make_program(
+            vec![Value::Int(1)],
+            vec![
+                // Simple loop that runs forever without pause
+                Opcode::LoadConst as u8, 0, 0, // Load 1
+                Opcode::Pop as u8,              // Pop it
+                Opcode::Jump as u8, 0, 0,       // Jump back to start
+            ],
+        );
+        let mut vm = VM::new(program);
+        vm.prepare();
+
+        // Get the pause flag and request pause
+        let flag = vm.get_pause_flag();
+        flag.request();
+
+        // Step instruction should return Paused
+        let outcome = vm.step_instruction();
+        assert!(matches!(outcome, StepOutcome::Paused { .. }));
+    }
+
+    #[test]
+    fn test_execution_state_transitions() {
+        let program = make_program(
+            vec![Value::Int(42)],
+            vec![
+                Opcode::LoadConst as u8, 0, 0,
+                Opcode::Halt as u8,
+            ],
+        );
+        let mut vm = VM::new(program);
+
+        // Initial state is Ready
+        assert!(matches!(vm.execution_state, ExecutionState::Ready));
+
+        // After prepare, still Ready
+        vm.prepare();
+        assert!(matches!(vm.execution_state, ExecutionState::Ready));
+
+        // After step, state changes based on outcome
+        vm.step_instruction();
+        // Note: execution_state is updated by step_instruction based on outcome
+    }
+
+    #[test]
+    fn test_debug_snapshot() {
+        let program = make_program_with_debug(
+            vec![Value::Int(42), Value::Int(100)],
+            vec![
+                Opcode::LoadConst as u8, 0, 0, // Line 1
+                Opcode::LoadConst as u8, 1, 0, // Line 2
+                Opcode::Halt as u8,             // Line 3
+            ],
+            vec![
+                (0, 3, 1, 1),
+                (3, 6, 2, 1),
+                (6, 7, 3, 1),
+            ],
+        );
+        let mut vm = VM::new(program);
+        vm.prepare();
+
+        // Execute two instructions
+        vm.step_instruction();
+        vm.step_instruction();
+
+        // Get snapshot
+        let snapshot = vm.get_debug_snapshot();
+        assert_eq!(snapshot.stack.len(), 2);
+        assert_eq!(snapshot.ip, 6);
+        assert!(snapshot.location.is_some());
     }
 }
