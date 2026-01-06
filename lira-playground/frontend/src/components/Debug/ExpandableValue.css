@@ -1,0 +1,114 @@
+.expandable-value {
+  font-family: var(--font-mono, 'Fira Code', monospace);
+  font-size: 12px;
+}
+
+.expandable-container {
+  display: inline-block;
+}
+
+.expand-toggle {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.expand-toggle:hover {
+  opacity: 0.8;
+}
+
+.expand-icon {
+  font-size: 8px;
+  color: var(--text-secondary, #808080);
+  width: 10px;
+  display: inline-block;
+  user-select: none;
+}
+
+.value-preview {
+  color: var(--text-primary, #d4d4d4);
+}
+
+.expand-children {
+  margin-left: 16px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border-color, #333);
+}
+
+.expand-child {
+  display: flex;
+  gap: 6px;
+  padding: 2px 0;
+  align-items: baseline;
+}
+
+.child-key {
+  color: var(--color-property, #9cdcfe);
+  flex-shrink: 0;
+}
+
+.expand-more {
+  padding: 4px 0;
+}
+
+.show-more-btn {
+  background: none;
+  border: none;
+  color: var(--color-link, #4fc1ff);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 4px;
+  font-family: inherit;
+}
+
+.show-more-btn:hover {
+  text-decoration: underline;
+}
+
+/* Value type colors */
+.value-null {
+  color: var(--color-keyword, #569cd6);
+  font-style: italic;
+}
+
+.value-bool {
+  color: var(--color-keyword, #569cd6);
+}
+
+.value-number {
+  color: var(--color-number, #b5cea8);
+}
+
+.value-string {
+  color: var(--color-string, #ce9178);
+}
+
+.value-function {
+  color: var(--color-function, #dcdcaa);
+}
+
+.value-closure {
+  color: var(--color-function, #dcdcaa);
+}
+
+.value-fiber {
+  color: var(--color-type, #4ec9b0);
+}
+
+.value-channel {
+  color: var(--color-type, #4ec9b0);
+}
+
+.value-array {
+  color: var(--text-primary, #d4d4d4);
+}
+
+.value-object {
+  color: var(--text-primary, #d4d4d4);
+}
+
+.value-truncated {
+  color: var(--text-secondary, #808080);
+  font-style: italic;
+}

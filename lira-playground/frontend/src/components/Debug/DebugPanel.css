@@ -98,8 +98,18 @@
 }
 
 .var-value {
-  color: var(--color-string, #ce9178);
-  margin-left: auto;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Local variable items need flexible layout for expandable values */
+.local-item {
+  flex-wrap: wrap;
+}
+
+.local-item .var-value {
+  flex-basis: 100%;
+  margin-top: 4px;
 }
 
 .stack-list {

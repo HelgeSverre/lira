@@ -7,7 +7,7 @@
 
 import { create } from 'zustand';
 import { createWebSocket } from '../api/client';
-import type { ClientMessage, ServerMessage, DebugVmState, VariableInfo } from '../types/protocol';
+import type { ClientMessage, ServerMessage, DebugVmState, VariableInfo, ValueJson } from '../types/protocol';
 import { useVmStore } from './vmStore';
 import { useEditorStore } from './editorStore';
 import { useCompilerStore } from './compilerStore';
@@ -24,7 +24,7 @@ export interface WebSocketStoreState {
   /** Current locals for variable inspection */
   locals: VariableInfo[];
   /** Current stack values */
-  stack: string[];
+  stack: ValueJson[];
   /** Error message if connection failed */
   connectionError: string | null;
 
@@ -218,11 +218,13 @@ function handleServerMessage(
 
     case 'finished':
       vmStore.setFinished(message.exitCode, message.durationMs);
+      vmStore.setTimeoutWarning(null);
       editorStore.setHighlightedLine(null);
       break;
 
     case 'runtimeError':
       vmStore.setError(message.message);
+      vmStore.setTimeoutWarning(null);
       if (message.location) {
         editorStore.setHighlightedLine(message.location.line);
       }
@@ -245,6 +247,7 @@ function handleServerMessage(
 
     case 'stopped':
       vmStore.reset();
+      vmStore.setTimeoutWarning(null);
       editorStore.setHighlightedLine(null);
       break;
 
@@ -265,7 +268,8 @@ function handleServerMessage(
       break;
 
     case 'stack':
-      set({ stack: message.stack });
+      // Legacy message - convert strings to ValueJson format
+      set({ stack: message.stack.map(s => ({ type: 'String', value: s } as ValueJson)) });
       break;
 
     case 'variableValue':
@@ -274,20 +278,19 @@ function handleServerMessage(
       break;
 
     case 'fiberSpawned':
-      // Could update fiber display in the future
-      console.log('Fiber spawned:', message.fiber);
+      vmStore.addFiber(message.fiber);
       break;
 
     case 'fiberStateChanged':
-      console.log('Fiber state changed:', message.fiberId, '->', message.newState);
+      vmStore.updateFiberState(message.fiberId, message.newState);
       break;
 
     case 'channelCreated':
-      console.log('Channel created:', message.channel);
+      vmStore.addChannel(message.channel);
       break;
 
     case 'channelMessage':
-      console.log('Channel message:', message.channelId, message.operation, message.value);
+      vmStore.recordChannelMessage(message.channelId, message.operation, message.value);
       break;
 
     case 'pong':
@@ -295,7 +298,7 @@ function handleServerMessage(
       break;
 
     case 'timeoutWarning':
-      console.warn('Timeout warning:', message.secondsRemaining, 'seconds remaining');
+      vmStore.setTimeoutWarning(message.secondsRemaining);
       break;
 
     case 'ast':

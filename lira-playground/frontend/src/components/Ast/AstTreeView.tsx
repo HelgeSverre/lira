@@ -45,7 +45,9 @@ function StatementNode({ statement }: StatementNodeProps) {
   const renderContent = () => {
     try {
     switch (kind.type) {
-      case 'VarDecl':
+      case 'VarDecl': {
+        // Use type assertion for optional fields that may exist in different AST versions
+        const varDecl = kind as typeof kind & { name?: string; value?: Expression };
         return (
           <>
             <span className="ast-keyword">{kind.mutable ? 'var' : 'let'}</span>
@@ -54,16 +56,17 @@ function StatementNode({ statement }: StatementNodeProps) {
               <span className="ast-name">{kind.pattern.kind.name}</span>
             )}
             {/* New structure: pattern might be directly a name or in a value field */}
-            {kind.name && <span className="ast-name">{kind.name}</span>}
+            {varDecl.name && <span className="ast-name">{varDecl.name}</span>}
             {kind.initializer && (
               <ExpressionNode expression={kind.initializer} label="init" />
             )}
             {/* Handle value field for simpler AST structure */}
-            {kind.value && !kind.initializer && (
-              <ExpressionNode expression={kind.value} label="value" />
+            {varDecl.value && !kind.initializer && (
+              <ExpressionNode expression={varDecl.value} label="value" />
             )}
           </>
         );
+      }
 
       case 'FnDecl':
         return (

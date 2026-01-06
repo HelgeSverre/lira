@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-export type OutputTab = 'output' | 'debug' | 'vm' | 'fibers' | 'channels';
+export type OutputTab = 'output' | 'debug' | 'vm' | 'fibers' | 'channels' | 'events';
 
 export interface UiState {
   /** Active tab in the output panel */

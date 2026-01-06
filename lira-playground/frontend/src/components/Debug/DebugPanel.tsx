@@ -6,6 +6,7 @@
 
 import { useWebSocketStore, selectLocals, selectStack, selectDebugState } from '../../stores/websocketStore';
 import { useVmStore } from '../../stores/vmStore';
+import { ExpandableValue } from './ExpandableValue';
 import './DebugPanel.css';
 
 export function DebugPanel() {
@@ -59,10 +60,12 @@ export function DebugPanel() {
         ) : (
           <div className="debug-list">
             {locals.map((local, index) => (
-              <div key={index} className="debug-item" data-testid="local-var" data-name={local.name}>
+              <div key={index} className="debug-item local-item" data-testid="local-var" data-name={local.name}>
                 <span className="var-name">{local.name}</span>
                 <span className="var-type">{local.typeName}</span>
-                <span className="var-value">{local.value}</span>
+                <span className="var-value">
+                  <ExpandableValue value={local.value} />
+                </span>
               </div>
             ))}
           </div>
@@ -79,7 +82,9 @@ export function DebugPanel() {
             {stack.map((value, index) => (
               <div key={index} className="debug-item stack-item" data-testid="stack-value">
                 <span className="stack-index">{stack.length - 1 - index}</span>
-                <span className="stack-value">{value}</span>
+                <span className="stack-value">
+                  <ExpandableValue value={value} />
+                </span>
               </div>
             )).reverse()}
           </div>

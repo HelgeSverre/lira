@@ -4,6 +4,13 @@
   gap: 2px;
 }
 
+.debug-controls-separator {
+  width: 1px;
+  height: 16px;
+  background: var(--border-color);
+  margin: 0 4px;
+}
+
 .debug-controls .icon-button {
   width: 28px;
   height: 28px;

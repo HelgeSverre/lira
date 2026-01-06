@@ -6,6 +6,8 @@ import {
   ArrowRightToLine,
   ArrowUpFromLine,
   Square,
+  Code,
+  MoveRight,
   type LucideIcon,
 } from 'lucide-react';
 import { useEditorStore } from '../../stores/editorStore';
@@ -48,6 +50,8 @@ export function DebugControls() {
     stepInto,
     stepOver,
     stepOut,
+    stepLine,
+    stepInstruction,
     pause,
     stop,
     connectionStatus,
@@ -79,6 +83,18 @@ export function DebugControls() {
   const handleStepOut = () => {
     if (canStep && isConnected) {
       stepOut();
+    }
+  };
+
+  const handleStepLine = () => {
+    if (canStep && isConnected) {
+      stepLine();
+    }
+  };
+
+  const handleStepInstruction = () => {
+    if (canStep && isConnected) {
+      stepInstruction();
     }
   };
 
@@ -140,6 +156,26 @@ export function DebugControls() {
           onClick={handleStepOut}
           disabled={!canStep}
         />
+
+        <div className="debug-controls-separator" />
+
+        <IconButton
+          icon={MoveRight}
+          label="Step Line"
+          shortcut="Ctrl+Shift+L"
+          onClick={handleStepLine}
+          disabled={!canStep}
+        />
+
+        <IconButton
+          icon={Code}
+          label="Step Instruction"
+          shortcut="Ctrl+Shift+I"
+          onClick={handleStepInstruction}
+          disabled={!canStep}
+        />
+
+        <div className="debug-controls-separator" />
 
         <IconButton
           icon={Square}

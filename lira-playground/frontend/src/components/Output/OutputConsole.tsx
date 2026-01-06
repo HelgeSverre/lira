@@ -4,7 +4,7 @@ import { useUiStore } from '../../stores/uiStore';
 import './OutputConsole.css';
 
 export function OutputConsole() {
-  const { output, executionStatus, error, exitCode, executionTime } = useVmStore();
+  const { output, executionStatus, error, exitCode, executionTime, timeoutWarning } = useVmStore();
   const { autoScrollOutput } = useUiStore();
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -47,6 +47,12 @@ export function OutputConsole() {
       {executionStatus === 'running' && (
         <div className="console-line running" data-testid="console-running">
           Running...
+        </div>
+      )}
+
+      {timeoutWarning !== null && (
+        <div className="console-line timeout-warning" data-testid="console-timeout-warning">
+          Warning: Execution will timeout in {timeoutWarning} seconds
         </div>
       )}
 

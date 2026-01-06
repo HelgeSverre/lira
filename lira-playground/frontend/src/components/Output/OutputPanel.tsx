@@ -2,6 +2,7 @@ import { useUiStore, OutputTab } from '../../stores/uiStore';
 import { OutputConsole } from './OutputConsole';
 import { VmInspector } from '../VmInspector/VmInspector';
 import { FiberInspector } from '../FiberInspector/FiberInspector';
+import { EventTimeline } from '../FiberInspector/EventTimeline';
 import { DebugPanel } from '../Debug/DebugPanel';
 import './OutputPanel.css';
 
@@ -11,6 +12,7 @@ const TABS: { id: OutputTab; label: string }[] = [
   { id: 'vm', label: 'VM' },
   { id: 'fibers', label: 'Fibers' },
   { id: 'channels', label: 'Channels' },
+  { id: 'events', label: 'Events' },
 ];
 
 export function OutputPanel() {
@@ -37,6 +39,7 @@ export function OutputPanel() {
         {activeOutputTab === 'vm' && <VmInspector />}
         {activeOutputTab === 'fibers' && <FiberInspector mode="fibers" />}
         {activeOutputTab === 'channels' && <FiberInspector mode="channels" />}
+        {activeOutputTab === 'events' && <EventTimeline />}
       </div>
     </div>
   );

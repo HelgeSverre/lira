@@ -68,10 +68,24 @@ export interface SourceLocation {
   file: string | null;
 }
 
+/** Rich value types for structured value inspection */
+export type ValueJson =
+  | { type: 'Null' }
+  | { type: 'Bool'; value: boolean }
+  | { type: 'Int'; value: number }
+  | { type: 'Float'; value: number }
+  | { type: 'String'; value: string }
+  | { type: 'Array'; elements: ValueJson[] }
+  | { type: 'Object'; fields: Record<string, ValueJson> }
+  | { type: 'Function'; codeOffset: number }
+  | { type: 'Closure'; codeOffset: number; captures: ValueJson[] }
+  | { type: 'Fiber'; id: number }
+  | { type: 'Channel'; id: number };
+
 /** Variable info for inspection */
 export interface VariableInfo {
   name: string;
-  value: string;
+  value: ValueJson;
   typeName: string;
 }
 
@@ -88,7 +102,7 @@ export interface DebugVmState {
   ip: number;
   line: number | null;
   column: number | null;
-  stack: string[];
+  stack: ValueJson[];
   locals: VariableInfo[];
   callStack: string[];
   output: string[];
