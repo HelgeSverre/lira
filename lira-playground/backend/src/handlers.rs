@@ -9,7 +9,9 @@ use axum::{
 };
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use std::time::Instant;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tokio::sync::Mutex;
 
 use crate::protocol::{ClientMessage, CompileError, ErrorSeverity, ServerMessage};
 use crate::vm_thread::VmThreadHandle;
@@ -387,9 +389,13 @@ pub async fn websocket(ws: WebSocketUpgrade) -> Response {
     ws.on_upgrade(handle_websocket)
 }
 
+/// Timeout warning threshold in seconds (warn before the 30s timeout)
+const TIMEOUT_WARNING_SECS: u64 = 25;
+
 /// Handle WebSocket connection
 async fn handle_websocket(socket: WebSocket) {
-    let (mut sender, mut receiver) = socket.split();
+    let (sender, mut receiver) = socket.split();
+    let sender = Arc::new(Mutex::new(sender));
 
     // Spawn dedicated VM thread for this session
     let mut vm_handle = VmThreadHandle::spawn();
@@ -411,16 +417,54 @@ async fn handle_websocket(socket: WebSocket) {
             }
         };
 
+        // Check if this is a long-running command that might timeout
+        let is_long_running = matches!(
+            client_msg,
+            ClientMessage::Run { .. }
+                | ClientMessage::Debug { .. }
+                | ClientMessage::Continue
+                | ClientMessage::StepInto
+                | ClientMessage::StepOver
+                | ClientMessage::StepOut
+                | ClientMessage::StepLine
+                | ClientMessage::StepInstruction
+        );
+
+        // Spawn timeout warning task for long-running commands
+        let warning_handle = if is_long_running {
+            let sender_clone = Arc::clone(&sender);
+            Some(tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(TIMEOUT_WARNING_SECS)).await;
+                let warning_msg = ServerMessage::TimeoutWarning {
+                    seconds_remaining: 5,
+                };
+                let json = serde_json::to_string(&warning_msg).unwrap();
+                let mut sender_guard = sender_clone.lock().await;
+                let _ = sender_guard.send(Message::Text(json.into())).await;
+            }))
+        } else {
+            None
+        };
+
         // Send to VM thread and get response
-        match vm_handle.send_command(client_msg).await {
+        let result = vm_handle.send_command(client_msg).await;
+
+        // Cancel the timeout warning if it hasn't fired yet
+        if let Some(handle) = warning_handle {
+            handle.abort();
+        }
+
+        match result {
             Ok(response) => {
                 // Send all response messages
+                let mut sender_guard = sender.lock().await;
                 for msg in response.messages {
                     let json = serde_json::to_string(&msg).unwrap();
-                    if sender.send(Message::Text(json.into())).await.is_err() {
+                    if sender_guard.send(Message::Text(json.into())).await.is_err() {
                         break;
                     }
                 }
+                drop(sender_guard);
 
                 // Check if we should terminate
                 if response.terminate {
@@ -435,7 +479,8 @@ async fn handle_websocket(socket: WebSocket) {
                     location: None,
                 };
                 let json = serde_json::to_string(&error_msg).unwrap();
-                let _ = sender.send(Message::Text(json.into())).await;
+                let mut sender_guard = sender.lock().await;
+                let _ = sender_guard.send(Message::Text(json.into())).await;
 
                 // Continue trying - the VM thread might recover or be restarted
             }

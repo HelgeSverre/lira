@@ -7,6 +7,7 @@
 
 #![allow(dead_code)]
 
+use liravm::{RichValue, Value};
 use serde::{Deserialize, Serialize};
 
 /// Messages sent from client to server
@@ -171,7 +172,8 @@ pub struct SourceLocation {
 #[derive(Debug, Clone, Serialize)]
 pub struct VariableInfo {
     pub name: String,
-    pub value: String,
+    /// Rich structured value
+    pub value: ValueJson,
     #[serde(rename = "typeName")]
     pub type_name: String,
 }
@@ -184,7 +186,8 @@ pub struct VmState {
     pub ip: usize,
     pub line: Option<u32>,
     pub column: Option<u32>,
-    pub stack: Vec<String>,
+    /// Rich structured stack values
+    pub stack: Vec<ValueJson>,
     pub locals: Vec<VariableInfo>,
     #[serde(rename = "callStack")]
     pub call_stack: Vec<String>,
@@ -317,4 +320,76 @@ pub enum ValueJson {
     },
     Fiber { id: u64 },
     Channel { id: u64 },
+}
+
+impl ValueJson {
+    /// Convert a VM Value to ValueJson
+    pub fn from_value(value: &Value) -> Self {
+        match value {
+            Value::Null => ValueJson::Null,
+            Value::Bool(b) => ValueJson::Bool { value: *b },
+            Value::Int(n) => ValueJson::Int { value: *n },
+            Value::Float(f) => ValueJson::Float { value: *f },
+            Value::String(s) => ValueJson::String {
+                value: (**s).clone(),
+            },
+            Value::Array(arr) => {
+                let elements = arr
+                    .borrow()
+                    .iter()
+                    .map(ValueJson::from_value)
+                    .collect();
+                ValueJson::Array { elements }
+            }
+            Value::Object(obj) => {
+                let fields = obj
+                    .borrow()
+                    .iter()
+                    .map(|(k, v)| (k.clone(), ValueJson::from_value(v)))
+                    .collect();
+                ValueJson::Object { fields }
+            }
+            Value::Function(offset) => ValueJson::Function {
+                code_offset: *offset,
+            },
+            Value::Closure(c) => ValueJson::Closure {
+                code_offset: c.code_offset,
+                captures: c.captures.iter().map(ValueJson::from_value).collect(),
+            },
+            Value::Fiber(id) => ValueJson::Fiber { id: *id },
+            Value::Channel(id) => ValueJson::Channel { id: *id },
+        }
+    }
+
+    /// Convert a RichValue to ValueJson
+    pub fn from_rich_value(value: &RichValue) -> Self {
+        match value {
+            RichValue::Null => ValueJson::Null,
+            RichValue::Bool(b) => ValueJson::Bool { value: *b },
+            RichValue::Int(n) => ValueJson::Int { value: *n },
+            RichValue::Float(f) => ValueJson::Float { value: *f },
+            RichValue::String(s) => ValueJson::String { value: s.clone() },
+            RichValue::Array(elements) => ValueJson::Array {
+                elements: elements.iter().map(ValueJson::from_rich_value).collect(),
+            },
+            RichValue::Object(fields) => ValueJson::Object {
+                fields: fields
+                    .iter()
+                    .map(|(k, v)| (k.clone(), ValueJson::from_rich_value(v)))
+                    .collect(),
+            },
+            RichValue::Function { code_offset } => ValueJson::Function {
+                code_offset: *code_offset,
+            },
+            RichValue::Closure {
+                code_offset,
+                captures,
+            } => ValueJson::Closure {
+                code_offset: *code_offset,
+                captures: captures.iter().map(ValueJson::from_rich_value).collect(),
+            },
+            RichValue::Fiber { id } => ValueJson::Fiber { id: *id },
+            RichValue::Channel { id } => ValueJson::Channel { id: *id },
+        }
+    }
 }

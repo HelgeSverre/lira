@@ -8,12 +8,13 @@ use std::panic::AssertUnwindSafe;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use liravm::{DebugEvent, DebugSession, DebugSnapshot};
+use liravm::{DebugEvent, DebugSession, DebugSnapshot, FiberEvent};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::handlers::compile_source;
 use crate::protocol::{
-    ClientMessage, CompileError, ErrorSeverity, ServerMessage, VariableInfo, VmState,
+    ChannelInfo, ClientMessage, CompileError, ErrorSeverity, FiberInfo, ServerMessage,
+    VariableInfo, VmState,
 };
 
 /// Channel buffer size for commands
@@ -523,14 +524,26 @@ fn handle_inspect_variable(session: &DebugSession, name: &str) -> VmResponse {
 
 /// Handle locals inspection
 fn handle_inspect_locals(session: &DebugSession) -> VmResponse {
+    use crate::protocol::ValueJson;
+
     let locals = if let Some(snapshot) = session.get_snapshot() {
         snapshot
             .locals
             .iter()
-            .map(|l| VariableInfo {
-                name: l.name.clone().unwrap_or_else(|| format!("local_{}", l.slot)),
-                value: l.value.display.clone(),
-                type_name: l.value.type_name.clone(),
+            .map(|l| {
+                let value = l
+                    .value
+                    .rich_value
+                    .as_ref()
+                    .map(ValueJson::from_rich_value)
+                    .unwrap_or_else(|| ValueJson::String {
+                        value: l.value.display.clone(),
+                    });
+                VariableInfo {
+                    name: l.name.clone().unwrap_or_else(|| format!("local_{}", l.slot)),
+                    value,
+                    type_name: l.value.type_name.clone(),
+                }
             })
             .collect()
     } else {
@@ -564,6 +577,63 @@ fn debug_event_to_messages(
     start: std::time::Instant,
 ) -> Vec<ServerMessage> {
     let mut messages = Vec::new();
+
+    // Drain and convert fiber/channel events first
+    for fiber_event in session.drain_fiber_events() {
+        match fiber_event {
+            FiberEvent::FiberSpawned { fiber_id, ip } => {
+                messages.push(ServerMessage::FiberSpawned {
+                    fiber: FiberInfo {
+                        id: fiber_id as u64,
+                        state: "Ready".to_string(),
+                        ip,
+                    },
+                });
+            }
+            FiberEvent::FiberStateChanged {
+                fiber_id,
+                new_state,
+                ..
+            } => {
+                messages.push(ServerMessage::FiberStateChanged {
+                    fiber_id: fiber_id as u64,
+                    new_state,
+                });
+            }
+            FiberEvent::ChannelCreated {
+                channel_id,
+                capacity,
+            } => {
+                messages.push(ServerMessage::ChannelCreated {
+                    channel: ChannelInfo {
+                        id: channel_id as u64,
+                        capacity,
+                        buffer_size: 0,
+                        closed: false,
+                    },
+                });
+            }
+            FiberEvent::ChannelMessage {
+                channel_id,
+                operation,
+                value,
+            } => {
+                messages.push(ServerMessage::ChannelMessage {
+                    channel_id: channel_id as u64,
+                    operation,
+                    value,
+                });
+            }
+            FiberEvent::ChannelClosed { channel_id } => {
+                // Send as a channel message with "close" operation
+                messages.push(ServerMessage::ChannelMessage {
+                    channel_id: channel_id as u64,
+                    operation: "close".to_string(),
+                    value: String::new(),
+                });
+            }
+        }
+    }
 
     // Always send any accumulated output
     for line in session.get_output() {
@@ -628,20 +698,44 @@ fn debug_event_to_messages(
 
 /// Convert DebugSnapshot to VmState for protocol
 fn snapshot_to_vm_state(snapshot: &DebugSnapshot) -> VmState {
+    use crate::protocol::ValueJson;
+
     let (line, column) = snapshot.location.unzip();
     VmState {
         execution_state: format!("{:?}", snapshot.state),
         ip: snapshot.ip,
         line,
         column,
-        stack: snapshot.stack.iter().map(|v| v.display.clone()).collect(),
+        stack: snapshot
+            .stack
+            .iter()
+            .map(|v| {
+                // Use rich_value if available, otherwise create a simple string value
+                v.rich_value
+                    .as_ref()
+                    .map(ValueJson::from_rich_value)
+                    .unwrap_or_else(|| ValueJson::String {
+                        value: v.display.clone(),
+                    })
+            })
+            .collect(),
         locals: snapshot
             .locals
             .iter()
-            .map(|l| VariableInfo {
-                name: l.name.clone().unwrap_or_else(|| format!("local_{}", l.slot)),
-                value: l.value.display.clone(),
-                type_name: l.value.type_name.clone(),
+            .map(|l| {
+                let value = l
+                    .value
+                    .rich_value
+                    .as_ref()
+                    .map(ValueJson::from_rich_value)
+                    .unwrap_or_else(|| ValueJson::String {
+                        value: l.value.display.clone(),
+                    });
+                VariableInfo {
+                    name: l.name.clone().unwrap_or_else(|| format!("local_{}", l.slot)),
+                    value,
+                    type_name: l.value.type_name.clone(),
+                }
             })
             .collect(),
         call_stack: snapshot
