@@ -1,0 +1,14 @@
+[package]
+name = "lira"
+version = "0.1.0"
+edition = "2021"
+description = "Lira programming language CLI"
+license = "MIT"
+
+[[bin]]
+name = "lira"
+path = "src/main.rs"
+
+[dependencies]
+lirac = { path = "../lirac" }
+liravm = { path = "../liravm" }

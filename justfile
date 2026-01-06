@@ -8,25 +8,25 @@ default:
 # Build - Core compilation targets
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Build compiler and VM
+# Build compiler, VM, and unified CLI
 [group('build')]
 build:
-    cargo build --package lirac --package liravm
+    cargo build --package lira --package lirac --package liravm
 
-# Build all packages (compiler, VM, LSP, doc generator)
+# Build all packages (CLI, compiler, VM, LSP, doc generator, playground)
 [group('build')]
 build-all:
-    cargo build --package lirac --package liravm --package lira-lsp --package lira-doc --package lira-playground
+    cargo build --package lira --package lirac --package liravm --package lira-lsp --package lira-doc --package lira-playground
 
 # Build in release mode
 [group('build')]
 release:
-    cargo build --package lirac --package liravm --release
+    cargo build --package lira --package lirac --package liravm --release
 
 # Build all in release mode
 [group('build')]
 release-all:
-    cargo build --package lirac --package liravm --package lira-lsp --package lira-doc --package lira-playground --release
+    cargo build --package lira --package lirac --package liravm --package lira-lsp --package lira-doc --package lira-playground --release
 
 # Clean build artifacts
 [group('build')]
@@ -45,9 +45,8 @@ lsp:
 # Compile and run a Lira file
 [group('dev')]
 run file:
-    cargo build --package lirac --package liravm --release
-    ./target/release/lirac compile {{ file }} -o /tmp/out.lic
-    ./target/release/liravm run /tmp/out.lic
+    cargo build --package lira --release
+    ./target/release/lira run {{ file }}
 
 # Run all tests
 [group('dev')]
@@ -233,6 +232,7 @@ playground port="3001":
 [group('install')]
 install: release-all
     mkdir -p ~/.local/bin
+    cp target/release/lira ~/.local/bin/
     cp target/release/lirac ~/.local/bin/
     cp target/release/liravm ~/.local/bin/
     cp target/release/lira-lsp ~/.local/bin/
