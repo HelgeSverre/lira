@@ -10,8 +10,8 @@
 
 This roadmap tracks the implementation of Lira, a modern systems programming language with Go-like fiber concurrency. Development follows a **host-first** strategy: the compiler and VM are developed and tested on macOS/Linux.
 
-**Total Estimated Tasks**: ~160 discrete implementation tasks
-**Major Phases**: 20 phases from lexer to production-ready
+**Total Estimated Tasks**: ~190 discrete implementation tasks
+**Major Phases**: 22 phases from lexer to production-ready
 **Test Coverage**: ~30% of language features (expanding)
 
 ---
@@ -38,6 +38,8 @@ This roadmap tracks the implementation of Lira, a modern systems programming lan
 18. [Phase 17: Testing Framework](#phase-17-testing-framework) - PLANNED
 19. [Phase 18: Standard Library Expansions](#phase-18-standard-library-expansions) - PLANNED
 20. [Phase 19: Concurrency Enhancements](#phase-19-concurrency-enhancements) - PLANNED
+21. [Phase 20: Windows Support](#phase-20-windows-support) - PLANNED
+22. [Phase 21: Language Specification](#phase-21-language-specification) - PLANNED
 
 ---
 
@@ -309,19 +311,20 @@ Phase 2 (Type System)
 Phase 3 (Bytecode Generation)
     │
     ▼
-Phase 4 (VM Core)
-    │
-    ▼
-Phase 5 (Fiber Runtime) ──────────────────────┐
+Phase 4 (VM Core) ────────────────────────────┐
     │                                          │
     ▼                                          ▼
-Phase 6 (Standard Library)            Phase 19 (Concurrency+)
+Phase 5 (Fiber Runtime) ──────────────┐    Phase 20 (Windows)
+    │                                  │
+    ├──────────────────────────────────┤
+    ▼                                  ▼
+Phase 6 (Standard Library)     Phase 19 (Concurrency+)
     │
     ▼
-Phase 7 (Advanced Features)  ←── CURRENT
-    │
-    ▼
-Phase 8 (Developer Tooling)  ←── CURRENT
+Phase 7 (Advanced Features)  ←── CURRENT ─────┐
+    │                                          │
+    ▼                                          ▼
+Phase 8 (Developer Tooling)  ←── CURRENT   Phase 21 (Language Spec)
     │
     ▼
 Phase 9 (Dev Experience)
@@ -460,16 +463,16 @@ just fmt
 
 | Metric         | Count   |
 | -------------- | ------- |
-| Total tasks    | ~167    |
+| Total tasks    | ~190    |
 | Completed      | ~74     |
 | In Progress    | ~4      |
-| Pending        | ~89     |
+| Pending        | ~112    |
 | Compiler LOC   | ~15,900 |
 | VM LOC         | ~5,600  |
 | Core LOC       | ~350    |
 | Stdlib modules | 21      |
 | Example files  | 86      |
-| Major Phases   | 20      |
+| Major Phases   | 22      |
 
 ---
 
@@ -608,17 +611,18 @@ _This roadmap tracks the development of Lira as a standalone systems programming
 **Depends On**: Phase 10
 **Status**: PLANNED
 
-| ID    | Task             | Description                                                  | Status |
-| ----- | ---------------- | ------------------------------------------------------------ | ------ |
-| T11.1 | Package Manifest | `lira.toml` for project metadata, dependencies, build config | [ ]    |
-| T11.2 | Package Manager  | `lira add`, `lira install`, dependency resolution            | [ ]    |
-| T11.3 | Package Registry | Central registry for publishing/discovering packages         | [ ]    |
-| T11.4 | Build System     | `lira build`, `lira test`, `lira run` unified CLI            | [ ]    |
-| T11.5 | Lockfiles        | `lira.lock` for reproducible builds                          | [ ]    |
-| T11.6 | Vendoring        | `lira vendor` to copy dependencies locally                   | [ ]    |
-| T11.7 | Feature Flags    | Optional package features (`[features]` in lira.toml)        | [ ]    |
-| T11.8 | Security Audit   | `lira audit` to check dependencies for vulnerabilities       | [ ]    |
-| T11.9 | License Checking | Verify dependency licenses are compatible                    | [ ]    |
+| ID     | Task             | Description                                                  | Status |
+| ------ | ---------------- | ------------------------------------------------------------ | ------ |
+| T11.1  | Package Manifest | `lira.toml` for project metadata, dependencies, build config | [ ]    |
+| T11.2  | Package Manager  | `lira add`, `lira install`, dependency resolution            | [ ]    |
+| T11.3  | Package Registry | Central registry for publishing/discovering packages         | [ ]    |
+| T11.4  | Build System     | `lira build`, `lira test`, `lira run` unified CLI            | [ ]    |
+| T11.5  | Lockfiles        | `lira.lock` for reproducible builds                          | [ ]    |
+| T11.6  | Vendoring        | `lira vendor` to copy dependencies locally                   | [ ]    |
+| T11.7  | Feature Flags    | Optional package features (`[features]` in lira.toml)        | [ ]    |
+| T11.8  | Security Audit   | `lira audit` to check dependencies for vulnerabilities       | [ ]    |
+| T11.9  | License Checking | Verify dependency licenses are compatible                    | [ ]    |
+| T11.10 | Version Manager  | `liraup` - install/manage multiple Lira versions (like rustup) | [ ]    |
 
 ---
 
@@ -721,18 +725,20 @@ _This roadmap tracks the development of Lira as a standalone systems programming
 **Depends On**: Phase 6, Phase 13
 **Status**: PLANNED
 
-| ID     | Task          | Description                                       | Status |
-| ------ | ------------- | ------------------------------------------------- | ------ |
-| T18.1  | std.sql       | Database drivers (SQLite, PostgreSQL, MySQL)      | [ ]    |
-| T18.2  | std.cli       | Argument parsing, help generation, subcommands    | [ ]    |
-| T18.3  | std.compress  | Compression (gzip, zstd, brotli)                  | [ ]    |
-| T18.4  | std.websocket | WebSocket client and server                       | [ ]    |
-| T18.5  | std.template  | Template engine for text generation               | [ ]    |
-| T18.6  | std.csv       | CSV parsing and generation                        | [ ]    |
-| T18.7  | std.yaml      | YAML parsing and generation                       | [ ]    |
-| T18.8  | std.toml      | TOML parsing and generation                       | [ ]    |
-| T18.9  | std.image     | Basic image manipulation (resize, crop, format)   | [ ]    |
-| T18.10 | std.crypto    | Encryption (AES, RSA), signatures, key management | [ ]    |
+| ID     | Task              | Description                                         | Status |
+| ------ | ----------------- | --------------------------------------------------- | ------ |
+| T18.1  | std.sql           | Database drivers (SQLite, PostgreSQL, MySQL)        | [ ]    |
+| T18.2  | std.cli           | Argument parsing, help generation, subcommands      | [ ]    |
+| T18.3  | std.compress      | Compression (gzip, zstd, brotli)                    | [ ]    |
+| T18.4  | std.websocket     | WebSocket client and server                         | [ ]    |
+| T18.5  | std.template      | Template engine for text generation                 | [ ]    |
+| T18.6  | std.csv           | CSV parsing and generation                          | [ ]    |
+| T18.7  | std.yaml          | YAML parsing and generation                         | [ ]    |
+| T18.8  | std.toml          | TOML parsing and generation                         | [ ]    |
+| T18.9  | std.image         | Basic image manipulation (resize, crop, format)     | [ ]    |
+| T18.10 | std.crypto        | Encryption (AES, RSA), signatures, key management   | [ ]    |
+| T18.11 | std.tls           | TLS/SSL support for secure connections              | [ ]    |
+| T18.12 | std.log (structured) | Structured logging with JSON output, log levels  | [ ]    |
 
 ---
 
@@ -752,3 +758,49 @@ _This roadmap tracks the development of Lira as a standalone systems programming
 | T19.6 | Work Stealing Scheduler | Improved fiber scheduling for multi-core             | [ ]    |
 | T19.7 | Fiber Pools             | Reusable fiber pools for high-throughput workloads   | [ ]    |
 | T19.8 | Deadlock Detection      | Runtime detection of channel deadlocks               | [ ]    |
+
+---
+
+## Phase 20: Windows Support
+
+**Goal**: Full Windows platform support for Lira toolchain and runtime.
+**Depends On**: Phase 4, Phase 6
+**Status**: PLANNED
+
+| ID    | Task                  | Description                                            | Status |
+| ----- | --------------------- | ------------------------------------------------------ | ------ |
+| T20.1 | Windows CI            | GitHub Actions Windows build and test pipeline         | [ ]    |
+| T20.2 | Windows syscalls      | File I/O, process, networking via Windows API          | [ ]    |
+| T20.3 | Windows paths         | Handle backslashes, drive letters, UNC paths           | [ ]    |
+| T20.4 | Windows console       | ANSI colors, terminal handling on Windows              | [ ]    |
+| T20.5 | Windows installer     | MSI or exe installer for Lira toolchain                | [ ]    |
+| T20.6 | Chocolatey package    | `choco install lira` distribution                      | [ ]    |
+| T20.7 | winget package        | Windows Package Manager distribution                   | [ ]    |
+| T20.8 | Windows fiber support | Fiber scheduling compatible with Windows threading     | [ ]    |
+
+---
+
+## Phase 21: Language Specification
+
+**Goal**: Formal language specification for standardization and correctness.
+**Depends On**: Phase 7
+**Status**: IN PROGRESS
+
+| ID     | Task                    | Description                                              | Status |
+| ------ | ----------------------- | -------------------------------------------------------- | ------ |
+| T21.1  | Specification format    | Choose format (EBNF + prose, like Go/Rust spec)          | [x]    |
+| T21.2  | Lexical specification   | Formal grammar for tokens, keywords, literals            | [x]    |
+| T21.3  | Syntax specification    | Complete EBNF grammar for all constructs                 | [x]    |
+| T21.4  | Type system spec        | Formal type rules, inference algorithm                   | [x]    |
+| T21.5  | Semantics spec          | Operational semantics for expressions/statements         | [x]    |
+| T21.6  | Memory model spec       | ARC semantics, object lifecycle, ordering guarantees     | [x]    |
+| T21.7  | Concurrency spec        | Fiber scheduling, channel semantics, memory ordering     | [x]    |
+| T21.8  | Standard library spec   | API contracts, behavior guarantees for stdlib            | [ ]    |
+| T21.9  | Versioning policy       | Semantic versioning, backwards compatibility rules       | [ ]    |
+| T21.10 | Specification website   | Published spec at docs.lira-lang.org/spec                | [ ]    |
+| T21.11 | Spec validation tool    | lira-spec crate for conformance testing                  | [x]    |
+| T21.12 | Tree-sitter comparison  | Compare EBNF spec with tree-sitter grammar               | [x]    |
+| T21.13 | Name normalization      | Normalize rule names across spec/tree-sitter/parser      | [ ]    |
+| T21.14 | Keyword audit           | Sync keywords across lexer, spec, and tree-sitter        | [ ]    |
+| T21.15 | Semantic tests          | Add runtime behavior conformance tests                   | [ ]    |
+| T21.16 | Sync strategy doc       | Document source-of-truth hierarchy (SPECIFICATION_SYNC)  | [x]    |

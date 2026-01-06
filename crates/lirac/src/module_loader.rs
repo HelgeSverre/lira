@@ -228,6 +228,18 @@ impl ModuleLoader {
                                 all_statements.push(module_stmt.clone());
                             }
                         }
+                        StatementKind::ImplDecl { type_name, .. } => {
+                            // Impl blocks extend types - always import them when the module is imported.
+                            // They can't be selectively imported by name since they don't have their own name.
+                            // Use module path + type name as key to allow multiple impl blocks
+                            // for the same type from different modules (e.g., impl int in core.li
+                            // and impl int in math.li should both be imported).
+                            let impl_key = format!("__impl_{}_{}", path.join("."), type_name);
+                            if !imported_names.contains(&impl_key) {
+                                imported_names.insert(impl_key);
+                                all_statements.push(module_stmt.clone());
+                            }
+                        }
                         _ => {}
                     }
                 }

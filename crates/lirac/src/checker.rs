@@ -3396,7 +3396,41 @@ impl TypeChecker {
                         Type::Unknown
                     }
                     Type::Any => Type::Any, // Allow field access on Any type
-                    // Check impl methods for built-in types (e.g., impl string { ... })
+                    // Check impl methods for built-in types (e.g., impl int { ... })
+                    Type::Int => {
+                        if let Some(impl_method) = self.env.lookup_method("int", field) {
+                            let param_types: Vec<Type> = impl_method
+                                .params
+                                .iter()
+                                .map(|(_, ty)| ty.clone())
+                                .collect();
+                            return Type::Function {
+                                params: param_types.clone(),
+                                return_type: Box::new(impl_method.return_type.clone()),
+                                required_params: param_types.len(),
+                            };
+                        }
+                        self.env
+                            .error(&expr.span, format!("Unknown method: {} on int", field));
+                        Type::Unknown
+                    }
+                    Type::Float => {
+                        if let Some(impl_method) = self.env.lookup_method("float", field) {
+                            let param_types: Vec<Type> = impl_method
+                                .params
+                                .iter()
+                                .map(|(_, ty)| ty.clone())
+                                .collect();
+                            return Type::Function {
+                                params: param_types.clone(),
+                                return_type: Box::new(impl_method.return_type.clone()),
+                                required_params: param_types.len(),
+                            };
+                        }
+                        self.env
+                            .error(&expr.span, format!("Unknown method: {} on float", field));
+                        Type::Unknown
+                    }
                     Type::String => {
                         if let Some(impl_method) = self.env.lookup_method("string", field) {
                             let param_types: Vec<Type> = impl_method
@@ -3423,7 +3457,21 @@ impl TypeChecker {
                         Type::Unknown
                     }
                     Type::Array(inner) => {
-                        // Check impl methods for array
+                        // Check impl methods for specific array type like [int] or [string]
+                        let specific_type_name = format!("[{}]", inner.display_name());
+                        if let Some(impl_method) = self.env.lookup_method(&specific_type_name, field) {
+                            let param_types: Vec<Type> = impl_method
+                                .params
+                                .iter()
+                                .map(|(_, ty)| ty.clone())
+                                .collect();
+                            return Type::Function {
+                                params: param_types.clone(),
+                                return_type: Box::new(impl_method.return_type.clone()),
+                                required_params: param_types.len(),
+                            };
+                        }
+                        // Fall back to generic array impl methods
                         if let Some(impl_method) = self.env.lookup_method("array", field) {
                             let param_types: Vec<Type> = impl_method
                                 .params

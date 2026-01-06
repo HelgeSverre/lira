@@ -1,5 +1,5 @@
 // Test String Module
-// Comprehensive tests for std.strings functions
+// Comprehensive tests for std.strings methods
 // @expect-contains: All string tests passed!
 
 import std.strings
@@ -11,12 +11,12 @@ import std.strings
 // @expect-contains: hello world
 
 println("=== Case Conversion ===")
-println(to_upper("Hello World"))
-println(to_lower("Hello World"))
+println("Hello World".to_upper())
+println("Hello World".to_lower())
 
 // Test edge cases
-println(to_upper(""))  // empty string
-println(to_lower("123!@#"))  // non-letters stay unchanged
+println("".to_upper())  // empty string
+println("123!@#".to_lower())  // non-letters stay unchanged
 
 // ============================================================================
 // Test: char_at
@@ -26,9 +26,9 @@ println(to_lower("123!@#"))  // non-letters stay unchanged
 
 println("=== char_at ===")
 let test_str = "Hello"
-println("char_at: " + char_at(test_str, 0))  // H
-println("char_at: " + char_at(test_str, 2))  // l
-println("char_at empty: " + char_at(test_str, 100))  // out of bounds returns empty
+println("char_at: " + test_str.char_at(0))  // H
+println("char_at: " + test_str.char_at(2))  // l
+println("char_at empty: " + test_str.char_at(100))  // out of bounds returns empty
 
 // ============================================================================
 // Test: substring
@@ -37,9 +37,9 @@ println("char_at empty: " + char_at(test_str, 100))  // out of bounds returns em
 // @expect-contains: substring: Hello
 
 println("=== substring ===")
-println("substring: " + substring("Hello World", 1, 4))  // ell
-println("substring: " + substring("Hello World", 0, 5))  // Hello
-println("substring empty: " + substring("Hello", 5, 5))  // empty (equal indices)
+println("substring: " + "Hello World".substring(1, 4))  // ell
+println("substring: " + "Hello World".substring(0, 5))  // Hello
+println("substring empty: " + "Hello".substring(5, 5))  // empty (equal indices)
 
 // ============================================================================
 // Test: index_of / last_index_of
@@ -50,11 +50,11 @@ println("substring empty: " + substring("Hello", 5, 5))  // empty (equal indices
 
 println("=== index_of / last_index_of ===")
 let haystack = "hello hello"
-println("index_of: " + index_of(haystack, "hello"))  // 0
-println("index_of: " + index_of(haystack, "hello"))  // 0 (finds first)
-println("index_of not found: " + index_of(haystack, "world"))  // -1
-println("index_of: " + index_of("hello world", "world"))  // 6
-println("last_index_of: " + last_index_of("hello hello", "llo"))  // 8
+println("index_of: " + haystack.index_of("hello"))  // 0
+println("index_of: " + haystack.index_of("hello"))  // 0 (finds first)
+println("index_of not found: " + haystack.index_of("world"))  // -1
+println("index_of: " + "hello world".index_of("world"))  // 6
+println("last_index_of: " + "hello hello".last_index_of("llo"))  // 8
 
 // ============================================================================
 // Test: contains / starts_with / ends_with
@@ -65,12 +65,12 @@ println("last_index_of: " + last_index_of("hello hello", "llo"))  // 8
 
 println("=== contains / starts_with / ends_with ===")
 let test = "Hello World"
-println("contains: " + contains(test, "llo"))
-println("contains false: " + contains(test, "xyz"))
-println("starts_with: " + starts_with(test, "Hello"))
-println("starts_with false: " + starts_with(test, "World"))
-println("ends_with: " + ends_with(test, "World"))
-println("ends_with false: " + ends_with(test, "Hello"))
+println("contains: " + test.contains("llo"))
+println("contains false: " + test.contains("xyz"))
+println("starts_with: " + test.starts_with("Hello"))
+println("starts_with false: " + test.starts_with("World"))
+println("ends_with: " + test.ends_with("World"))
+println("ends_with false: " + test.ends_with("Hello"))
 
 // ============================================================================
 // Test: trim / trim_start / trim_end
@@ -81,10 +81,10 @@ println("ends_with false: " + ends_with(test, "Hello"))
 
 println("=== trim ===")
 let spaced = "   hello   "
-println("trim: [" + trim(spaced) + "]")
-println("trim_start: [" + trim_start(spaced) + "]")
-println("trim_end: [" + trim_end(spaced) + "]")
-println("trim empty: [" + trim("   ") + "]")
+println("trim: [" + spaced.trim() + "]")
+println("trim_start: [" + spaced.trim_start() + "]")
+println("trim_end: [" + spaced.trim_end() + "]")
+println("trim empty: [" + "   ".trim() + "]")
 
 // ============================================================================
 // Test: split / join
@@ -94,7 +94,7 @@ println("trim empty: [" + trim("   ") + "]")
 
 println("=== split / join ===")
 let csv = "apple,banana,cherry"
-let parts = split(csv, ",")
+let parts = csv.split(",")
 println("split count: " + len(parts))
 println("split[0]: " + parts[0])
 println("split[1]: " + parts[1])
@@ -113,9 +113,9 @@ println("join: " + joined)
 
 println("=== replace ===")
 let original = "hello hello hello"
-println("replace: " + replace(original, "hello", "hi"))
-println("replace_first: " + replace_first(original, "hello", "hi"))
-println("replace not found: " + replace("abc", "x", "y"))
+println("replace: " + original.replace("hello", "hi"))
+println("replace_first: " + original.replace_first("hello", "hi"))
+println("replace not found: " + "abc".replace("x", "y"))
 
 // ============================================================================
 // Test: repeat
@@ -123,9 +123,9 @@ println("replace not found: " + replace("abc", "x", "y"))
 // @expect-contains: repeat: hahaha
 
 println("=== repeat ===")
-println("repeat: " + repeat("ha", 3))
-println("repeat zero: [" + repeat("x", 0) + "]")
-println("repeat negative: [" + repeat("x", -1) + "]")
+println("repeat: " + "ha".repeat(3))
+println("repeat zero: [" + "x".repeat(0) + "]")
+println("repeat negative: [" + "x".repeat(-1) + "]")
 
 // ============================================================================
 // Test: reverse
@@ -133,9 +133,9 @@ println("repeat negative: [" + repeat("x", -1) + "]")
 // @expect-contains: reverse: olleH
 
 println("=== reverse ===")
-println("reverse: " + reverse("Hello"))
-println("reverse empty: [" + reverse("") + "]")
-println("reverse single: " + reverse("x"))
+println("reverse: " + "Hello".reverse())
+println("reverse empty: [" + "".reverse() + "]")
+println("reverse single: " + "x".reverse())
 
 // ============================================================================
 // Test: pad_start / pad_end
@@ -144,10 +144,10 @@ println("reverse single: " + reverse("x"))
 // @expect-contains: pad_end: hello..
 
 println("=== pad_start / pad_end ===")
-println("pad_start: " + pad_start("42", 5, "0"))
-println("pad_end: " + pad_end("hello", 7, "."))
-println("pad_start no change: " + pad_start("hello", 3, "x"))
-println("pad_end multi: " + pad_end("x", 5, "ab"))
+println("pad_start: " + "42".pad_start(5, "0"))
+println("pad_end: " + "hello".pad_end(7, "."))
+println("pad_start no change: " + "hello".pad_start(3, "x"))
+println("pad_end multi: " + "x".pad_end(5, "ab"))
 
 // ============================================================================
 // Test: is_empty / is_blank
@@ -156,11 +156,11 @@ println("pad_end multi: " + pad_end("x", 5, "ab"))
 // @expect-contains: is_blank space: true
 
 println("=== is_empty / is_blank ===")
-println("is_empty true: " + is_empty(""))
-println("is_empty false: " + is_empty("x"))
-println("is_blank empty: " + is_blank(""))
-println("is_blank space: " + is_blank("   "))
-println("is_blank text: " + is_blank("  x  "))
+println("is_empty true: " + "".is_empty())
+println("is_empty false: " + "x".is_empty())
+println("is_blank empty: " + "".is_blank())
+println("is_blank space: " + "   ".is_blank())
+println("is_blank text: " + "  x  ".is_blank())
 
 // ============================================================================
 // Test: is_numeric / is_alpha / is_alphanumeric
@@ -170,12 +170,12 @@ println("is_blank text: " + is_blank("  x  "))
 // @expect-contains: is_alphanumeric: true
 
 println("=== is_numeric / is_alpha / is_alphanumeric ===")
-println("is_numeric: " + is_numeric("12345"))
-println("is_numeric false: " + is_numeric("12a45"))
-println("is_alpha: " + is_alpha("Hello"))
-println("is_alpha false: " + is_alpha("Hello1"))
-println("is_alphanumeric: " + is_alphanumeric("Hello123"))
-println("is_alphanumeric false: " + is_alphanumeric("Hello!"))
+println("is_numeric: " + "12345".is_numeric())
+println("is_numeric false: " + "12a45".is_numeric())
+println("is_alpha: " + "Hello".is_alpha())
+println("is_alpha false: " + "Hello1".is_alpha())
+println("is_alphanumeric: " + "Hello123".is_alphanumeric())
+println("is_alphanumeric false: " + "Hello!".is_alphanumeric())
 
 // ============================================================================
 // Test: capitalize / title_case
@@ -184,9 +184,9 @@ println("is_alphanumeric false: " + is_alphanumeric("Hello!"))
 // @expect-contains: title_case: Hello World
 
 println("=== capitalize / title_case ===")
-println("capitalize: " + capitalize("hello world"))
-println("title_case: " + title_case("hello world"))
-println("capitalize empty: [" + capitalize("") + "]")
+println("capitalize: " + "hello world".capitalize())
+println("title_case: " + "hello world".title_case())
+println("capitalize empty: [" + "".capitalize() + "]")
 
 // ============================================================================
 // Test: count / word_count
@@ -195,11 +195,11 @@ println("capitalize empty: [" + capitalize("") + "]")
 // @expect-contains: word_count: 4
 
 println("=== count / word_count ===")
-println("count: " + count("abcabcabc", "abc"))
-println("count overlap: " + count("aaa", "a"))  // 3
-println("word_count: " + word_count("the quick brown fox"))
-println("word_count empty: " + word_count(""))
-println("word_count spaces: " + word_count("   "))
+println("count: " + "abcabcabc".count("abc"))
+println("count overlap: " + "aaa".count("a"))  // 3
+println("word_count: " + "the quick brown fox".word_count())
+println("word_count empty: " + "".word_count())
+println("word_count spaces: " + "   ".word_count())
 
 // ============================================================================
 // Test: char_code / from_char_code
@@ -208,8 +208,8 @@ println("word_count spaces: " + word_count("   "))
 // @expect-contains: from_char_code: A
 
 println("=== char_code / from_char_code ===")
-println("char_code A: " + char_code("ABC", 0))  // 65
-println("char_code a: " + char_code("abc", 0))  // 97
+println("char_code A: " + "ABC".char_code(0))  // 65
+println("char_code a: " + "abc".char_code(0))  // 97
 println("from_char_code: " + from_char_code(65))  // A
 println("from_char_code space: [" + from_char_code(32) + "]")
 
@@ -220,12 +220,12 @@ println("from_char_code space: [" + from_char_code(32) + "]")
 
 println("=== Edge Cases ===")
 // Empty strings
-println("empty trim: [" + trim("") + "]")
-println("empty split: " + len(split("", ",")))
+println("empty trim: [" + "".trim() + "]")
+println("empty split: " + len("".split(",")))
 
 // Single characters
-println("single char upper: " + to_upper("a"))
-println("single char reverse: " + reverse("x"))
+println("single char upper: " + "a".to_upper())
+println("single char reverse: " + "x".reverse())
 
 // Special characters
 let special = "Hello\tWorld\n"

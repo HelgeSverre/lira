@@ -1,0 +1,20 @@
+[package]
+name = "lira-spec"
+version = "0.1.0"
+edition = "2021"
+description = "Lira language specification validation and conformance testing"
+license = "MIT"
+
+[[bin]]
+name = "lira-spec"
+path = "src/main.rs"
+
+[dependencies]
+lirac = { path = "../lirac" }
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+
+[dev-dependencies]
+pretty_assertions = "1"

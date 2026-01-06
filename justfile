@@ -13,10 +13,10 @@ default:
 build:
     cargo build --package lira --package lirac --package liravm
 
-# Build all packages (CLI, compiler, VM, LSP, doc generator, playground)
+# Build all packages (CLI, compiler, VM, LSP, doc generator, spec, playground)
 [group('build')]
 build-all:
-    cargo build --package lira --package lirac --package liravm --package lira-lsp --package lira-doc --package lira-playground
+    cargo build --package lira --package lirac --package liravm --package lira-lsp --package lira-doc --package lira-spec --package lira-playground
 
 # Build in release mode
 [group('build')]
@@ -26,7 +26,7 @@ release:
 # Build all in release mode
 [group('build')]
 release-all:
-    cargo build --package lira --package lirac --package liravm --package lira-lsp --package lira-doc --package lira-playground --release
+    cargo build --package lira --package lirac --package liravm --package lira-lsp --package lira-doc --package lira-spec --package lira-playground --release
 
 # Clean build artifacts
 [group('build')]
@@ -51,13 +51,13 @@ run file:
 # Run all tests
 [group('dev')]
 test:
-    cargo test --package lirac --package liravm --package lira-core --package lira-playground
+    cargo test --package lirac --package liravm --package lira-core --package lira-spec --package lira-playground
     cargo test --package lirac --test integration
 
 # Run all tests with output
 [group('dev')]
 test-verbose:
-    cargo test --package lirac --package liravm --package lira-core --package lira-playground -- --nocapture
+    cargo test --package lirac --package liravm --package lira-core --package lira-spec --package lira-playground -- --nocapture
     cargo test --package lirac --test integration -- --nocapture
 
 # Type check without building
@@ -119,6 +119,35 @@ doc-stdlib:
     cargo run --package lira-doc -- generate stdlib/ --mdbook --title "Lira Standard Library" -o docs/stdlib-book/
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Specification
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Validate implementation against formal specification
+[group('spec')]
+spec-validate:
+    cargo run --package lira-spec -- validate docs/FORMAL_SPECIFICATION.md
+
+# Compare EBNF spec with tree-sitter grammar
+[group('spec')]
+spec-compare:
+    cargo run --package lira-spec -- compare docs/FORMAL_SPECIFICATION.md editors/tree-sitter-lira/grammar.js
+
+# Run specification conformance tests
+[group('spec')]
+spec-test:
+    cargo test --package lira-spec
+
+# Run specification conformance tests with output
+[group('spec')]
+spec-test-verbose:
+    cargo test --package lira-spec -- --nocapture
+
+# Check spec crate compiles
+[group('spec')]
+spec-check:
+    cargo check --package lira-spec
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Playground - Web playground commands
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -177,32 +206,7 @@ playground-frontend-build:
 playground-frontend-dev:
     cd lira-playground/frontend && pnpm dev
 
-# Run playground in development mode (hot-reload, React DevTools, sourcemaps)
-[group('playground')]
-playground-dev port="3001":
-    #!/usr/bin/env bash
-    set -e
-
-    # Trap to kill both processes on exit
-    trap 'kill $(jobs -p) 2>/dev/null' EXIT
-
-    echo "Starting Lira Playground (dev mode)..."
-    echo ""
-    echo "  Frontend: http://localhost:5173 (with hot-reload)"
-    echo "  Backend:  http://localhost:{{ port }} (API only)"
-    echo ""
-    echo "Open http://localhost:5173 in your browser"
-    echo "Press Ctrl+C to stop both servers"
-    echo ""
-
-    # Build and start backend in background
-    cargo build --package lira-playground --release
-    PORT={{ port }} ./target/release/lira-playground &
-
-    # Start frontend dev server (this blocks)
-    cd lira-playground/frontend && pnpm install --silent && VITE_API_URL=http://localhost:{{ port }} pnpm dev
-
-# Build and serve playground (production preview)
+# Run complete playground (backend + frontend)
 [group('playground')]
 playground port="3001":
     #!/usr/bin/env bash
@@ -237,6 +241,7 @@ install: release-all
     cp target/release/liravm ~/.local/bin/
     cp target/release/lira-lsp ~/.local/bin/
     cp target/release/lira-doc ~/.local/bin/
+    cp target/release/lira-spec ~/.local/bin/
     cp target/release/lira-playground ~/.local/bin/
 
 # Install Vim/Neovim syntax highlighting

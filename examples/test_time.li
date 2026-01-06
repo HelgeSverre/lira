@@ -11,11 +11,11 @@ import std.time
 
 println("=== Time Module Tests ===")
 
-// Test time_ms
+// Test time_ms (builtin)
 let ms = time_ms()
 println("time_ms > 0: " + (ms > 0))
 
-// Test time_secs
+// Test time_secs (builtin)
 let secs = time_secs()
 println("time_secs > 0: " + (secs > 0))
 
@@ -31,27 +31,28 @@ println("time_nanos > 0: " + (nanos > 0))
 let ms2 = time_ms()
 println("time advancing: " + (ms2 >= ms))
 
-// Test format ISO
+// Test format ISO (builtin)
 let iso = time_format_iso(ms)
 println("ISO format: " + iso)
 if len(iso) > 10 {
     println("format test passed")
 }
 
-// Test custom format
+// Test custom format (builtin)
 let formatted = time_format(ms, "%Y-%m-%d")
 println("Date format: " + formatted)
 
-// Test duration helpers
-let one_hour = hours(1)
-let one_minute = minutes(1)
-let one_second = seconds(1)
-let one_day = days(1)
+// Test duration helpers (methods on int)
+let n = 1
+let one_hour = n.hours()
+let one_minute = n.minutes()
+let one_second = n.seconds()
+let one_day = n.days()
 if one_hour == 3600000 && one_minute == 60000 && one_second == 1000 && one_day == 86400000 {
     println("duration test passed")
 }
 
-// Test time_components
+// Test time_components (builtin)
 let comp = time_components(ms)
 println("Year: " + comp[0])
 println("Month: " + comp[1])
@@ -63,7 +64,7 @@ if comp[0] > 2000 && comp[1] >= 1 && comp[1] <= 12 {
     println("components test passed")
 }
 
-// Test time_from_components (create a known timestamp)
+// Test time_from_components (builtin)
 // January 1, 2024 00:00:00 UTC
 let ts_2024 = time_from_components(2024, 1, 1, 0, 0, 0)
 println("Timestamp 2024-01-01: " + ts_2024)
@@ -81,7 +82,7 @@ if parsed > 0 {
 }
 
 // Test timezone offset (just verify it returns a number)
-let tz_offset = time_timezone_offset()
+let tz_offset = timezone_offset()
 println("Timezone offset (min): " + tz_offset)
 
 // Test helper functions
@@ -89,21 +90,36 @@ println("Today: " + today())
 println("Now time: " + now_time())
 println("Now ISO: " + now_iso())
 
-// Test elapsed time
-let start = time_ms()
+// Test Timestamp struct with constructor functions
+let now = timestamp_now()
+println("timestamp_now ms: " + now.ms)
+
+// Test Timestamp methods
+let ts = timestamp_from_ms(ms)
+println("format_date: " + ts.format_date())
+println("format_time: " + ts.format_time())
+println("format_datetime: " + ts.format_datetime())
+
+// Test elapsed time via Timestamp
+let start_ts = timestamp_now()
 sleep(50)
-let elapsed = elapsed_ms(start)
+let elapsed = start_ts.elapsed()
 println("Elapsed after sleep(50): " + elapsed + "ms")
 
-// Test is_past/is_future
-let past_ts = time_ms() - days(1)
-let future_ts = time_ms() + days(1)
-println("is_past(yesterday): " + is_past(past_ts))
-println("is_future(tomorrow): " + is_future(future_ts))
+// Test is_past/is_future via Timestamp
+let one_day_ms = n.days()
+let past_ts = timestamp_from_ms(time_ms() - one_day_ms)
+let future_ts = timestamp_from_ms(time_ms() + one_day_ms)
+println("is_past(yesterday): " + past_ts.is_past())
+println("is_future(tomorrow): " + future_ts.is_future())
 
-// Test date formatting functions
-println("format_date: " + format_date(ms))
-println("format_time: " + format_time(ms))
-println("format_datetime: " + format_datetime(ms))
+// Test Timestamp arithmetic
+let tomorrow = now.add(one_day_ms)
+println("Tomorrow: " + tomorrow.format_date())
+
+// Test Timestamp component methods
+println("Year: " + ts.year())
+println("Month: " + ts.month())
+println("Day: " + ts.day())
 
 println("=== All Time Tests Completed ===")
