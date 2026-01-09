@@ -1,8 +1,8 @@
 # Lira Implementation Roadmap
 
-**Version**: 3.0
-**Last Updated**: 2025-12-30
-**Status**: Phase 7 In Progress - Advanced Features
+**Version**: 3.1
+**Last Updated**: 2026-01-09
+**Status**: Phase 8 In Progress - Developer Tooling
 
 ---
 
@@ -25,8 +25,8 @@ This roadmap tracks the implementation of Lira, a modern systems programming lan
 5. [Phase 4: VM Core](#phase-4-vm-core) - COMPLETE
 6. [Phase 5: Fiber Runtime](#phase-5-fiber-runtime) - COMPLETE
 7. [Phase 6: Standard Library](#phase-6-standard-library) - COMPLETE
-8. [Phase 7: Advanced Features](#phase-7-advanced-features) - IN PROGRESS
-9. [Phase 8: Developer Tooling](#phase-8-developer-tooling) - IN PROGRESS
+8. [Phase 7: Advanced Features](#phase-7-advanced-features) - COMPLETE
+9. [Phase 8: Developer Tooling](#phase-8-developer-tooling) - IN PROGRESS (LSP: 19/20 features)
 10. [Phase 9: Developer Experience & Debugging](#phase-9-developer-experience--debugging) - PLANNED
 11. [Phase 10: Performance & Profiling](#phase-10-performance--profiling) - PLANNED
 12. [Phase 11: Package Ecosystem](#phase-11-package-ecosystem) - PLANNED
@@ -265,7 +265,7 @@ This roadmap tracks the implementation of Lira, a modern systems programming lan
 
 **Goal**: Complete remaining language features.
 **Depends On**: Phase 6
-**Status**: IN PROGRESS (19 tasks complete, 5 pending)
+**Status**: COMPLETE
 
 | ID    | Task                        | Description                                         | Status                   |
 | ----- | --------------------------- | --------------------------------------------------- | ------------------------ |
@@ -461,16 +461,19 @@ just fmt
 
 ## Statistics
 
-| Metric         | Count   |
-| -------------- | ------- |
-| Total tasks    | ~190    |
-| Completed      | ~74     |
-| In Progress    | ~4      |
-| Pending        | ~112    |
-| Compiler LOC   | ~15,900 |
-| VM LOC         | ~5,600  |
-| Core LOC       | ~350    |
-| Stdlib modules | 21      |
+| Metric           | Count   |
+| ---------------- | ------- |
+| Total tasks      | ~193    |
+| Completed        | ~82     |
+| In Progress      | ~2      |
+| Pending          | ~109    |
+| Compiler LOC     | ~15,900 |
+| VM LOC           | ~5,600  |
+| Core LOC         | ~350    |
+| LSP LOC          | ~2,800  |
+| Stdlib modules   | 21      |
+| LSP features     | 12      |
+| Editor plugins   | 6       |
 | Example files  | 86      |
 | Major Phases   | 22      |
 
@@ -524,11 +527,14 @@ _This roadmap tracks the development of Lira as a standalone systems programming
 | T8.11 | Find references  | Find all references to a symbol             | [x]    |
 | T8.12 | Document symbols | Outline view for files                      | [x]    |
 | T8.13 | Semantic tokens  | Enhanced syntax highlighting                | [x]    |
-| T8.23 | Inlay hints      | Show inferred types inline in editor        | [ ]    |
-| T8.24 | Code actions     | Quick fixes and refactoring suggestions     | [ ]    |
-| T8.25 | Rename refactor  | Rename symbols across files                 | [ ]    |
-| T8.26 | Call hierarchy   | Show callers and callees of functions       | [ ]    |
-| T8.27 | Signature help   | Parameter hints while typing function calls | [ ]    |
+| T8.23 | Inlay hints      | Show inferred types inline in editor        | [x]    |
+| T8.24 | Code actions     | Quick fixes and refactoring suggestions     | [x]    |
+| T8.25 | Rename refactor  | Rename symbols across files                 | [x]    |
+| T8.26 | Call hierarchy   | Show callers and callees of functions       | [x]    |
+| T8.27 | Signature help   | Parameter hints while typing function calls | [x]    |
+| T8.35 | Folding ranges   | Code folding for functions, blocks, imports | [x]    |
+| T8.36 | Document links   | Clickable import paths to navigate to files | [x]    |
+| T8.37 | User completions | Complete user-defined symbols (fn, struct)  | [x]    |
 
 ### 8.3 Editor Extensions
 

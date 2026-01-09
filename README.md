@@ -99,6 +99,22 @@ liravm --version           # Show version
 lira-lsp                   # Start LSP server (stdio)
 ```
 
+**LSP Features:**
+- Diagnostics (syntax and type errors)
+- Completion (keywords, builtins, user symbols)
+- Hover (type info and documentation)
+- Go to definition
+- Find references
+- Document symbols (outline)
+- Semantic highlighting
+- Signature help (parameter hints)
+- Folding ranges
+- Document links (clickable imports)
+- Inlay hints (inline type annotations)
+- Rename symbol
+- Call hierarchy (callers/callees)
+- Code actions (quick fixes, refactoring)
+
 **lira-doc** — The Lira documentation generator
 
 ```bash
@@ -108,14 +124,14 @@ lira-doc stdlib/           # Generate docs for a directory
 
 ## Editor Support
 
-| Editor   | Extension                              | Features              |
-| -------- | -------------------------------------- | --------------------- |
-| VS Code  | [vscode-lira](editors/vscode-lira)     | Syntax, LSP, snippets |
-| Zed      | [zed-lira](editors/zed-lira)           | Syntax, tree-sitter   |
-| Neovim   | [vim-lira](editors/vim-lira)           | Syntax, LSP config    |
-| Vim      | [vim-lira](editors/vim-lira)           | Syntax highlighting   |
-| Helix    | [helix-lira](editors/helix-lira)       | Syntax, LSP config    |
-| IntelliJ | [intellij-lira](editors/intellij-lira) | Syntax (TextMate)     |
+| Editor   | Extension                              | Syntax | LSP | Tree-sitter |
+| -------- | -------------------------------------- | :----: | :-: | :---------: |
+| VS Code  | [vscode-lira](editors/vscode-lira)     | ✓      | ✓   | —           |
+| Zed      | [zed-lira](editors/zed-lira)           | ✓      | ✓   | ✓           |
+| Neovim   | [vim-lira](editors/vim-lira)           | ✓      | ✓   | ✓           |
+| Helix    | [helix-lira](editors/helix-lira)       | ✓      | ✓   | ✓           |
+| Vim      | [vim-lira](editors/vim-lira)           | ✓      | —   | —           |
+| IntelliJ | [intellij-lira](editors/intellij-lira) | ✓      | —   | —           |
 
 Install with `just <editor>-install` (e.g., `just nvim-install`).
 
@@ -192,19 +208,22 @@ import std.fs.{read_file, write_file}
 
 ## Status
 
-**Current Phase**: Developer Tooling
+**Current Phase**: Developer Tooling (Phase 8)
 
-| Component               | Status                |
-| ----------------------- | --------------------- |
-| Lexer & Parser          | Complete              |
-| Type System             | Complete              |
-| Bytecode Compiler       | Complete              |
-| VM Core                 | Complete              |
-| Fiber Runtime           | Complete              |
-| Standard Library        | Complete (20 modules) |
-| Language Server         | Complete              |
-| Documentation Generator | Complete              |
-| Editor Extensions       | Complete              |
+| Component               | Status                          |
+| ----------------------- | ------------------------------- |
+| Lexer & Parser          | Complete                        |
+| Type System             | Complete                        |
+| Bytecode Compiler       | Complete                        |
+| VM Core                 | Complete                        |
+| Fiber Runtime           | Complete                        |
+| Standard Library        | Complete (21 modules)           |
+| Language Server         | Complete (14 features)          |
+| Documentation Generator | Complete                        |
+| Editor Extensions       | Complete (6 editors)            |
+| Code Formatter          | Planned                         |
+| REPL                    | Planned                         |
+| Debugger                | Planned                         |
 
 ## Contributing
 
