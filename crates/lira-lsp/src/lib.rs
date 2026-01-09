@@ -2,15 +2,29 @@
 //!
 //! Implements the Language Server Protocol for Lira, providing:
 //! - Diagnostics (syntax and type errors)
-//! - Completion (keywords, built-ins, snippets)
-//! - Future: hover, go-to-definition, etc.
+//! - Completion (keywords, built-ins, snippets, user symbols)
+//! - Hover (type info and documentation)
+//! - Go-to-definition, find references
+//! - Signature help (parameter hints)
+//! - Folding ranges (code folding)
+//! - Document links (clickable imports)
+//! - Call hierarchy (incoming/outgoing calls)
+//! - Code actions (quick fixes, refactoring)
 
+mod call_hierarchy;
+mod code_actions;
 mod completion;
+mod utils;
 mod definition;
 mod diagnostics;
+mod document_links;
+mod folding;
 mod hover;
+mod inlay_hints;
 mod references;
+mod rename;
 mod semantic_tokens;
+mod signature_help;
 mod symbols;
 
 use dashmap::DashMap;
@@ -94,6 +108,40 @@ impl LanguageServer for LiraLanguageServer {
                         },
                     ),
                 ),
+                // Signature help (parameter hints)
+                signature_help_provider: Some(SignatureHelpOptions {
+                    trigger_characters: Some(vec!["(".to_string(), ",".to_string()]),
+                    retrigger_characters: Some(vec![")".to_string()]),
+                    ..Default::default()
+                }),
+                // Folding ranges (code folding)
+                folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
+                // Document links (clickable imports)
+                document_link_provider: Some(DocumentLinkOptions {
+                    resolve_provider: Some(false),
+                    work_done_progress_options: Default::default(),
+                }),
+                // Inlay hints (inline type annotations)
+                inlay_hint_provider: Some(OneOf::Left(true)),
+                // Rename support
+                rename_provider: Some(OneOf::Right(RenameOptions {
+                    prepare_provider: Some(true),
+                    work_done_progress_options: Default::default(),
+                })),
+                // Call hierarchy (callers/callees)
+                call_hierarchy_provider: Some(CallHierarchyServerCapability::Simple(true)),
+                // Code actions (quick fixes, refactoring)
+                code_action_provider: Some(CodeActionProviderCapability::Options(
+                    CodeActionOptions {
+                        code_action_kinds: Some(vec![
+                            CodeActionKind::REFACTOR,
+                            CodeActionKind::REFACTOR_EXTRACT,
+                            CodeActionKind::REFACTOR_REWRITE,
+                            CodeActionKind::SOURCE_ORGANIZE_IMPORTS,
+                        ]),
+                        ..Default::default()
+                    },
+                )),
                 ..Default::default()
             },
             server_info: Some(ServerInfo {
@@ -244,5 +292,170 @@ impl LanguageServer for LiraLanguageServer {
 
         let tokens = semantic_tokens::get_semantic_tokens(&content);
         Ok(Some(SemanticTokensResult::Tokens(tokens)))
+    }
+
+    async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        let content = match self.documents.get(&uri) {
+            Some(doc) => doc.content.to_string(),
+            None => return Ok(None),
+        };
+
+        Ok(signature_help::get_signature_help(&content, position))
+    }
+
+    async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
+        let uri = params.text_document.uri;
+
+        let content = match self.documents.get(&uri) {
+            Some(doc) => doc.content.to_string(),
+            None => return Ok(None),
+        };
+
+        let ranges = folding::get_folding_ranges(&content);
+        if ranges.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(ranges))
+        }
+    }
+
+    async fn document_link(&self, params: DocumentLinkParams) -> Result<Option<Vec<DocumentLink>>> {
+        let uri = params.text_document.uri;
+
+        let content = match self.documents.get(&uri) {
+            Some(doc) => doc.content.to_string(),
+            None => return Ok(None),
+        };
+
+        let links = document_links::get_document_links(&uri, &content);
+        if links.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(links))
+        }
+    }
+
+    async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
+        let uri = params.text_document.uri;
+        let range = params.range;
+
+        let content = match self.documents.get(&uri) {
+            Some(doc) => doc.content.to_string(),
+            None => return Ok(None),
+        };
+
+        let hints = inlay_hints::get_inlay_hints(&content, range);
+        if hints.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(hints))
+        }
+    }
+
+    async fn prepare_rename(
+        &self,
+        params: TextDocumentPositionParams,
+    ) -> Result<Option<PrepareRenameResponse>> {
+        let uri = params.text_document.uri;
+        let position = params.position;
+
+        let content = match self.documents.get(&uri) {
+            Some(doc) => doc.content.to_string(),
+            None => return Ok(None),
+        };
+
+        Ok(rename::prepare_rename(&content, position))
+    }
+
+    async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+        let new_name = params.new_name;
+
+        let content = match self.documents.get(&uri) {
+            Some(doc) => doc.content.to_string(),
+            None => return Ok(None),
+        };
+
+        Ok(rename::rename(&uri, &content, position, &new_name))
+    }
+
+    async fn prepare_call_hierarchy(
+        &self,
+        params: CallHierarchyPrepareParams,
+    ) -> Result<Option<Vec<CallHierarchyItem>>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        let content = match self.documents.get(&uri) {
+            Some(doc) => doc.content.to_string(),
+            None => return Ok(None),
+        };
+
+        Ok(call_hierarchy::prepare_call_hierarchy(&uri, &content, position))
+    }
+
+    async fn incoming_calls(
+        &self,
+        params: CallHierarchyIncomingCallsParams,
+    ) -> Result<Option<Vec<CallHierarchyIncomingCall>>> {
+        let item = &params.item;
+        let uri = &item.uri;
+
+        let content = match self.documents.get(uri) {
+            Some(doc) => doc.content.to_string(),
+            None => return Ok(None),
+        };
+
+        let calls = call_hierarchy::incoming_calls(uri, &content, item);
+        if calls.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(calls))
+        }
+    }
+
+    async fn outgoing_calls(
+        &self,
+        params: CallHierarchyOutgoingCallsParams,
+    ) -> Result<Option<Vec<CallHierarchyOutgoingCall>>> {
+        let item = &params.item;
+        let uri = &item.uri;
+
+        let content = match self.documents.get(uri) {
+            Some(doc) => doc.content.to_string(),
+            None => return Ok(None),
+        };
+
+        let calls = call_hierarchy::outgoing_calls(uri, &content, item);
+        if calls.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(calls))
+        }
+    }
+
+    async fn code_action(
+        &self,
+        params: CodeActionParams,
+    ) -> Result<Option<CodeActionResponse>> {
+        let uri = params.text_document.uri;
+        let range = params.range;
+        let diagnostics = &params.context.diagnostics;
+
+        let content = match self.documents.get(&uri) {
+            Some(doc) => doc.content.to_string(),
+            None => return Ok(None),
+        };
+
+        let actions = code_actions::get_code_actions(&uri, &content, range, diagnostics);
+        if actions.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(actions))
+        }
     }
 }

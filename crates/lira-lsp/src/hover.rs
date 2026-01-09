@@ -2,6 +2,7 @@
 //!
 //! Provides type information and documentation on hover.
 
+use crate::utils::{self, WordInfo};
 use tower_lsp::lsp_types::*;
 
 /// Get hover information at a position
@@ -17,10 +18,10 @@ pub fn get_hover(content: &str, position: Position) -> Option<Hover> {
     let col = position.character as usize;
 
     // Get the word at the cursor position
-    let word = get_word_at_position(line, col)?;
+    let word_info = utils::get_word_at_position(line, col)?;
 
     // Look up documentation for the word
-    let (markdown, range) = get_word_documentation(word, line, col, position.line)?;
+    let (markdown, range) = get_word_documentation(&word_info, position.line)?;
 
     Some(Hover {
         contents: HoverContents::Markup(MarkupContent {
@@ -31,85 +32,30 @@ pub fn get_hover(content: &str, position: Position) -> Option<Hover> {
     })
 }
 
-fn get_word_at_position(line: &str, col: usize) -> Option<&str> {
-    if col > line.len() {
-        return None;
-    }
-
-    // Find word boundaries
-    let chars: Vec<char> = line.chars().collect();
-
-    if col >= chars.len() {
-        return None;
-    }
-
-    // Check if we're on a word character
-    if !chars[col].is_alphanumeric() && chars[col] != '_' {
-        return None;
-    }
-
-    // Find start of word
-    let mut start = col;
-    while start > 0 && (chars[start - 1].is_alphanumeric() || chars[start - 1] == '_') {
-        start -= 1;
-    }
-
-    // Find end of word
-    let mut end = col;
-    while end < chars.len() && (chars[end].is_alphanumeric() || chars[end] == '_') {
-        end += 1;
-    }
-
-    if start == end {
-        return None;
-    }
-
-    let byte_start: usize = chars[..start].iter().map(|c| c.len_utf8()).sum();
-    let byte_end: usize = chars[..end].iter().map(|c| c.len_utf8()).sum();
-
-    Some(&line[byte_start..byte_end])
-}
-
-fn get_word_documentation(
-    word: &str,
-    line: &str,
-    col: usize,
-    line_num: u32,
-) -> Option<(String, Range)> {
-    // Calculate the range for the word
-    let chars: Vec<char> = line.chars().collect();
-    let mut start = col;
-    while start > 0 && (chars[start - 1].is_alphanumeric() || chars[start - 1] == '_') {
-        start -= 1;
-    }
-    let mut end = col;
-    while end < chars.len() && (chars[end].is_alphanumeric() || chars[end] == '_') {
-        end += 1;
-    }
-
+fn get_word_documentation(word_info: &WordInfo, line_num: u32) -> Option<(String, Range)> {
     let range = Range {
         start: Position {
             line: line_num,
-            character: start as u32,
+            character: word_info.start_col as u32,
         },
         end: Position {
             line: line_num,
-            character: end as u32,
+            character: word_info.end_col as u32,
         },
     };
 
     // Look up keyword documentation
-    if let Some(doc) = keyword_docs(word) {
+    if let Some(doc) = keyword_docs(&word_info.text) {
         return Some((doc, range));
     }
 
     // Look up type documentation
-    if let Some(doc) = type_docs(word) {
+    if let Some(doc) = type_docs(&word_info.text) {
         return Some((doc, range));
     }
 
     // Look up built-in function documentation
-    if let Some(doc) = builtin_docs(word) {
+    if let Some(doc) = builtin_docs(&word_info.text) {
         return Some((doc, range));
     }
 
@@ -212,9 +158,11 @@ mod tests {
 
     #[test]
     fn test_get_word_at_position() {
-        assert_eq!(get_word_at_position("let x = 42", 0), Some("let"));
-        assert_eq!(get_word_at_position("let x = 42", 4), Some("x"));
-        assert_eq!(get_word_at_position("let x = 42", 6), None); // on '='
+        let word = utils::get_word_at_position("let x = 42", 0).unwrap();
+        assert_eq!(word.text, "let");
+        let word = utils::get_word_at_position("let x = 42", 4).unwrap();
+        assert_eq!(word.text, "x");
+        assert!(utils::get_word_at_position("let x = 42", 6).is_none()); // on '='
     }
 
     #[test]
@@ -229,5 +177,13 @@ mod tests {
         assert!(type_docs("int").is_some());
         assert!(type_docs("string").is_some());
         assert!(type_docs("unknown").is_none());
+    }
+
+    #[test]
+    fn test_hover_unicode() {
+        // Test hover works with unicode
+        let content = "let 变量 = 5";
+        let hover = get_hover(content, Position { line: 0, character: 0 });
+        assert!(hover.is_some());
     }
 }

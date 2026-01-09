@@ -1,7 +1,8 @@
 //! Completion support for Lira
 //!
-//! Provides keyword, built-in function, and snippet completions.
+//! Provides keyword, built-in function, snippet, and user-defined symbol completions.
 
+use regex::Regex;
 use tower_lsp::lsp_types::*;
 
 /// Get completions at a position in the document
@@ -49,6 +50,13 @@ pub fn get_completions(content: &str, position: Position) -> Vec<CompletionItem>
     // Add snippet completions
     completions.extend(
         snippet_completions()
+            .into_iter()
+            .filter(|c| matches_prefix(&c.label, prefix)),
+    );
+
+    // Add user-defined symbol completions
+    completions.extend(
+        user_symbol_completions(content)
             .into_iter()
             .filter(|c| matches_prefix(&c.label, prefix)),
     );
@@ -338,6 +346,138 @@ fn snippet_completions() -> Vec<CompletionItem> {
             ..Default::default()
         })
         .collect()
+}
+
+/// Extract user-defined symbols from the document
+fn user_symbol_completions(content: &str) -> Vec<CompletionItem> {
+    let mut completions = Vec::new();
+
+    // Function pattern: fn name( or fn name<
+    let fn_re = Regex::new(r"fn\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*[<(]").unwrap();
+    for caps in fn_re.captures_iter(content) {
+        if let Some(name) = caps.get(1) {
+            let name = name.as_str();
+            // Extract the full signature for detail
+            let detail = extract_function_detail(content, name);
+            completions.push(CompletionItem {
+                label: name.to_string(),
+                kind: Some(CompletionItemKind::FUNCTION),
+                detail,
+                insert_text: Some(format!("{}($0)", name)),
+                insert_text_format: Some(InsertTextFormat::SNIPPET),
+                ..Default::default()
+            });
+        }
+    }
+
+    // Struct pattern: struct Name
+    let struct_re = Regex::new(r"struct\s+([A-Z][a-zA-Z0-9_]*)\s*[<{]").unwrap();
+    for caps in struct_re.captures_iter(content) {
+        if let Some(name) = caps.get(1) {
+            completions.push(CompletionItem {
+                label: name.as_str().to_string(),
+                kind: Some(CompletionItemKind::STRUCT),
+                detail: Some("struct".to_string()),
+                ..Default::default()
+            });
+        }
+    }
+
+    // Class pattern: class Name
+    let class_re = Regex::new(r"class\s+([A-Z][a-zA-Z0-9_]*)\s*[<{]").unwrap();
+    for caps in class_re.captures_iter(content) {
+        if let Some(name) = caps.get(1) {
+            completions.push(CompletionItem {
+                label: name.as_str().to_string(),
+                kind: Some(CompletionItemKind::CLASS),
+                detail: Some("class".to_string()),
+                ..Default::default()
+            });
+        }
+    }
+
+    // Enum pattern: enum Name
+    let enum_re = Regex::new(r"enum\s+([A-Z][a-zA-Z0-9_]*)\s*[<{]").unwrap();
+    for caps in enum_re.captures_iter(content) {
+        if let Some(name) = caps.get(1) {
+            completions.push(CompletionItem {
+                label: name.as_str().to_string(),
+                kind: Some(CompletionItemKind::ENUM),
+                detail: Some("enum".to_string()),
+                ..Default::default()
+            });
+        }
+    }
+
+    // Trait pattern: trait Name
+    let trait_re = Regex::new(r"trait\s+([A-Z][a-zA-Z0-9_]*)\s*[<{]").unwrap();
+    for caps in trait_re.captures_iter(content) {
+        if let Some(name) = caps.get(1) {
+            completions.push(CompletionItem {
+                label: name.as_str().to_string(),
+                kind: Some(CompletionItemKind::INTERFACE),
+                detail: Some("trait".to_string()),
+                ..Default::default()
+            });
+        }
+    }
+
+    // Constant pattern: const NAME
+    let const_re = Regex::new(r"const\s+([A-Z_][A-Z0-9_]*)\s*[=:]").unwrap();
+    for caps in const_re.captures_iter(content) {
+        if let Some(name) = caps.get(1) {
+            completions.push(CompletionItem {
+                label: name.as_str().to_string(),
+                kind: Some(CompletionItemKind::CONSTANT),
+                detail: Some("const".to_string()),
+                ..Default::default()
+            });
+        }
+    }
+
+    // Variable pattern: let/var name (top-level only, simple heuristic)
+    let var_re = Regex::new(r"^(?:let|var)\s+([a-z_][a-zA-Z0-9_]*)\s*[=:]").unwrap();
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+        if let Some(caps) = var_re.captures(trimmed) {
+            if let Some(name) = caps.get(1) {
+                completions.push(CompletionItem {
+                    label: name.as_str().to_string(),
+                    kind: Some(CompletionItemKind::VARIABLE),
+                    detail: Some("variable".to_string()),
+                    ..Default::default()
+                });
+            }
+        }
+    }
+
+    // Deduplicate by label (in case of duplicates)
+    let mut seen = std::collections::HashSet::new();
+    completions.retain(|c| seen.insert(c.label.clone()));
+
+    completions
+}
+
+/// Extract function signature detail
+fn extract_function_detail(content: &str, func_name: &str) -> Option<String> {
+    let pattern = format!(
+        r"fn\s+{}\s*(?:<[^>]*>)?\s*\(([^)]*)\)\s*(?:->\s*([^\s{{]+))?",
+        regex::escape(func_name)
+    );
+    let re = Regex::new(&pattern).ok()?;
+
+    for line in content.lines() {
+        if let Some(caps) = re.captures(line) {
+            let params = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            let ret = caps.get(2).map(|m| m.as_str());
+            return Some(match ret {
+                Some(r) => format!("fn({}) -> {}", params, r),
+                None => format!("fn({})", params),
+            });
+        }
+    }
+
+    None
 }
 
 #[cfg(test)]

@@ -2,7 +2,7 @@
 //!
 //! Finds symbol definitions within the document.
 
-use regex::Regex;
+use crate::utils::{self, get_regex};
 use tower_lsp::lsp_types::*;
 
 /// Find the definition of the symbol at the given position
@@ -18,45 +18,10 @@ pub fn find_definition(uri: &Url, content: &str, position: Position) -> Option<L
     let col = position.character as usize;
 
     // Get the word at the cursor
-    let word = get_word_at_position(line, col)?;
+    let word_info = utils::get_word_at_position(line, col)?;
 
     // Search for the definition
-    find_symbol_definition(uri, content, word)
-}
-
-fn get_word_at_position(line: &str, col: usize) -> Option<&str> {
-    if col > line.len() {
-        return None;
-    }
-
-    let chars: Vec<char> = line.chars().collect();
-
-    if col >= chars.len() {
-        return None;
-    }
-
-    if !chars[col].is_alphanumeric() && chars[col] != '_' {
-        return None;
-    }
-
-    let mut start = col;
-    while start > 0 && (chars[start - 1].is_alphanumeric() || chars[start - 1] == '_') {
-        start -= 1;
-    }
-
-    let mut end = col;
-    while end < chars.len() && (chars[end].is_alphanumeric() || chars[end] == '_') {
-        end += 1;
-    }
-
-    if start == end {
-        return None;
-    }
-
-    let byte_start: usize = chars[..start].iter().map(|c| c.len_utf8()).sum();
-    let byte_end: usize = chars[..end].iter().map(|c| c.len_utf8()).sum();
-
-    Some(&line[byte_start..byte_end])
+    find_symbol_definition(uri, content, &word_info.text)
 }
 
 fn find_symbol_definition(uri: &Url, content: &str, symbol: &str) -> Option<Location> {
@@ -95,27 +60,32 @@ fn find_pattern_in_content(
     pattern: &str,
     symbol: &str,
 ) -> Option<Location> {
-    let re = match Regex::new(pattern) {
-        Ok(r) => r,
-        Err(_) => return None,
-    };
+    let re = get_regex(pattern)?;
 
     for (line_idx, line) in content.lines().enumerate() {
         if let Some(m) = re.find(line) {
+            // Skip if in string or comment
+            if utils::is_in_string_or_comment(line, m.start()) {
+                continue;
+            }
+
             // Find the exact position of the symbol name within the match
             if let Some(symbol_pos) = line[m.start()..].find(symbol) {
                 let char_offset = m.start() + symbol_pos;
+                // Convert byte offset to character offset for UTF-8
+                let char_start = utils::byte_offset_to_char_col(line, char_offset);
+                let char_end = char_start + symbol.chars().count();
 
                 return Some(Location {
                     uri: uri.clone(),
                     range: Range {
                         start: Position {
                             line: line_idx as u32,
-                            character: char_offset as u32,
+                            character: char_start as u32,
                         },
                         end: Position {
                             line: line_idx as u32,
-                            character: (char_offset + symbol.len()) as u32,
+                            character: char_end as u32,
                         },
                     },
                 });
@@ -183,5 +153,36 @@ fn main() {
         assert!(result.is_some());
         let location = result.unwrap();
         assert_eq!(location.range.start.line, 2);
+    }
+
+    #[test]
+    fn test_find_unicode_variable() {
+        let content = r#"
+fn main() {
+    let 变量 = 5
+    println(变量)
+}
+"#;
+        let uri = Url::parse("file:///test.li").unwrap();
+        let result = find_symbol_definition(&uri, content, "变量");
+
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_skip_definition_in_string() {
+        let content = r#"
+fn main() {
+    println("fn foo() { }")
+}
+
+fn foo() {}
+"#;
+        let uri = Url::parse("file:///test.li").unwrap();
+        let result = find_symbol_definition(&uri, content, "foo");
+
+        assert!(result.is_some());
+        // Should find the real definition, not the one in string
+        assert_eq!(result.unwrap().range.start.line, 5);
     }
 }

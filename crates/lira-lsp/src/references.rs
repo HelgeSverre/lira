@@ -2,7 +2,7 @@
 //!
 //! Finds all references to a symbol across the document.
 
-use regex::Regex;
+use crate::utils::{self, get_regex};
 use tower_lsp::lsp_types::*;
 
 /// Find all references to the symbol at the given position
@@ -23,45 +23,13 @@ pub fn find_references(
     let col = position.character as usize;
 
     // Get the word at the cursor
-    let word = match get_word_at_position(line, col) {
+    let word_info = match utils::get_word_at_position(line, col) {
         Some(w) => w,
         None => return vec![],
     };
 
     // Find all occurrences of this word as an identifier
-    find_all_references(uri, content, &word, include_declaration)
-}
-
-fn get_word_at_position(line: &str, col: usize) -> Option<String> {
-    if col > line.len() {
-        return None;
-    }
-
-    let chars: Vec<char> = line.chars().collect();
-
-    if col >= chars.len() {
-        return None;
-    }
-
-    if !chars[col].is_alphanumeric() && chars[col] != '_' {
-        return None;
-    }
-
-    let mut start = col;
-    while start > 0 && (chars[start - 1].is_alphanumeric() || chars[start - 1] == '_') {
-        start -= 1;
-    }
-
-    let mut end = col;
-    while end < chars.len() && (chars[end].is_alphanumeric() || chars[end] == '_') {
-        end += 1;
-    }
-
-    if start == end {
-        return None;
-    }
-
-    Some(chars[start..end].iter().collect())
+    find_all_references(uri, content, &word_info.text, include_declaration)
 }
 
 fn find_all_references(
@@ -74,9 +42,9 @@ fn find_all_references(
 
     // Pattern to match the symbol as a whole word (identifier)
     let pattern = format!(r"\b{}\b", regex::escape(symbol));
-    let re = match Regex::new(&pattern) {
-        Ok(r) => r,
-        Err(_) => return references,
+    let re = match get_regex(&pattern) {
+        Some(r) => r,
+        None => return references,
     };
 
     // Patterns for definitions (to optionally exclude them)
@@ -90,9 +58,9 @@ fn find_all_references(
         format!(r"(?:let|var|const)\s+{}\s*[=:]", regex::escape(symbol)),
     ];
 
-    let def_regexes: Vec<Regex> = def_patterns
+    let def_regexes: Vec<_> = def_patterns
         .iter()
-        .filter_map(|p| Regex::new(p).ok())
+        .filter_map(|p| get_regex(p))
         .collect();
 
     for (line_idx, line) in content.lines().enumerate() {
@@ -107,20 +75,24 @@ fn find_all_references(
         // Find all matches in the line
         for m in re.find_iter(line) {
             // Skip if it's inside a string or comment
-            if is_in_string_or_comment(line, m.start()) {
+            if utils::is_in_string_or_comment(line, m.start()) {
                 continue;
             }
+
+            // Convert byte positions to character positions for UTF-8
+            let char_start = utils::byte_offset_to_char_col(line, m.start());
+            let char_end = utils::byte_offset_to_char_col(line, m.end());
 
             references.push(Location {
                 uri: uri.clone(),
                 range: Range {
                     start: Position {
                         line: line_idx as u32,
-                        character: m.start() as u32,
+                        character: char_start as u32,
                     },
                     end: Position {
                         line: line_idx as u32,
-                        character: m.end() as u32,
+                        character: char_end as u32,
                     },
                 },
             });
@@ -128,28 +100,6 @@ fn find_all_references(
     }
 
     references
-}
-
-fn is_in_string_or_comment(line: &str, pos: usize) -> bool {
-    let before = &line[..pos];
-
-    // Check for line comment
-    if before.contains("//") {
-        return true;
-    }
-
-    // Simple string detection (count unescaped quotes)
-    let mut in_string = false;
-    let mut prev_char = ' ';
-
-    for c in before.chars() {
-        if c == '"' && prev_char != '\\' {
-            in_string = !in_string;
-        }
-        prev_char = c;
-    }
-
-    in_string
 }
 
 #[cfg(test)]
@@ -221,6 +171,52 @@ fn foo() {
         let refs = find_all_references(&uri, content, "foo", true);
 
         // Should find only definition, not the comment
+        assert_eq!(refs.len(), 1);
+    }
+
+    #[test]
+    fn test_unicode_references() {
+        let content = r#"
+fn main() {
+    let 变量 = 5
+    println(变量)
+    let x = 变量 + 1
+}
+"#;
+        let uri = Url::parse("file:///test.li").unwrap();
+        let refs = find_all_references(&uri, content, "变量", true);
+
+        // Should find: definition + 2 usages = 3
+        assert_eq!(refs.len(), 3);
+    }
+
+    #[test]
+    fn test_skip_escaped_string() {
+        let content = r#"
+fn test() {
+    println("escaped \"test\" quote")
+    test()
+}
+"#;
+        let uri = Url::parse("file:///test.li").unwrap();
+        let refs = find_all_references(&uri, content, "test", true);
+
+        // Should find definition and call, but NOT the string content
+        assert_eq!(refs.len(), 2);
+    }
+
+    #[test]
+    fn test_skip_char_literal() {
+        let content = r#"
+fn main() {
+    let c = 'a'
+    let a = 5
+}
+"#;
+        let uri = Url::parse("file:///test.li").unwrap();
+        let refs = find_all_references(&uri, content, "a", true);
+
+        // Should find only the variable 'a', not the char literal
         assert_eq!(refs.len(), 1);
     }
 }
