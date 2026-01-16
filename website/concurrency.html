@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Concurrency - Lira Deep Dive</title>
+    <meta name="description" content="Master Lira's fiber-based concurrency model. Learn spawn, await, channels, and select for writing efficient concurrent programs.">
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="style.css">
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+</head>
+<body>
+    <!-- Constellation background -->
+    <div class="constellation" aria-hidden="true"></div>
+
+    <!-- Navigation -->
+    <nav class="nav">
+        <div class="nav-container">
+            <a href="/" class="nav-logo">
+                <svg class="logo-icon" viewBox="0 0 40 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M4 8C4 4 8 2 12 4L20 8L28 4C32 2 36 4 36 8V36C36 40 32 44 28 44L20 40L12 44C8 44 4 40 4 36V8Z" stroke="currentColor" stroke-width="2.5" fill="none"/>
+                    <line x1="14" y1="12" x2="14" y2="36" stroke="#E8A924" stroke-width="2" stroke-linecap="round"/>
+                    <line x1="20" y1="10" x2="20" y2="38" stroke="#E8A924" stroke-width="2" stroke-linecap="round"/>
+                    <line x1="26" y1="12" x2="26" y2="36" stroke="#E8A924" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <span class="logo-text">Lira</span>
+            </a>
+            <div class="nav-links">
+                <a href="/#features">Features</a>
+                <a href="/#examples">Examples</a>
+                <a href="guide.html">Tour</a>
+                <a href="getting-started.html">Get Started</a>
+                <a href="https://github.com/HelgeSverre/lira" class="nav-github" aria-label="GitHub">
+                    <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
+                        <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+                    </svg>
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Page Header -->
+    <header class="page-header guide-header">
+        <div class="container">
+            <h1 class="page-title">Concurrency</h1>
+            <p class="page-subtitle">Lightweight fibers, channels, and the spawn/await model for writing efficient concurrent programs.</p>
+        </div>
+    </header>
+
+    <!-- Content -->
+    <main class="guide-content">
+        <div class="container">
+            <!-- Table of Contents -->
+            <nav class="guide-toc">
+                <h3>On This Page</h3>
+                <ol>
+                    <li><a href="#fibers">Fibers Overview</a></li>
+                    <li><a href="#spawn">Spawning Fibers</a></li>
+                    <li><a href="#channels">Channels</a></li>
+                    <li><a href="#patterns">Common Patterns</a></li>
+                    <li><a href="#select">Select Statement</a></li>
+                    <li><a href="#best-practices">Best Practices</a></li>
+                </ol>
+            </nav>
+
+            <!-- Sections -->
+            <div class="guide-sections">
+
+                <!-- Section 1: Fibers Overview -->
+                <section id="fibers" class="guide-section">
+                    <div class="section-header">
+                        <span class="section-number">01</span>
+                        <h2>Fibers Overview</h2>
+                    </div>
+                    <div class="section-intro">
+                        <p>Fibers are Lira's lightweight green threads. Unlike OS threads, you can spawn thousands of fibers without significant overhead. The runtime scheduler manages them cooperatively.</p>
+                    </div>
+
+                    <div class="guide-block">
+                        <div class="block-header">
+                            <span class="block-label">Why Fibers?</span>
+                        </div>
+                        <div class="block-explanation">
+                            <p>Traditional threads are heavyweight - each requires its own stack (typically 1-8MB) and involves kernel scheduling. Fibers use much smaller stacks and are scheduled in userspace, making them ideal for I/O-bound workloads like web servers and concurrent task runners.</p>
+                        </div>
+                    </div>
+
+                    <div class="guide-block">
+                        <div class="block-header">
+                            <span class="block-label">Fiber Lifecycle</span>
+                        </div>
+                        <div class="code-box">
+                            <pre class="code-box-content"><code><span class="cm">// A fiber is created with spawn and runs concurrently</span>
+<span class="kw">fn</span> <span class="fn">task</span>(name: <span class="ty">string</span>) {
+    <span class="fn">println</span>(<span class="str">"Starting: "</span> + name)
+    <span class="fn">sleep</span>(<span class="num">100</span>)  <span class="cm">// Fiber yields during sleep</span>
+    <span class="fn">println</span>(<span class="str">"Finished: "</span> + name)
+}
+
+<span class="kw">fn</span> <span class="fn">main</span>() {
+    <span class="cm">// Spawn creates a new fiber</span>
+    <span class="fn">spawn</span> <span class="fn">task</span>(<span class="str">"alpha"</span>)
+    <span class="fn">spawn</span> <span class="fn">task</span>(<span class="str">"beta"</span>)
+
+    <span class="cm">// Main continues immediately</span>
+    <span class="fn">println</span>(<span class="str">"Main fiber continues"</span>)
+
+    <span class="cm">// Give spawned fibers time to complete</span>
+    <span class="fn">sleep</span>(<span class="num">200</span>)
+}
+
+<span class="fn">main</span>()</code></pre>
+                        </div>
+                        <div class="block-explanation">
+                            <p>When you <code>spawn</code> a function call, it runs concurrently with the spawning fiber. The scheduler interleaves execution, switching between fibers at yield points like <code>sleep()</code>, channel operations, or I/O.</p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Section 2: Spawning Fibers -->
+                <section id="spawn" class="guide-section">
+                    <div class="section-header">
+                        <span class="section-number">02</span>
+                        <h2>Spawning Fibers</h2>
+                    </div>
+                    <div class="section-intro">
+                        <p>The <code>spawn</code> keyword starts a function call in a new fiber. It returns immediately, allowing the current fiber to continue.</p>
+                    </div>
+
+                    <div class="guide-block">
+                        <div class="block-header">
+                            <span class="block-label">Basic Spawn</span>
+                        </div>
+                        <div class="code-box">
+                            <pre class="code-box-content"><code><span class="kw">fn</span> <span class="fn">worker</span>(id: <span class="ty">int</span>) {
+    <span class="fn">println</span>(<span class="str">"Worker "</span> + id + <span class="str">" running"</span>)
+}
+
+<span class="kw">fn</span> <span class="fn">main</span>() {
+    <span class="cm">// Spawn multiple workers concurrently</span>
+    <span class="fn">spawn</span> <span class="fn">worker</span>(<span class="num">1</span>)
+    <span class="fn">spawn</span> <span class="fn">worker</span>(<span class="num">2</span>)
+    <span class="fn">spawn</span> <span class="fn">worker</span>(<span class="num">3</span>)
+
+    <span class="fn">println</span>(<span class="str">"All workers spawned"</span>)
+    <span class="fn">sleep</span>(<span class="num">100</span>)
+}
+
+<span class="fn">main</span>()</code></pre>
+                        </div>
+                    </div>
+
+                    <div class="guide-block">
+                        <div class="block-header">
+                            <span class="block-label">Spawning with Return Values</span>
+                        </div>
+                        <div class="code-box">
+                            <pre class="code-box-content"><code><span class="kw">fn</span> <span class="fn">compute</span>(n: <span class="ty">int</span>) -> <span class="ty">int</span> {
+    <span class="fn">sleep</span>(<span class="num">50</span>)
+    <span class="kw">return</span> n * n
+}
+
+<span class="kw">fn</span> <span class="fn">main</span>() {
+    <span class="cm">// Spawn returns immediately, computation runs in background</span>
+    <span class="fn">spawn</span> <span class="fn">compute</span>(<span class="num">10</span>)
+    <span class="fn">spawn</span> <span class="fn">compute</span>(<span class="num">20</span>)
+
+    <span class="fn">println</span>(<span class="str">"Computations started"</span>)
+    <span class="fn">sleep</span>(<span class="num">100</span>)
+}
+
+<span class="fn">main</span>()</code></pre>
+                        </div>
+                        <div class="block-explanation">
+                            <p>To collect return values from spawned fibers, use channels to communicate results back to the main fiber (covered in the next section).</p>
+                        </div>
+                    </div>
+
+                    <div class="guide-block">
+                        <div class="block-header">
+                            <span class="block-label">Spawning Many Fibers</span>
+                        </div>
+                        <div class="code-box">
+                            <pre class="code-box-content"><code><span class="kw">fn</span> <span class="fn">process_item</span>(id: <span class="ty">int</span>) {
+    <span class="fn">println</span>(<span class="str">"Processing item "</span> + id)
+    <span class="fn">sleep</span>(<span class="num">10</span>)
+}
+
+<span class="kw">fn</span> <span class="fn">main</span>() {
+    <span class="kw">let</span> items = [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>, <span class="num">4</span>, <span class="num">5</span>, <span class="num">6</span>, <span class="num">7</span>, <span class="num">8</span>, <span class="num">9</span>, <span class="num">10</span>]
+
+    <span class="cm">// Spawn a fiber for each item</span>
+    <span class="kw">for</span> id <span class="kw">in</span> items {
+        <span class="fn">spawn</span> <span class="fn">process_item</span>(id)
+    }
+
+    <span class="fn">println</span>(<span class="str">"Spawned "</span> + <span class="fn">len</span>(items) + <span class="str">" fibers"</span>)
+    <span class="fn">sleep</span>(<span class="num">200</span>)
+}
+
+<span class="fn">main</span>()</code></pre>
+                        </div>
+                        <div class="block-explanation">
+                            <p>Unlike OS threads, spawning thousands of fibers is efficient. Each fiber has minimal overhead, making this pattern practical for processing large datasets concurrently.</p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Section 3: Channels -->
+                <section id="channels" class="guide-section">
+                    <div class="section-header">
+                        <span class="section-number">03</span>
+                        <h2>Channels</h2>
+                    </div>
+                    <div class="section-intro">
+                        <p>Channels provide safe communication between fibers. They're the primary way to pass data between concurrent tasks without shared mutable state.</p>
+                    </div>
+
+                    <div class="guide-block">
+                        <div class="block-header">
+                            <span class="block-label">Creating Channels</span>
+                        </div>
+                        <div class="code-box">
+                            <pre class="code-box-content"><code><span class="cm">// Buffered channel with capacity</span>
+<span class="kw">let</span> ch = <span class="fn">chan</span>(<span class="num">5</span>)  <span class="cm">// Can hold 5 values before blocking</span>
+
+<span class="cm">// Unbuffered channel (synchronous)</span>
+<span class="kw">let</span> sync_ch = <span class="fn">chan</span>()  <span class="cm">// Sender blocks until receiver ready</span></code></pre>
+                        </div>
+                        <div class="block-explanation">
+                            <p>Buffered channels allow sends to complete without a receiver ready (up to the buffer size). Unbuffered channels synchronize sender and receiver - the send blocks until another fiber receives.</p>
+                        </div>
+                    </div>
+
+                    <div class="guide-block">
+                        <div class="block-header">
+                            <span class="block-label">Send and Receive</span>
+                        </div>
+                        <div class="code-box">
+                            <pre class="code-box-content"><code><span class="kw">fn</span> <span class="fn">main</span>() {
+    <span class="kw">let</span> ch = <span class="fn">chan</span>(<span class="num">3</span>)
+
+    <span class="cm">// Send values to channel</span>
+    <span class="fn">send</span>(ch, <span class="num">10</span>)
+    <span class="fn">send</span>(ch, <span class="num">20</span>)
+    <span class="fn">send</span>(ch, <span class="num">30</span>)
+
+    <span class="cm">// Receive values (FIFO order)</span>
+    <span class="kw">let</span> first = <span class="fn">recv</span>(ch)   <span class="cm">// 10</span>
+    <span class="kw">let</span> second = <span class="fn">recv</span>(ch)  <span class="cm">// 20</span>
+    <span class="kw">let</span> third = <span class="fn">recv</span>(ch)   <span class="cm">// 30</span>
+
+    <span class="fn">println</span>(<span class="str">"Received: "</span> + first + <span class="str">", "</span> + second + <span class="str">", "</span> + third)
+}
+
+<span class="fn">main</span>()</code></pre>
+                        </div>
+                    </div>
+
+                    <div class="guide-block">
+                        <div class="block-header">
+                            <span class="block-label">Producer-Consumer Pattern</span>
+                        </div>
+                        <div class="code-box">
+                            <pre class="code-box-content"><code><span class="kw">fn</span> <span class="fn">producer</span>(ch: <span class="ty">channel</span>, count: <span class="ty">int</span>) {
+    <span class="kw">var</span> i = <span class="num">1</span>
+    <span class="kw">while</span> i <= count {
+        <span class="fn">println</span>(<span class="str">"Producing: "</span> + i)
+        <span class="fn">send</span>(ch, i * i)
+        i = i + <span class="num">1</span>
+    }
+}
+
+<span class="kw">fn</span> <span class="fn">consumer</span>(ch: <span class="ty">channel</span>, count: <span class="ty">int</span>) {
+    <span class="kw">var</span> received = <span class="num">0</span>
+    <span class="kw">while</span> received < count {
+        <span class="kw">let</span> value = <span class="fn">recv</span>(ch)
+        <span class="fn">println</span>(<span class="str">"Consumed: "</span> + value)
+        received = received + <span class="num">1</span>
+    }
+}
+
+<span class="kw">fn</span> <span class="fn">main</span>() {
+    <span class="kw">let</span> ch = <span class="fn">chan</span>(<span class="num">5</span>)
+
+    <span class="fn">spawn</span> <span class="fn">producer</span>(ch, <span class="num">5</span>)
+    <span class="fn">spawn</span> <span class="fn">consumer</span>(ch, <span class="num">5</span>)
+
+    <span class="fn">sleep</span>(<span class="num">200</span>)
+}
+
+<span class="fn">main</span>()</code></pre>
+                        </div>
+                        <div class="block-explanation">
+                            <p>This classic pattern separates data production from consumption. The channel acts as a buffer, decoupling the two fibers and allowing them to run at different speeds.</p>
+                        </div>
+                    </div>
+
+                    <div class="guide-block">
+                        <div class="block-header">
+                            <span class="block-label">Closing Channels</span>
+                        </div>
+                        <div class="code-box">
+                            <pre class="code-box-content"><code><span class="kw">fn</span> <span class="fn">sender</span>(ch: <span class="ty">channel</span>) {
+    <span class="fn">send</span>(ch, <span class="num">1</span>)
+    <span class="fn">send</span>(ch, <span class="num">2</span>)
+    <span class="fn">send</span>(ch, <span class="num">3</span>)
+    <span class="fn">close</span>(ch)  <span class="cm">// Signal no more values</span>
+}
+
+<span class="kw">fn</span> <span class="fn">main</span>() {
+    <span class="kw">let</span> ch = <span class="fn">chan</span>(<span class="num">5</span>)
+
+    <span class="fn">spawn</span> <span class="fn">sender</span>(ch)
+
+    <span class="cm">// Receive until channel is closed</span>
+    <span class="kw">var</span> value = <span class="fn">recv</span>(ch)
+    <span class="kw">while</span> value != <span class="kw">null</span> {
+        <span class="fn">println</span>(<span class="str">"Got: "</span> + value)
+        value = <span class="fn">recv</span>(ch)
+    }
+
+    <span class="fn">println</span>(<span class="str">"Channel closed"</span>)
+}
+
+<span class="fn">main</span>()</code></pre>
+                        </div>
+                        <div class="block-explanation">
+                            <p>Closing a channel signals that no more values will be sent. Receivers can detect this and stop waiting. Always close channels from the sender side.</p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Section 4: Common Patterns -->
+                <section id="patterns" class="guide-section">
+                    <div class="section-header">
+                        <span class="section-number">04</span>
+                        <h2>Common Patterns</h2>
+                    </div>
+                    <div class="section-intro">
+                        <p>These patterns solve common concurrent programming problems using fibers and channels.</p>
+                    </div>
+
+                    <div class="guide-block">
+                        <div class="block-header">
+                            <span class="block-label">Fan-Out: Distribute Work</span>
+                        </div>
+                        <div class="code-box">
+                            <pre class="code-box-content"><code><span class="kw">fn</span> <span class="fn">worker</span>(id: <span class="ty">int</span>, jobs: <span class="ty">channel</span>, results: <span class="ty">channel</span>) {
+    <span class="kw">var</span> job = <span class="fn">recv</span>(jobs)
+    <span class="kw">while</span> job != <span class="kw">null</span> {
+        <span class="fn">println</span>(<span class="str">"Worker "</span> + id + <span class="str">" processing "</span> + job)
+        <span class="fn">sleep</span>(<span class="num">50</span>)
+        <span class="fn">send</span>(results, job * <span class="num">2</span>)
+        job = <span class="fn">recv</span>(jobs)
+    }
+}
+
+<span class="kw">fn</span> <span class="fn">main</span>() {
+    <span class="kw">let</span> jobs = <span class="fn">chan</span>(<span class="num">10</span>)
+    <span class="kw">let</span> results = <span class="fn">chan</span>(<span class="num">10</span>)
+
+    <span class="cm">// Start 3 workers</span>
+    <span class="fn">spawn</span> <span class="fn">worker</span>(<span class="num">1</span>, jobs, results)
+    <span class="fn">spawn</span> <span class="fn">worker</span>(<span class="num">2</span>, jobs, results)
+    <span class="fn">spawn</span> <span class="fn">worker</span>(<span class="num">3</span>, jobs, results)
+
+    <span class="cm">// Send jobs</span>
+    <span class="kw">var</span> i = <span class="num">1</span>
+    <span class="kw">while</span> i <= <span class="num">9</span> {
+        <span class="fn">send</span>(jobs, i)
+        i = i + <span class="num">1</span>
+    }
+    <span class="fn">close</span>(jobs)
+
+    <span class="cm">// Collect results</span>
+    <span class="kw">var</span> collected = <span class="num">0</span>
+    <span class="kw">while</span> collected < <span class="num">9</span> {
+        <span class="kw">let</span> r = <span class="fn">recv</span>(results)
+        <span class="fn">println</span>(<span class="str">"Result: "</span> + r)
+        collected = collected + <span class="num">1</span>
+    }
+}
+
+<span class="fn">main</span>()</code></pre>
+                        </div>
+                        <div class="block-explanation">
+                            <p>Fan-out distributes work across multiple workers. Jobs are sent to a shared channel, and workers pull from it. This naturally load-balances - fast workers process more jobs.</p>
+                        </div>
+                    </div>
+
+                    <div class="guide-block">
+                        <div class="block-header">
+                            <span class="block-label">Concurrent Task Execution</span>
+                        </div>
+                        <div class="code-box">
+                            <pre class="code-box-content"><code><span class="kw">fn</span> <span class="fn">fetch_user</span>(results: <span class="ty">channel</span>) {
+    <span class="fn">sleep</span>(<span class="num">100</span>)
+    <span class="fn">send</span>(results, <span class="str">"user_data"</span>)
+}
+
+<span class="kw">fn</span> <span class="fn">fetch_posts</span>(results: <span class="ty">channel</span>) {
+    <span class="fn">sleep</span>(<span class="num">150</span>)
+    <span class="fn">send</span>(results, <span class="str">"posts_data"</span>)
+}
+
+<span class="kw">fn</span> <span class="fn">fetch_comments</span>(results: <span class="ty">channel</span>) {
+    <span class="fn">sleep</span>(<span class="num">80</span>)
+    <span class="fn">send</span>(results, <span class="str">"comments_data"</span>)
+}
+
+<span class="kw">fn</span> <span class="fn">main</span>() {
+    <span class="kw">let</span> results = <span class="fn">chan</span>(<span class="num">3</span>)
+
+    <span class="cm">// Start all fetches concurrently</span>
+    <span class="fn">spawn</span> <span class="fn">fetch_user</span>(results)
+    <span class="fn">spawn</span> <span class="fn">fetch_posts</span>(results)
+    <span class="fn">spawn</span> <span class="fn">fetch_comments</span>(results)
+
+    <span class="cm">// Wait for all results (total ~150ms, not 330ms)</span>
+    <span class="kw">var</span> count = <span class="num">0</span>
+    <span class="kw">while</span> count < <span class="num">3</span> {
+        <span class="kw">let</span> data = <span class="fn">recv</span>(results)
+        <span class="fn">println</span>(<span class="str">"Received: "</span> + data)
+        count = count + <span class="num">1</span>
+    }
+
+    <span class="fn">println</span>(<span class="str">"All data fetched"</span>)
+}
+
+<span class="fn">main</span>()</code></pre>
+                        </div>
+                        <div class="block-explanation">
+                            <p>Run independent tasks concurrently and wait for all to complete. Total time is the slowest task, not the sum. This is ideal for aggregating data from multiple sources.</p>
+                        </div>
+                    </div>
+
+                    <div class="guide-block">
+                        <div class="block-header">
+                            <span class="block-label">Pipeline Processing</span>
+                        </div>
+                        <div class="code-box">
+                            <pre class="code-box-content"><code><span class="kw">fn</span> <span class="fn">stage1</span>(input: <span class="ty">channel</span>, output: <span class="ty">channel</span>) {
+    <span class="kw">var</span> value = <span class="fn">recv</span>(input)
+    <span class="kw">while</span> value != <span class="kw">null</span> {
+        <span class="fn">send</span>(output, value * <span class="num">2</span>)
+        value = <span class="fn">recv</span>(input)
+    }
+    <span class="fn">close</span>(output)
+}
+
+<span class="kw">fn</span> <span class="fn">stage2</span>(input: <span class="ty">channel</span>, output: <span class="ty">channel</span>) {
+    <span class="kw">var</span> value = <span class="fn">recv</span>(input)
+    <span class="kw">while</span> value != <span class="kw">null</span> {
+        <span class="fn">send</span>(output, value + <span class="num">10</span>)
+        value = <span class="fn">recv</span>(input)
+    }
+    <span class="fn">close</span>(output)
+}
+
+<span class="kw">fn</span> <span class="fn">main</span>() {
+    <span class="kw">let</span> ch1 = <span class="fn">chan</span>(<span class="num">5</span>)
+    <span class="kw">let</span> ch2 = <span class="fn">chan</span>(<span class="num">5</span>)
+    <span class="kw">let</span> ch3 = <span class="fn">chan</span>(<span class="num">5</span>)
+
+    <span class="fn">spawn</span> <span class="fn">stage1</span>(ch1, ch2)
+    <span class="fn">spawn</span> <span class="fn">stage2</span>(ch2, ch3)
+
+    <span class="cm">// Feed input</span>
+    <span class="fn">send</span>(ch1, <span class="num">1</span>)
+    <span class="fn">send</span>(ch1, <span class="num">2</span>)
+    <span class="fn">send</span>(ch1, <span class="num">3</span>)
+    <span class="fn">close</span>(ch1)
+
+    <span class="cm">// Read output: (1*2)+10=12, (2*2)+10=14, (3*2)+10=16</span>
+    <span class="kw">var</span> result = <span class="fn">recv</span>(ch3)
+    <span class="kw">while</span> result != <span class="kw">null</span> {
+        <span class="fn">println</span>(<span class="str">"Output: "</span> + result)
+        result = <span class="fn">recv</span>(ch3)
+    }
+}
+
+<span class="fn">main</span>()</code></pre>
+                        </div>
+                        <div class="block-explanation">
+                            <p>Pipelines chain processing stages with channels. Data flows through each stage, with stages running concurrently. Great for ETL, image processing, or any multi-step transformation.</p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Section 5: Select -->
+                <section id="select" class="guide-section">
+                    <div class="section-header">
+                        <span class="section-number">05</span>
+                        <h2>Select Statement</h2>
+                    </div>
+                    <div class="section-intro">
+                        <p>The <code>select</code> statement waits on multiple channel operations simultaneously, proceeding with whichever is ready first.</p>
+                    </div>
+
+                    <div class="guide-block">
+                        <div class="block-header">
+                            <span class="block-label">Basic Select</span>
+                        </div>
+                        <div class="code-box">
+                            <pre class="code-box-content"><code><span class="kw">fn</span> <span class="fn">main</span>() {
+    <span class="kw">let</span> ch1 = <span class="fn">chan</span>(<span class="num">1</span>)
+    <span class="kw">let</span> ch2 = <span class="fn">chan</span>(<span class="num">1</span>)
+
+    <span class="cm">// Sender on ch1 after 100ms</span>
+    <span class="fn">spawn</span> {
+        <span class="fn">sleep</span>(<span class="num">100</span>)
+        <span class="fn">send</span>(ch1, <span class="str">"from ch1"</span>)
+    }
+
+    <span class="cm">// Sender on ch2 after 50ms</span>
+    <span class="fn">spawn</span> {
+        <span class="fn">sleep</span>(<span class="num">50</span>)
+        <span class="fn">send</span>(ch2, <span class="str">"from ch2"</span>)
+    }
+
+    <span class="cm">// Select waits for first available</span>
+    <span class="kw">select</span> {
+        msg1 <- ch1 => <span class="fn">println</span>(<span class="str">"Received: "</span> + msg1)
+        msg2 <- ch2 => <span class="fn">println</span>(<span class="str">"Received: "</span> + msg2)
+    }
+}
+
+<span class="fn">main</span>()</code></pre>
+                        </div>
+                        <div class="block-explanation">
+                            <p>Select blocks until one of the channels is ready, then executes that case. If multiple are ready, one is chosen at random. This is useful for handling multiple event sources.</p>
+                        </div>
+                    </div>
+
+                    <div class="guide-block">
+                        <div class="block-header">
+                            <span class="block-label">Default Case</span>
+                        </div>
+                        <div class="code-box">
+                            <pre class="code-box-content"><code><span class="kw">fn</span> <span class="fn">main</span>() {
+    <span class="kw">let</span> ch = <span class="fn">chan</span>(<span class="num">1</span>)
+
+    <span class="cm">// Non-blocking select with default</span>
+    <span class="kw">select</span> {
+        msg <- ch => <span class="fn">println</span>(<span class="str">"Got: "</span> + msg)
+        _ => <span class="fn">println</span>(<span class="str">"No message available"</span>)
+    }
+}
+
+<span class="fn">main</span>()</code></pre>
+                        </div>
+                        <div class="block-explanation">
+                            <p>The default case (<code>_</code>) executes immediately if no other case is ready. This makes select non-blocking, useful for polling or implementing timeouts.</p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Section 6: Best Practices -->
+                <section id="best-practices" class="guide-section">
+                    <div class="section-header">
+                        <span class="section-number">06</span>
+                        <h2>Best Practices</h2>
+                    </div>
+
+                    <div class="guide-block">
+                        <div class="block-header">
+                            <span class="block-label">Do: Use Channels for Communication</span>
+                        </div>
+                        <div class="code-box">
+                            <pre class="code-box-content"><code><span class="cm">// Good: Communicate via channels</span>
+<span class="kw">fn</span> <span class="fn">compute</span>(result_ch: <span class="ty">channel</span>) {
+    <span class="kw">let</span> answer = <span class="num">42</span>
+    <span class="fn">send</span>(result_ch, answer)
+}
+
+<span class="kw">fn</span> <span class="fn">main</span>() {
+    <span class="kw">let</span> results = <span class="fn">chan</span>(<span class="num">1</span>)
+    <span class="fn">spawn</span> <span class="fn">compute</span>(results)
+    <span class="kw">let</span> answer = <span class="fn">recv</span>(results)
+    <span class="fn">println</span>(answer)
+}
+
+<span class="fn">main</span>()</code></pre>
+                        </div>
+                        <div class="block-explanation">
+                            <p>Channels are the safe way to share data between fibers. Avoid shared mutable state - it leads to race conditions.</p>
+                        </div>
+                    </div>
+
+                    <div class="guide-block">
+                        <div class="block-header">
+                            <span class="block-label">Do: Size Buffers Appropriately</span>
+                        </div>
+                        <div class="code-box">
+                            <pre class="code-box-content"><code><span class="cm">// Too small: may cause unnecessary blocking</span>
+<span class="kw">let</span> ch = <span class="fn">chan</span>(<span class="num">1</span>)
+
+<span class="cm">// Too large: wastes memory</span>
+<span class="kw">let</span> ch = <span class="fn">chan</span>(<span class="num">10000</span>)
+
+<span class="cm">// Right-sized: matches expected throughput</span>
+<span class="kw">let</span> ch = <span class="fn">chan</span>(<span class="num">100</span>)  <span class="cm">// For ~100 items in flight</span></code></pre>
+                        </div>
+                        <div class="block-explanation">
+                            <p>Buffer size affects performance. Too small causes blocking; too large wastes memory. Size based on expected items in flight and producer/consumer speed differences.</p>
+                        </div>
+                    </div>
+
+                    <div class="guide-block">
+                        <div class="block-header">
+                            <span class="block-label">Do: Always Close Channels from Sender</span>
+                        </div>
+                        <div class="code-box">
+                            <pre class="code-box-content"><code><span class="kw">fn</span> <span class="fn">producer</span>(ch: <span class="ty">channel</span>) {
+    <span class="fn">send</span>(ch, <span class="num">1</span>)
+    <span class="fn">send</span>(ch, <span class="num">2</span>)
+    <span class="fn">close</span>(ch)  <span class="cm">// Sender closes when done</span>
+}
+
+<span class="kw">fn</span> <span class="fn">consumer</span>(ch: <span class="ty">channel</span>) {
+    <span class="cm">// Consumer reads until channel closed</span>
+    <span class="kw">var</span> v = <span class="fn">recv</span>(ch)
+    <span class="kw">while</span> v != <span class="kw">null</span> {
+        <span class="fn">println</span>(v)
+        v = <span class="fn">recv</span>(ch)
+    }
+}</code></pre>
+                        </div>
+                        <div class="block-explanation">
+                            <p>Only the sender knows when there's no more data. Closing from the receiver can cause panics if the sender tries to send to a closed channel.</p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Next Steps -->
+                <section class="guide-section guide-next">
+                    <h2>Continue Learning</h2>
+                    <p>Explore more Lira features:</p>
+                    <div class="next-steps-grid">
+                        <a href="pattern-matching.html" class="next-step-card">
+                            <h4>Pattern Matching</h4>
+                            <p>Destructure data and handle variants elegantly</p>
+                        </a>
+                        <a href="types.html" class="next-step-card">
+                            <h4>Type System</h4>
+                            <p>Generics, inference, and type safety</p>
+                        </a>
+                        <a href="structs-methods.html" class="next-step-card">
+                            <h4>Structs & Methods</h4>
+                            <p>Define custom types with behavior</p>
+                        </a>
+                        <a href="modules.html" class="next-step-card">
+                            <h4>Modules</h4>
+                            <p>Organize code with imports</p>
+                        </a>
+                    </div>
+                </section>
+
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-brand">
+                    <svg class="footer-logo" viewBox="0 0 40 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M4 8C4 4 8 2 12 4L20 8L28 4C32 2 36 4 36 8V36C36 40 32 44 28 44L20 40L12 44C8 44 4 40 4 36V8Z" stroke="currentColor" stroke-width="2.5" fill="none"/>
+                        <line x1="14" y1="12" x2="14" y2="36" stroke="#E8A924" stroke-width="2" stroke-linecap="round"/>
+                        <line x1="20" y1="10" x2="20" y2="38" stroke="#E8A924" stroke-width="2" stroke-linecap="round"/>
+                        <line x1="26" y1="12" x2="26" y2="36" stroke="#E8A924" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <p>A systems programming language<br>crafted for harmony.</p>
+                </div>
+                <div class="footer-links">
+                    <div class="footer-column">
+                        <h4>Resources</h4>
+                        <a href="https://github.com/HelgeSverre/lira/tree/main/docs">Documentation</a>
+                        <a href="https://github.com/HelgeSverre/lira/tree/main/examples">Examples</a>
+                        <a href="https://github.com/HelgeSverre/lira/tree/main/stdlib">Standard Library</a>
+                    </div>
+                    <div class="footer-column">
+                        <h4>Community</h4>
+                        <a href="https://github.com/HelgeSverre/lira">GitHub</a>
+                        <a href="https://github.com/HelgeSverre/lira/issues">Issues</a>
+                        <a href="https://github.com/HelgeSverre/lira/discussions">Discussions</a>
+                    </div>
+                    <div class="footer-column">
+                        <h4>Deep Dives</h4>
+                        <a href="concurrency.html">Concurrency</a>
+                        <a href="pattern-matching.html">Pattern Matching</a>
+                        <a href="types.html">Type System</a>
+                    </div>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>Made with care. Open source under MIT.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>

@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Structs & Methods - Lira Deep Dive</title>
+    <meta name="description" content="Define custom types with structs and add behavior with impl blocks. Learn constructors, methods, and enums.">
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="style.css">
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+</head>
+<body>
+    <!-- Constellation background -->
+    <div class="constellation" aria-hidden="true"></div>
+
+    <!-- Navigation -->
+    <nav class="nav">
+        <div class="nav-container">
+            <a href="/" class="nav-logo">
+                <svg class="logo-icon" viewBox="0 0 40 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M4 8C4 4 8 2 12 4L20 8L28 4C32 2 36 4 36 8V36C36 40 32 44 28 44L20 40L12 44C8 44 4 40 4 36V8Z" stroke="currentColor" stroke-width="2.5" fill="none"/>
+                    <line x1="14" y1="12" x2="14" y2="36" stroke="#E8A924" stroke-width="2" stroke-linecap="round"/>
+                    <line x1="20" y1="10" x2="20" y2="38" stroke="#E8A924" stroke-width="2" stroke-linecap="round"/>
+                    <line x1="26" y1="12" x2="26" y2="36" stroke="#E8A924" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <span class="logo-text">Lira</span>
+            </a>
+            <div class="nav-links">
+                <a href="/#features">Features</a>
+                <a href="/#examples">Examples</a>
+                <a href="guide.html">Tour</a>
+                <a href="getting-started.html">Get Started</a>
+                <a href="https://github.com/HelgeSverre/lira" class="nav-github" aria-label="GitHub">
+                    <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
+                        <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+                    </svg>
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Page Header -->
+    <header class="page-header guide-header">
+        <div class="container">
+            <h1 class="page-title">Structs & Methods</h1>
+            <p class="page-subtitle">Model your domain with custom types. Add behavior with impl blocks and methods.</p>
+        </div>
+    </header>
+
+    <!-- Content -->
+    <main class="guide-content">
+        <div class="container">
+            <!-- Table of Contents -->
+            <nav class="guide-toc">
+                <h3>On This Page</h3>
+                <ol>
+                    <li><a href="#structs">Defining Structs</a></li>
+                    <li><a href="#impl">Impl Blocks</a></li>
+                    <li><a href="#constructors">Constructor Patterns</a></li>
+                    <li><a href="#methods">Instance Methods</a></li>
+                    <li><a href="#enums">Enums</a></li>
+                    <li><a href="#composition">Composition</a></li>
+                </ol>
+            </nav>
+
+            <!-- Sections -->
+            <div class="guide-sections">
+
+                <!-- Section 1: Defining Structs -->
+                <section id="structs" class="guide-section">
+                    <div class="section-header">
+                        <span class="section-number">01</span>
+                        <h2>Defining Structs</h2>
+                    </div>
+                    <div class="section-intro">
+                        <p>Structs group related data together into a named type. Each field has a name and type.</p>
+                    </div>
+
+                    <div class="guide-block">
+                        <div class="block-header">
+                            <span class="block-label">Basic Struct</span>
+                        </div>
+                        <div class="code-box">
+                            <pre class="code-box-content"><code><span class="kw">struct</span> <span class="ty">Point</span> {
+    x: <span class="ty">int</span>
+    y: <span class="ty">int</span>
+}
+
+<span class="kw">fn</span> <span class="fn">main</span>() {
+    <span class="cm">// Create with struct literal</span>
+    <span class="kw">let</span> origin = <span class="ty">Point</span> { x: <span class="num">0</span>, y: <span class="num">0</span> }
+    <span class="kw">let</span> point = <span class="ty">Point</span> { x: <span class="num">10</span>, y: <span class="num">20</span> }
+
+    <span class="cm">// Access fields with dot notation</span>
+    <span class="fn">println</span>(point.x)  <span class="cm">// 10</span>
+    <span class="fn">println</span>(point.y)  <span class="cm">// 20</span>
+}
+
+<span class="fn">main</span>()</code></pre>
+                        </div>
+                        <div class="block-explanation">
+                            <p>Fields are listed in the struct body with <code>name: type</code> syntax. Create instances with struct literals, providing values for all fields.</p>
+                        </div>
+                    </div>
+
+                    <div class="guide-block">
+                        <div class="block-header">
+                            <span class="block-label">Multiple Field Types</span>
+                        </div>
+                        <div class="code-box">
+                            <pre class="code-box-content"><code><span class="kw">struct</span> <span class="ty">User</span> {
+    id: <span class="ty">int</span>
+    name: <span class="ty">string</span>
+    email: <span class="ty">string</span>
+    active: <span class="ty">bool</span>
+}
+
+<span class="kw">fn</span> <span class="fn">main</span>() {
+    <span class="kw">let</span> user = <span class="ty">User</span> {
+        id: <span class="num">1</span>,
+        name: <span class="str">"Alice"</span>,
+        email: <span class="str">"alice@example.com"</span>,
+        active: <span class="kw">true</span>
+    }
+
+    <span class="fn">println</span>(<span class="str">"User: "</span> + user.name)
+    <span class="fn">println</span>(<span class="str">"Email: "</span> + user.email)
+    <span class="fn">println</span>(<span class="str">"Active: "</span> + user.active)
+}
+
+<span class="fn">main</span>()</code></pre>
+                        </div>
+                    </div>
+
+                    <div class="guide-block">
+                        <div class="block-header">
+                            <span class="block-label">Nested Structs</span>
+                        </div>
+                        <div class="code-box">
+                            <pre class="code-box-content"><code><span class="kw">struct</span> <span class="ty">Address</span> {
+    street: <span class="ty">string</span>
+    city: <span class="ty">string</span>
+    zip: <span class="ty">string</span>
+}
+
+<span class="kw">struct</span> <span class="ty">Person</span> {
+    name: <span class="ty">string</span>
+    address: <span class="ty">Address</span>
+}
+
+<span class="kw">fn</span> <span class="fn">main</span>() {
+    <span class="kw">let</span> person = <span class="ty">Person</span> {
+        name: <span class="str">"Bob"</span>,
+        address: <span class="ty">Address</span> {
+            street: <span class="str">"123 Main St"</span>,
+            city: <span class="str">"Springfield"</span>,
+            zip: <span class="str">"12345"</span>
+        }
+    }
+
+    <span class="fn">println</span>(person.name)              <span class="cm">// Bob</span>
+    <span class="fn">println</span>(person.address.city)      <span class="cm">// Springfield</span>
+    <span class="fn">println</span>(person.address.street)    <span class="cm">// 123 Main St</span>
+}
+
+<span class="fn">main</span>()</code></pre>
+                        </div>
+                        <div class="block-explanation">
+                            <p>Structs can contain other structs. Access nested fields with chained dot notation.</p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Section 2: Impl Blocks -->
+                <section id="impl" class="guide-section">
+                    <div class="section-header">
+                        <span class="section-number">02</span>
+                        <h2>Impl Blocks</h2>
+                    </div>
+                    <div class="section-intro">
+                        <p>The <code>impl</code> block adds methods to a struct, separating data from behavior.</p>
+                    </div>
+
+                    <div class="guide-block">
+                        <div class="block-header">
+                            <span class="block-label">Basic Impl Block</span>
+                        </div>
+                        <div class="code-box">
+                            <pre class="code-box-content"><code><span class="kw">struct</span> <span class="ty">Rectangle</span> {
+    width: <span class="ty">int</span>
+    height: <span class="ty">int</span>
+}
+
+<span class="kw">impl</span> <span class="ty">Rectangle</span> {
+    <span class="kw">fn</span> <span class="fn">area</span>(self) -> <span class="ty">int</span> {
+        <span class="kw">return</span> self.width * self.height
+    }
+
+    <span class="kw">fn</span> <span class="fn">perimeter</span>(self) -> <span class="ty">int</span> {
+        <span class="kw">return</span> <span class="num">2</span> * (self.width + self.height)
+    }
+}
+
+<span class="kw">fn</span> <span class="fn">main</span>() {
+    <span class="kw">let</span> rect = <span class="ty">Rectangle</span> { width: <span class="num">10</span>, height: <span class="num">5</span> }
+
+    <span class="fn">println</span>(<span class="str">"Area: "</span> + rect.<span class="fn">area</span>())        <span class="cm">// 50</span>
+    <span class="fn">println</span>(<span class="str">"Perimeter: "</span> + rect.<span class="fn">perimeter</span>()) <span class="cm">// 30</span>
+}
+
+<span class="fn">main</span>()</code></pre>
+                        </div>
+                        <div class="block-explanation">
+                            <p>Methods defined in <code>impl</code> blocks take <code>self</code> as the first parameter. Call them with dot notation on struct instances.</p>
+                        </div>
+                    </div>
+
+                    <div class="guide-block">
+                        <div class="block-header">
+                            <span class="block-label">Methods Inside Struct</span>
+                        </div>
+                        <div class="code-box">
+                            <pre class="code-box-content"><code><span class="cm">// Methods can also be defined inside the struct</span>
+<span class="kw">struct</span> <span class="ty">Counter</span> {
+    value: <span class="ty">int</span>
+
+    <span class="kw">fn</span> <span class="fn">get</span>(self) -> <span class="ty">int</span> {
+        <span class="kw">return</span> self.value
+    }
+
+    <span class="kw">fn</span> <span class="fn">increment</span>(self) -> <span class="ty">Counter</span> {
+        <span class="kw">return</span> <span class="ty">Counter</span> { value: self.value + <span class="num">1</span> }
+    }
+}
+
+<span class="kw">fn</span> <span class="fn">main</span>() {
+    <span class="kw">let</span> c1 = <span class="ty">Counter</span> { value: <span class="num">0</span> }
+    <span class="fn">println</span>(c1.<span class="fn">get</span>())  <span class="cm">// 0</span>
+
+    <span class="kw">let</span> c2 = c1.<span class="fn">increment</span>()
+    <span class="fn">println</span>(c2.<span class="fn">get</span>())  <span class="cm">// 1</span>
+
+    <span class="kw">let</span> c3 = c2.<span class="fn">increment</span>().<span class="fn">increment</span>()
+    <span class="fn">println</span>(c3.<span class="fn">get</span>())  <span class="cm">// 3</span>
+}
+
+<span class="fn">main</span>()</code></pre>
+                        </div>
+                        <div class="block-explanation">
+                            <p>Methods can be defined directly inside the struct body for convenience. Structs are immutable, so methods return new instances rather than modifying in place.</p>
+                        </div>
+                    </div>
+
+                    <div class="guide-block">
+                        <div class="block-header">
+                            <span class="block-label">Impl on Primitive Types</span>
+                        </div>
+                        <div class="code-box">
+                            <pre class="code-box-content"><code><span class="cm">// You can add methods to built-in types</span>
+<span class="kw">impl</span> <span class="ty">int</span> {
+    <span class="kw">fn</span> <span class="fn">abs</span>(self) -> <span class="ty">int</span> {
+        <span class="kw">if</span> self < <span class="num">0</span> {
+            <span class="kw">return</span> -self
+        }
+        <span class="kw">return</span> self
+    }
+
+    <span class="kw">fn</span> <span class="fn">clamp</span>(self, min_val: <span class="ty">int</span>, max_val: <span class="ty">int</span>) -> <span class="ty">int</span> {
+        <span class="kw">if</span> self < min_val {
+            <span class="kw">return</span> min_val
+        }
+        <span class="kw">if</span> self > max_val {
+            <span class="kw">return</span> max_val
+        }
+        <span class="kw">return</span> self
+    }
+
+    <span class="kw">fn</span> <span class="fn">is_even</span>(self) -> <span class="ty">bool</span> {
+        <span class="kw">return</span> self % <span class="num">2</span> == <span class="num">0</span>
+    }
+}
+
+<span class="kw">fn</span> <span class="fn">main</span>() {
+    <span class="kw">let</span> n = -<span class="num">42</span>
+    <span class="fn">println</span>(n.<span class="fn">abs</span>())         <span class="cm">// 42</span>
+    <span class="fn">println</span>(<span class="num">150</span>.<span class="fn">clamp</span>(<span class="num">0</span>, <span class="num">100</span>)) <span class="cm">// 100</span>
+    <span class="fn">println</span>(<span class="num">7</span>.<span class="fn">is_even</span>())      <span class="cm">// false</span>
+    <span class="fn">println</span>(<span class="num">8</span>.<span class="fn">is_even</span>())      <span class="cm">// true</span>
+}
+
+<span class="fn">main</span>()</code></pre>
+                        </div>
+                        <div class="block-explanation">
+                            <p>Impl blocks work on any type, including primitives like <code>int</code>, <code>string</code>, and <code>float</code>. This extends the language without modifying core types.</p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Section 3: Constructor Patterns -->
+                <section id="constructors" class="guide-section">
+                    <div class="section-header">
+                        <span class="section-number">03</span>
+                        <h2>Constructor Patterns</h2>
+                    </div>
+                    <div class="section-intro">
+                        <p>Use static methods (without <code>self</code>) as constructors to create instances with validation or default values.</p>
+                    </div>
+
+                    <div class="guide-block">
+                        <div class="block-header">
+                            <span class="block-label">Basic Constructor</span>
+                        </div>
+                        <div class="code-box">
+                            <pre class="code-box-content"><code><span class="kw">struct</span> <span class="ty">Circle</span> {
+    radius: <span class="ty">float</span>
+}
+
+<span class="kw">impl</span> <span class="ty">Circle</span> {
+    <span class="cm">// Static method - no 'self' parameter</span>
+    <span class="kw">fn</span> <span class="fn">new</span>(radius: <span class="ty">float</span>) -> <span class="ty">Circle</span> {
+        <span class="kw">return</span> <span class="ty">Circle</span> { radius: radius }
+    }
+
+    <span class="kw">fn</span> <span class="fn">unit</span>() -> <span class="ty">Circle</span> {
+        <span class="kw">return</span> <span class="ty">Circle</span> { radius: <span class="num">1.0</span> }
+    }
+
+    <span class="kw">fn</span> <span class="fn">area</span>(self) -> <span class="ty">float</span> {
+        <span class="kw">return</span> <span class="num">3.14159</span> * self.radius * self.radius
+    }
+}
+
+<span class="kw">fn</span> <span class="fn">main</span>() {
+    <span class="cm">// Call static method on the type</span>
+    <span class="kw">let</span> c1 = <span class="ty">Circle</span>.<span class="fn">new</span>(<span class="num">5.0</span>)
+    <span class="kw">let</span> c2 = <span class="ty">Circle</span>.<span class="fn">unit</span>()
+
+    <span class="fn">println</span>(c1.<span class="fn">area</span>())  <span class="cm">// ~78.54</span>
+    <span class="fn">println</span>(c2.<span class="fn">area</span>())  <span class="cm">// ~3.14</span>
+}
+
+<span class="fn">main</span>()</code></pre>
+                        </div>
+                        <div class="block-explanation">
+                            <p>Static methods are called on the type (<code>Circle.new()</code>) rather than an instance. They're perfect for constructors that create new instances.</p>
+                        </div>
+                    </div>
+
+                    <div class="guide-block">
+                        <div class="block-header">
+                            <span class="block-label">Constructor with Defaults</span>
+                        </div>
+                        <div class="code-box">
+                            <pre class="code-box-content"><code><span class="kw">struct</span> <span class="ty">Config</span> {
+    host: <span class="ty">string</span>
+    port: <span class="ty">int</span>
+    timeout: <span class="ty">int</span>
+}
+
+<span class="kw">impl</span> <span class="ty">Config</span> {
+    <span class="cm">// Default configuration</span>
+    <span class="kw">fn</span> <span class="fn">default</span>() -> <span class="ty">Config</span> {
+        <span class="kw">return</span> <span class="ty">Config</span> {
+            host: <span class="str">"localhost"</span>,
+            port: <span class="num">8080</span>,
+            timeout: <span class="num">30</span>
+        }
+    }
+
+    <span class="cm">// Builder-style methods</span>
+    <span class="kw">fn</span> <span class="fn">with_host</span>(self, host: <span class="ty">string</span>) -> <span class="ty">Config</span> {
+        <span class="kw">return</span> <span class="ty">Config</span> {
+            host: host,
+            port: self.port,
+            timeout: self.timeout
+        }
+    }
+
+    <span class="kw">fn</span> <span class="fn">with_port</span>(self, port: <span class="ty">int</span>) -> <span class="ty">Config</span> {
+        <span class="kw">return</span> <span class="ty">Config</span> {
+            host: self.host,
+            port: port,
+            timeout: self.timeout
+        }
+    }
+}
+
+<span class="kw">fn</span> <span class="fn">main</span>() {
+    <span class="cm">// Start with defaults, customize as needed</span>
+    <span class="kw">let</span> config = <span class="ty">Config</span>.<span class="fn">default</span>()
+        .<span class="fn">with_host</span>(<span class="str">"api.example.com"</span>)
+        .<span class="fn">with_port</span>(<span class="num">443</span>)
+
+    <span class="fn">println</span>(config.host)     <span class="cm">// api.example.com</span>
+    <span class="fn">println</span>(config.port)     <span class="cm">// 443</span>
+    <span class="fn">println</span>(config.timeout)  <span class="cm">// 30</span>
+}
+
+<span class="fn">main</span>()</code></pre>
+                        </div>
+                        <div class="block-explanation">
+                            <p>Builder-style methods let you customize objects fluently. Each method returns a new instance with one field changed, keeping the struct immutable.</p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Section 4: Instance Methods -->
+                <section id="methods" class="guide-section">
+                    <div class="section-header">
+                        <span class="section-number">04</span>
+                        <h2>Instance Methods</h2>
+                    </div>
+                    <div class="section-intro">
+                        <p>Instance methods take <code>self</code> and operate on struct data. They're called on instances with dot notation.</p>
+                    </div>
+
+                    <div class="guide-block">
+                        <div class="block-header">
+                            <span class="block-label">Self Parameter</span>
+                        </div>
+                        <div class="code-box">
+                            <pre class="code-box-content"><code><span class="kw">struct</span> <span class="ty">Vector2</span> {
+    x: <span class="ty">float</span>
+    y: <span class="ty">float</span>
+}
+
+<span class="kw">impl</span> <span class="ty">Vector2</span> {
+    <span class="cm">// 'self' refers to the instance</span>
+    <span class="kw">fn</span> <span class="fn">length</span>(self) -> <span class="ty">float</span> {
+        <span class="kw">return</span> (self.x * self.x + self.y * self.y).<span class="fn">sqrt</span>()
+    }
+
+    <span class="kw">fn</span> <span class="fn">add</span>(self, other: <span class="ty">Vector2</span>) -> <span class="ty">Vector2</span> {
+        <span class="kw">return</span> <span class="ty">Vector2</span> {
+            x: self.x + other.x,
+            y: self.y + other.y
+        }
+    }
+
+    <span class="kw">fn</span> <span class="fn">scale</span>(self, factor: <span class="ty">float</span>) -> <span class="ty">Vector2</span> {
+        <span class="kw">return</span> <span class="ty">Vector2</span> {
+            x: self.x * factor,
+            y: self.y * factor
+        }
+    }
+
+    <span class="kw">fn</span> <span class="fn">dot</span>(self, other: <span class="ty">Vector2</span>) -> <span class="ty">float</span> {
+        <span class="kw">return</span> self.x * other.x + self.y * other.y
+    }
+}
+
+<span class="kw">fn</span> <span class="fn">main</span>() {
+    <span class="kw">let</span> v1 = <span class="ty">Vector2</span> { x: <span class="num">3.0</span>, y: <span class="num">4.0</span> }
+    <span class="kw">let</span> v2 = <span class="ty">Vector2</span> { x: <span class="num">1.0</span>, y: <span class="num">2.0</span> }
+
+    <span class="fn">println</span>(v1.<span class="fn">length</span>())        <span class="cm">// 5.0</span>
+
+    <span class="kw">let</span> sum = v1.<span class="fn">add</span>(v2)
+    <span class="fn">println</span>(sum.x)              <span class="cm">// 4.0</span>
+    <span class="fn">println</span>(sum.y)              <span class="cm">// 6.0</span>
+
+    <span class="kw">let</span> scaled = v1.<span class="fn">scale</span>(<span class="num">2.0</span>)
+    <span class="fn">println</span>(scaled.x)           <span class="cm">// 6.0</span>
+    <span class="fn">println</span>(scaled.y)           <span class="cm">// 8.0</span>
+}
+
+<span class="fn">main</span>()</code></pre>
+                        </div>
+                    </div>
+
+                    <div class="guide-block">
+                        <div class="block-header">
+                            <span class="block-label">Method Chaining</span>
+                        </div>
+                        <div class="code-box">
+                            <pre class="code-box-content"><code><span class="kw">struct</span> <span class="ty">StringBuilder</span> {
+    content: <span class="ty">string</span>
+}
+
+<span class="kw">impl</span> <span class="ty">StringBuilder</span> {
+    <span class="kw">fn</span> <span class="fn">new</span>() -> <span class="ty">StringBuilder</span> {
+        <span class="kw">return</span> <span class="ty">StringBuilder</span> { content: <span class="str">""</span> }
+    }
+
+    <span class="kw">fn</span> <span class="fn">append</span>(self, text: <span class="ty">string</span>) -> <span class="ty">StringBuilder</span> {
+        <span class="kw">return</span> <span class="ty">StringBuilder</span> { content: self.content + text }
+    }
+
+    <span class="kw">fn</span> <span class="fn">append_line</span>(self, text: <span class="ty">string</span>) -> <span class="ty">StringBuilder</span> {
+        <span class="kw">return</span> <span class="ty">StringBuilder</span> { content: self.content + text + <span class="str">"\n"</span> }
+    }
+
+    <span class="kw">fn</span> <span class="fn">build</span>(self) -> <span class="ty">string</span> {
+        <span class="kw">return</span> self.content
+    }
+}
+
+<span class="kw">fn</span> <span class="fn">main</span>() {
+    <span class="kw">let</span> result = <span class="ty">StringBuilder</span>.<span class="fn">new</span>()
+        .<span class="fn">append_line</span>(<span class="str">"# Report"</span>)
+        .<span class="fn">append_line</span>(<span class="str">""</span>)
+        .<span class="fn">append</span>(<span class="str">"Total: "</span>)
+        .<span class="fn">append</span>(<span class="str">"100"</span>)
+        .<span class="fn">build</span>()
+
+    <span class="fn">println</span>(result)
+}
+
+<span class="fn">main</span>()</code></pre>
+                        </div>
+                        <div class="block-explanation">
+                            <p>Methods that return <code>Self</code> enable fluent chaining. Each method creates a new instance, keeping the original unchanged.</p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Section 5: Enums -->
+                <section id="enums" class="guide-section">
+                    <div class="section-header">
+                        <span class="section-number">05</span>
+                        <h2>Enums</h2>
+                    </div>
+                    <div class="section-intro">
+                        <p>Enums define types with a fixed set of variants. Each variant can optionally carry data.</p>
+                    </div>
+
+                    <div class="guide-block">
+                        <div class="block-header">
+                            <span class="block-label">Simple Enums</span>
+                        </div>
+                        <div class="code-box">
+                            <pre class="code-box-content"><code><span class="kw">enum</span> <span class="ty">Color</span> {
+    <span class="fn">Red</span>,
+    <span class="fn">Green</span>,
+    <span class="fn">Blue</span>
+}
+
+<span class="kw">fn</span> <span class="fn">to_hex</span>(color: <span class="ty">Color</span>) -> <span class="ty">string</span> {
+    <span class="kw">return</span> <span class="kw">match</span> color {
+        <span class="ty">Color</span>::<span class="fn">Red</span> => <span class="str">"#FF0000"</span>,
+        <span class="ty">Color</span>::<span class="fn">Green</span> => <span class="str">"#00FF00"</span>,
+        <span class="ty">Color</span>::<span class="fn">Blue</span> => <span class="str">"#0000FF"</span>
+    }
+}
+
+<span class="kw">fn</span> <span class="fn">main</span>() {
+    <span class="kw">let</span> c = <span class="ty">Color</span>::<span class="fn">Red</span>
+    <span class="fn">println</span>(<span class="fn">to_hex</span>(c))  <span class="cm">// #FF0000</span>
+}
+
+<span class="fn">main</span>()</code></pre>
+                        </div>
+                        <div class="block-explanation">
+                            <p>Use <code>::</code> to access enum variants. Simple enums (without data) are like C-style enums but type-safe.</p>
+                        </div>
+                    </div>
+
+                    <div class="guide-block">
+                        <div class="block-header">
+                            <span class="block-label">Enums with Data</span>
+                        </div>
+                        <div class="code-box">
+                            <pre class="code-box-content"><code><span class="kw">enum</span> <span class="ty">Message</span> {
+    <span class="fn">Text</span>(<span class="ty">string</span>),
+    <span class="fn">Number</span>(<span class="ty">int</span>),
+    <span class="fn">Pair</span>(<span class="ty">int</span>, <span class="ty">int</span>),
+    <span class="fn">Empty</span>
+}
+
+<span class="kw">fn</span> <span class="fn">describe</span>(msg: <span class="ty">Message</span>) -> <span class="ty">string</span> {
+    <span class="kw">return</span> <span class="kw">match</span> msg {
+        <span class="ty">Message</span>::<span class="fn">Text</span>(s) => <span class="str">"Text: "</span> + s,
+        <span class="ty">Message</span>::<span class="fn">Number</span>(n) => <span class="str">"Number: "</span> + n,
+        <span class="ty">Message</span>::<span class="fn">Pair</span>(a, b) => <span class="str">"Pair: ("</span> + a + <span class="str">", "</span> + b + <span class="str">")"</span>,
+        <span class="ty">Message</span>::<span class="fn">Empty</span> => <span class="str">"Empty message"</span>
+    }
+}
+
+<span class="kw">fn</span> <span class="fn">main</span>() {
+    <span class="kw">let</span> m1 = <span class="ty">Message</span>::<span class="fn">Text</span>(<span class="str">"Hello"</span>)
+    <span class="kw">let</span> m2 = <span class="ty">Message</span>::<span class="fn">Number</span>(<span class="num">42</span>)
+    <span class="kw">let</span> m3 = <span class="ty">Message</span>::<span class="fn">Pair</span>(<span class="num">10</span>, <span class="num">20</span>)
+    <span class="kw">let</span> m4 = <span class="ty">Message</span>::<span class="fn">Empty</span>
+
+    <span class="fn">println</span>(<span class="fn">describe</span>(m1))  <span class="cm">// Text: Hello</span>
+    <span class="fn">println</span>(<span class="fn">describe</span>(m2))  <span class="cm">// Number: 42</span>
+    <span class="fn">println</span>(<span class="fn">describe</span>(m3))  <span class="cm">// Pair: (10, 20)</span>
+    <span class="fn">println</span>(<span class="fn">describe</span>(m4))  <span class="cm">// Empty message</span>
+}
+
+<span class="fn">main</span>()</code></pre>
+                        </div>
+                        <div class="block-explanation">
+                            <p>Variants can carry different types and amounts of data. Use pattern matching to extract the data from each variant.</p>
+                        </div>
+                    </div>
+
+                    <div class="guide-block">
+                        <div class="block-header">
+                            <span class="block-label">Generic Enums</span>
+                        </div>
+                        <div class="code-box">
+                            <pre class="code-box-content"><code><span class="kw">enum</span> <span class="ty">Option</span>&lt;<span class="ty">T</span>&gt; {
+    <span class="fn">Some</span>(<span class="ty">T</span>),
+    <span class="fn">None</span>
+}
+
+<span class="kw">enum</span> <span class="ty">Result</span>&lt;<span class="ty">T</span>, <span class="ty">E</span>&gt; {
+    <span class="fn">Ok</span>(<span class="ty">T</span>),
+    <span class="fn">Err</span>(<span class="ty">E</span>)
+}
+
+<span class="kw">fn</span> <span class="fn">divide</span>(a: <span class="ty">int</span>, b: <span class="ty">int</span>) -> <span class="ty">Result</span>&lt;<span class="ty">int</span>, <span class="ty">string</span>&gt; {
+    <span class="kw">if</span> b == <span class="num">0</span> {
+        <span class="kw">return</span> <span class="ty">Result</span>::<span class="fn">Err</span>(<span class="str">"Division by zero"</span>)
+    }
+    <span class="kw">return</span> <span class="ty">Result</span>::<span class="fn">Ok</span>(a / b)
+}
+
+<span class="kw">fn</span> <span class="fn">main</span>() {
+    <span class="kw">let</span> some_int = <span class="ty">Option</span>::<span class="fn">Some</span>(<span class="num">42</span>)
+    <span class="kw">let</span> some_str = <span class="ty">Option</span>::<span class="fn">Some</span>(<span class="str">"hello"</span>)
+    <span class="kw">let</span> nothing: <span class="ty">Option</span>&lt;<span class="ty">int</span>&gt; = <span class="ty">Option</span>::<span class="fn">None</span>
+
+    <span class="kw">match</span> <span class="fn">divide</span>(<span class="num">10</span>, <span class="num">2</span>) {
+        <span class="ty">Result</span>::<span class="fn">Ok</span>(v) => <span class="fn">println</span>(<span class="str">"Result: "</span> + v),
+        <span class="ty">Result</span>::<span class="fn">Err</span>(e) => <span class="fn">println</span>(<span class="str">"Error: "</span> + e)
+    }
+}
+
+<span class="fn">main</span>()</code></pre>
+                        </div>
+                        <div class="block-explanation">
+                            <p>Generic enums like <code>Option&lt;T&gt;</code> and <code>Result&lt;T, E&gt;</code> work with any types. They're fundamental patterns for handling absence and errors.</p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Section 6: Composition -->
+                <section id="composition" class="guide-section">
+                    <div class="section-header">
+                        <span class="section-number">06</span>
+                        <h2>Composition</h2>
+                    </div>
+                    <div class="section-intro">
+                        <p>Build complex types by composing simpler ones. Prefer composition over inheritance.</p>
+                    </div>
+
+                    <div class="guide-block">
+                        <div class="block-header">
+                            <span class="block-label">Composing Structs</span>
+                        </div>
+                        <div class="code-box">
+                            <pre class="code-box-content"><code><span class="kw">struct</span> <span class="ty">Position</span> {
+    x: <span class="ty">int</span>
+    y: <span class="ty">int</span>
+}
+
+<span class="kw">struct</span> <span class="ty">Velocity</span> {
+    dx: <span class="ty">int</span>
+    dy: <span class="ty">int</span>
+}
+
+<span class="kw">struct</span> <span class="ty">Entity</span> {
+    name: <span class="ty">string</span>
+    pos: <span class="ty">Position</span>
+    vel: <span class="ty">Velocity</span>
+}
+
+<span class="kw">impl</span> <span class="ty">Entity</span> {
+    <span class="kw">fn</span> <span class="fn">new</span>(name: <span class="ty">string</span>) -> <span class="ty">Entity</span> {
+        <span class="kw">return</span> <span class="ty">Entity</span> {
+            name: name,
+            pos: <span class="ty">Position</span> { x: <span class="num">0</span>, y: <span class="num">0</span> },
+            vel: <span class="ty">Velocity</span> { dx: <span class="num">0</span>, dy: <span class="num">0</span> }
+        }
+    }
+
+    <span class="kw">fn</span> <span class="fn">update</span>(self) -> <span class="ty">Entity</span> {
+        <span class="kw">return</span> <span class="ty">Entity</span> {
+            name: self.name,
+            pos: <span class="ty">Position</span> {
+                x: self.pos.x + self.vel.dx,
+                y: self.pos.y + self.vel.dy
+            },
+            vel: self.vel
+        }
+    }
+
+    <span class="kw">fn</span> <span class="fn">set_velocity</span>(self, dx: <span class="ty">int</span>, dy: <span class="ty">int</span>) -> <span class="ty">Entity</span> {
+        <span class="kw">return</span> <span class="ty">Entity</span> {
+            name: self.name,
+            pos: self.pos,
+            vel: <span class="ty">Velocity</span> { dx: dx, dy: dy }
+        }
+    }
+}
+
+<span class="kw">fn</span> <span class="fn">main</span>() {
+    <span class="kw">let</span> player = <span class="ty">Entity</span>.<span class="fn">new</span>(<span class="str">"Player"</span>)
+        .<span class="fn">set_velocity</span>(<span class="num">1</span>, <span class="num">2</span>)
+        .<span class="fn">update</span>()
+        .<span class="fn">update</span>()
+        .<span class="fn">update</span>()
+
+    <span class="fn">println</span>(player.name)    <span class="cm">// Player</span>
+    <span class="fn">println</span>(player.pos.x)   <span class="cm">// 3</span>
+    <span class="fn">println</span>(player.pos.y)   <span class="cm">// 6</span>
+}
+
+<span class="fn">main</span>()</code></pre>
+                        </div>
+                        <div class="block-explanation">
+                            <p>Compose types by including them as fields. This creates clear ownership and enables modular design - each struct focuses on one responsibility.</p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Next Steps -->
+                <section class="guide-section guide-next">
+                    <h2>Continue Learning</h2>
+                    <p>Explore more Lira features:</p>
+                    <div class="next-steps-grid">
+                        <a href="concurrency.html" class="next-step-card">
+                            <h4>Concurrency</h4>
+                            <p>Fibers, channels, and async patterns</p>
+                        </a>
+                        <a href="pattern-matching.html" class="next-step-card">
+                            <h4>Pattern Matching</h4>
+                            <p>Destructure data and handle variants</p>
+                        </a>
+                        <a href="types.html" class="next-step-card">
+                            <h4>Type System</h4>
+                            <p>Generics, inference, and type safety</p>
+                        </a>
+                        <a href="modules.html" class="next-step-card">
+                            <h4>Modules</h4>
+                            <p>Organize code with imports</p>
+                        </a>
+                    </div>
+                </section>
+
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-brand">
+                    <svg class="footer-logo" viewBox="0 0 40 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M4 8C4 4 8 2 12 4L20 8L28 4C32 2 36 4 36 8V36C36 40 32 44 28 44L20 40L12 44C8 44 4 40 4 36V8Z" stroke="currentColor" stroke-width="2.5" fill="none"/>
+                        <line x1="14" y1="12" x2="14" y2="36" stroke="#E8A924" stroke-width="2" stroke-linecap="round"/>
+                        <line x1="20" y1="10" x2="20" y2="38" stroke="#E8A924" stroke-width="2" stroke-linecap="round"/>
+                        <line x1="26" y1="12" x2="26" y2="36" stroke="#E8A924" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <p>A systems programming language<br>crafted for harmony.</p>
+                </div>
+                <div class="footer-links">
+                    <div class="footer-column">
+                        <h4>Resources</h4>
+                        <a href="https://github.com/HelgeSverre/lira/tree/main/docs">Documentation</a>
+                        <a href="https://github.com/HelgeSverre/lira/tree/main/examples">Examples</a>
+                        <a href="https://github.com/HelgeSverre/lira/tree/main/stdlib">Standard Library</a>
+                    </div>
+                    <div class="footer-column">
+                        <h4>Community</h4>
+                        <a href="https://github.com/HelgeSverre/lira">GitHub</a>
+                        <a href="https://github.com/HelgeSverre/lira/issues">Issues</a>
+                        <a href="https://github.com/HelgeSverre/lira/discussions">Discussions</a>
+                    </div>
+                    <div class="footer-column">
+                        <h4>Deep Dives</h4>
+                        <a href="concurrency.html">Concurrency</a>
+                        <a href="pattern-matching.html">Pattern Matching</a>
+                        <a href="types.html">Type System</a>
+                    </div>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>Made with care. Open source under MIT.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>

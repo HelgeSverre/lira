@@ -379,3 +379,12 @@ ts-parse file:
 [group('treesitter')]
 ts-highlight file:
     cd editors/tree-sitter-lira && npx tree-sitter highlight {{ file }}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Website - Static site development
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Serve website locally
+[group('website')]
+website-serve port="3000":
+    cd website && bunx serve -l {{ port }}
