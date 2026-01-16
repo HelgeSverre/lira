@@ -124,14 +124,16 @@ lira-doc stdlib/           # Generate docs for a directory
 
 ## Editor Support
 
-| Editor   | Extension                              | Syntax | LSP | Tree-sitter |
-| -------- | -------------------------------------- | :----: | :-: | :---------: |
-| VS Code  | [vscode-lira](editors/vscode-lira)     | ✓      | ✓   | —           |
-| Zed      | [zed-lira](editors/zed-lira)           | ✓      | ✓   | ✓           |
-| Neovim   | [vim-lira](editors/vim-lira)           | ✓      | ✓   | ✓           |
-| Helix    | [helix-lira](editors/helix-lira)       | ✓      | ✓   | ✓           |
-| Vim      | [vim-lira](editors/vim-lira)           | ✓      | —   | —           |
-| IntelliJ | [intellij-lira](editors/intellij-lira) | ✓      | —   | —           |
+| Editor   | Extension                              | Syntax | LSP | Tree-sitter | Notes |
+| -------- | -------------------------------------- | :----: | :-: | :---------: | ----- |
+| VS Code  | [vscode-lira](editors/vscode-lira)     | ✓      | ✓   | —           | Full LSP client |
+| Zed      | [zed-lira](editors/zed-lira)           | ✓      | ✓   | ✓           | Auto-configured |
+| Neovim   | [vim-lira](editors/vim-lira)           | ✓      | ✓   | ✓           | Multiple LSP options |
+| Helix    | [helix-lira](editors/helix-lira)       | ✓      | ✓   | ✓           | Full integration |
+| Vim      | [vim-lira](editors/vim-lira)           | ✓      | ✓   | —           | ALE/vim-lsp support |
+| IntelliJ | [intellij-lira](editors/intellij-lira) | ✓      | ✓*  | —           | Via LSP4IJ plugin |
+
+*Requires plugin installation - see extension README for setup instructions.
 
 Install with `just <editor>-install` (e.g., `just nvim-install`).
 
@@ -218,7 +220,7 @@ import std.fs.{read_file, write_file}
 | VM Core                 | Complete                        |
 | Fiber Runtime           | Complete                        |
 | Standard Library        | Complete (21 modules)           |
-| Language Server         | Complete (14 features)          |
+| Language Server         | Complete (20 features)          |
 | Documentation Generator | Complete                        |
 | Editor Extensions       | Complete (6 editors)            |
 | Code Formatter          | Planned                         |

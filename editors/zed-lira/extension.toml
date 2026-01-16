@@ -2,12 +2,19 @@ id = "lira"
 name = "Lira"
 version = "0.1.0"
 schema_version = 1
-description = "Lira programming language support."
-repository = "https://github.com/lira-lang/lira"
+description = "Lira programming language support with syntax highlighting and LSP."
+repository = "https://github.com/HelgeSverre/lira"
 authors = ["Lira contributors"]
 
 [grammars.lira]
-# For local development: use file:// URL with current git rev
-repository = "file:///Users/helge/code/lira"
+repository = "https://github.com/HelgeSverre/lira"
 path = "editors/tree-sitter-lira"
-rev = "8b063eb59ac9403af044b8679373ee2b28bfd027"
+rev = "main"
+
+[language_servers.lira-lsp]
+name = "Lira Language Server"
+languages = ["Lira"]
+
+[language_servers.lira-lsp.binary]
+path = "lira-lsp"
+arguments = []
