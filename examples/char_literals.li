@@ -15,7 +15,7 @@ fn main() {
     // Escape sequences in chars
     let newline = '\n'
     let tab = '\t'
-    let quote = '\''
+    let quote = \''
     let backslash = '\\'
 
     print("newline test")
