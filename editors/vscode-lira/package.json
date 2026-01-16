@@ -69,7 +69,94 @@
           "description": "Path to the lira-lsp binary"
         }
       }
-    }
+    },
+    "configurationDefaults": {
+      "[lira]": {
+        "editor.semanticHighlighting.enabled": true
+      }
+    },
+    "semanticTokenScopes": [
+      {
+        "language": "lira",
+        "scopes": {
+          "function": ["entity.name.function.lira"],
+          "function.declaration": ["entity.name.function.definition.lira"],
+          "type": ["entity.name.type.lira"],
+          "struct": ["entity.name.type.struct.lira"],
+          "enum": ["entity.name.type.enum.lira"],
+          "variable": ["variable.other.lira"],
+          "variable.readonly": ["variable.other.constant.lira"],
+          "parameter": ["variable.parameter.lira"],
+          "keyword": ["keyword.control.lira"],
+          "string": ["string.quoted.double.lira"],
+          "number": ["constant.numeric.lira"],
+          "comment": ["comment.line.lira"],
+          "operator": ["keyword.operator.lira"]
+        }
+      }
+    ],
+    "commands": [
+      {
+        "command": "lira.runFile",
+        "title": "Run File",
+        "category": "Lira",
+        "icon": "$(play)"
+      },
+      {
+        "command": "lira.checkFile",
+        "title": "Check File",
+        "category": "Lira",
+        "icon": "$(check)"
+      },
+      {
+        "command": "lira.showAST",
+        "title": "Show AST",
+        "category": "Lira",
+        "icon": "$(list-tree)"
+      }
+    ],
+    "menus": {
+      "editor/title/run": [
+        {
+          "command": "lira.runFile",
+          "when": "editorLangId == lira",
+          "group": "navigation"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "lira.runFile",
+          "when": "editorLangId == lira",
+          "group": "lira@1"
+        },
+        {
+          "command": "lira.checkFile",
+          "when": "editorLangId == lira",
+          "group": "lira@2"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "lira.runFile",
+        "key": "ctrl+shift+r",
+        "mac": "cmd+shift+r",
+        "when": "editorLangId == lira"
+      },
+      {
+        "command": "lira.checkFile",
+        "key": "ctrl+shift+c",
+        "mac": "cmd+shift+c",
+        "when": "editorLangId == lira"
+      }
+    ],
+    "iconThemes": [
+      {
+        "id": "lira-icons",
+        "label": "Lira File Icons",
+        "path": "./icons/lira-icon-theme.json"
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
