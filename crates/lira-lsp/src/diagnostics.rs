@@ -32,10 +32,12 @@ fn parse_error_message(error: &str, content: &str) -> Vec<Diagnostic> {
     // - "Error at line X, column Y: message"
     // - "Line X: message"
     // - "[X:Y] message"
+    // - "X:Y: message" (simple position format from lexer/parser)
 
     let line_col_regex =
         Regex::new(r"(?:Error at |)line\s*(\d+)(?:,?\s*column\s*(\d+))?:?\s*(.*)").unwrap();
     let bracket_regex = Regex::new(r"\[(\d+):(\d+)\]\s*(.*)").unwrap();
+    let simple_pos_regex = Regex::new(r"^(\d+):(\d+):\s*(.*)").unwrap();
 
     // Count total lines for range validation
     let line_count = content.lines().count();
@@ -53,6 +55,17 @@ fn parse_error_message(error: &str, content: &str) -> Vec<Diagnostic> {
             let message = caps.get(3).map(|m| m.as_str()).unwrap_or(line);
             (line_num, col_num, message.to_string())
         } else if let Some(caps) = bracket_regex.captures(line) {
+            let line_num = caps
+                .get(1)
+                .map(|m| m.as_str().parse::<u32>().unwrap_or(1))
+                .unwrap_or(1);
+            let col_num = caps
+                .get(2)
+                .map(|m| m.as_str().parse::<u32>().unwrap_or(0))
+                .unwrap_or(0);
+            let message = caps.get(3).map(|m| m.as_str()).unwrap_or(line);
+            (line_num, col_num, message.to_string())
+        } else if let Some(caps) = simple_pos_regex.captures(line) {
             let line_num = caps
                 .get(1)
                 .map(|m| m.as_str().parse::<u32>().unwrap_or(1))
@@ -146,5 +159,17 @@ mod tests {
 
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].range.start.line, 2);
+    }
+
+    #[test]
+    fn test_parse_simple_position_error() {
+        let error = "18:17: Unterminated character literal";
+        let content = "// lines 1-17\n".repeat(17) + "let quote = '\\";
+        let diagnostics = parse_error_message(&error, &content);
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].range.start.line, 17); // 0-indexed
+        assert_eq!(diagnostics[0].range.start.character, 16); // 0-indexed
+        assert_eq!(diagnostics[0].message, "Unterminated character literal");
     }
 }
