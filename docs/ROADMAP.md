@@ -27,7 +27,7 @@ This roadmap tracks the implementation of Lira, a modern systems programming lan
 7. [Phase 6: Standard Library](#phase-6-standard-library) - COMPLETE
 8. [Phase 7: Advanced Features](#phase-7-advanced-features) - COMPLETE
 9. [Phase 8: Developer Tooling](#phase-8-developer-tooling) - IN PROGRESS (LSP: 20 features complete)
-10. [Phase 9: Developer Experience & Debugging](#phase-9-developer-experience--debugging) - PLANNED
+10. [Phase 9: Developer Experience & Debugging](#phase-9-developer-experience--debugging) - IN PROGRESS (2/9)
 11. [Phase 10: Performance & Profiling](#phase-10-performance--profiling) - PLANNED
 12. [Phase 11: Package Ecosystem](#phase-11-package-ecosystem) - PLANNED
 13. [Phase 12: Native Compilation](#phase-12-native-compilation) - PLANNED
@@ -577,13 +577,13 @@ _This roadmap tracks the development of Lira as a standalone systems programming
 
 **Goal**: Improve developer workflow with interactive tools and debugging support.
 **Depends On**: Phase 8
-**Status**: PLANNED
+**Status**: IN PROGRESS (2/9 complete)
 
 | ID   | Task                    | Description                                                         | Status |
 | ---- | ----------------------- | ------------------------------------------------------------------- | ------ |
 | T9.1 | REPL                    | Interactive interpreter for quick experimentation (`lira repl`)     | [ ]    |
-| T9.2 | AST Dump Flag           | `lirac --ast file.li` to output parsed AST as JSON/pretty-print     | [ ]    |
-| T9.3 | Bytecode Disassembler   | `lirac --disasm file.lic` for human-readable bytecode inspection    | [ ]    |
+| T9.2 | AST Dump Flag           | `lira ast file.li` to output parsed AST as JSON                     | [x]    |
+| T9.3 | Bytecode Disassembler   | `lira disasm file.lic` for human-readable bytecode inspection       | [x]    |
 | T9.4 | Debug Symbols           | Emit DWARF-like debug info, source mapping for stack traces         | [ ]    |
 | T9.5 | Step Debugger           | Interactive debugger with breakpoints, step-in/over, var inspection | [ ]    |
 | T9.6 | Watch Mode              | `lira watch` - auto-recompile on file changes                       | [ ]    |
