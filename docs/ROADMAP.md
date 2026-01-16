@@ -1,7 +1,7 @@
 # Lira Implementation Roadmap
 
-**Version**: 3.1
-**Last Updated**: 2026-01-09
+**Version**: 3.2
+**Last Updated**: 2026-01-16
 **Status**: Phase 8 In Progress - Developer Tooling
 
 ---
@@ -26,7 +26,7 @@ This roadmap tracks the implementation of Lira, a modern systems programming lan
 6. [Phase 5: Fiber Runtime](#phase-5-fiber-runtime) - COMPLETE
 7. [Phase 6: Standard Library](#phase-6-standard-library) - COMPLETE
 8. [Phase 7: Advanced Features](#phase-7-advanced-features) - COMPLETE
-9. [Phase 8: Developer Tooling](#phase-8-developer-tooling) - IN PROGRESS (LSP: 19/20 features)
+9. [Phase 8: Developer Tooling](#phase-8-developer-tooling) - IN PROGRESS (LSP: 20 features complete)
 10. [Phase 9: Developer Experience & Debugging](#phase-9-developer-experience--debugging) - PLANNED
 11. [Phase 10: Performance & Profiling](#phase-10-performance--profiling) - PLANNED
 12. [Phase 11: Package Ecosystem](#phase-11-package-ecosystem) - PLANNED
@@ -470,9 +470,9 @@ just fmt
 | Compiler LOC     | ~15,900 |
 | VM LOC           | ~5,600  |
 | Core LOC         | ~350    |
-| LSP LOC          | ~2,800  |
+| LSP LOC          | ~3,200  |
 | Stdlib modules   | 21      |
-| LSP features     | 12      |
+| LSP features     | 20      |
 | Editor plugins   | 6       |
 | Example files  | 86      |
 | Major Phases   | 22      |
@@ -532,9 +532,13 @@ _This roadmap tracks the development of Lira as a standalone systems programming
 | T8.25 | Rename refactor  | Rename symbols across files                 | [x]    |
 | T8.26 | Call hierarchy   | Show callers and callees of functions       | [x]    |
 | T8.27 | Signature help   | Parameter hints while typing function calls | [x]    |
-| T8.35 | Folding ranges   | Code folding for functions, blocks, imports | [x]    |
-| T8.36 | Document links   | Clickable import paths to navigate to files | [x]    |
-| T8.37 | User completions | Complete user-defined symbols (fn, struct)  | [x]    |
+| T8.35 | Folding ranges      | Code folding for functions, blocks, imports | [x]    |
+| T8.36 | Document links      | Clickable import paths to navigate to files | [x]    |
+| T8.37 | User completions    | Complete user-defined symbols (fn, struct)  | [x]    |
+| T8.38 | Document highlight  | Highlight all occurrences of symbol         | [x]    |
+| T8.39 | Selection range     | Smart expand/shrink selection               | [x]    |
+| T8.40 | Workspace symbols   | Search symbols across all files             | [x]    |
+| T8.41 | Type definition     | Go to type definition of symbol             | [x]    |
 
 ### 8.3 Editor Extensions
 
@@ -553,7 +557,7 @@ _This roadmap tracks the development of Lira as a standalone systems programming
 | T8.19 | lira-fmt                       | Code formatter                                           | [ ]    |
 | T8.20 | lira-doc                       | Documentation generator                                  | [x]    |
 | T8.21 | lira-doc - mdbook generation   | Generate mdbook structure from doc comments              | [x]    |
-| T8.22 | lira-doc - mdbook enhancements | Custom theme for mdbook doc site and syntax highlighting | [ ]    |
+| T8.22 | lira-doc - mdbook enhancements | Custom theme for mdbook doc site and syntax highlighting | [x]    |
 
 ### 8.5 Zed Advanced Features
 
