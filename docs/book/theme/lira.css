@@ -1,0 +1,510 @@
+/* Lira mdBook Custom Theme
+ * Based on Lira Brand Guidelines
+ *
+ * Primary Colors:
+ * - Lira Gold: #E8A924
+ * - Night: #1A1B26
+ * - Snow: #F5F5F7
+ *
+ * Secondary Colors:
+ * - Starlight: #6B9AC4
+ * - Moss: #7AA874
+ * - Ember: #E85A4F
+ * - Dusk: #2D2F3D
+ * - Mist: #E8E8EC
+ */
+
+/* ============================================================
+ * CSS Variables - Lira Dark Theme (Primary)
+ * ============================================================ */
+
+:root {
+    /* Brand Colors */
+    --lira-gold: #E8A924;
+    --lira-gold-light: #F0C14B;
+    --lira-night: #1A1B26;
+    --lira-snow: #F5F5F7;
+    --lira-starlight: #6B9AC4;
+    --lira-moss: #7AA874;
+    --lira-ember: #E85A4F;
+    --lira-dusk: #2D2F3D;
+    --lira-mist: #E8E8EC;
+
+    /* Syntax Highlighting */
+    --code-bg: #1A1B26;
+    --code-fg: #F5F5F7;
+    --code-comment: #6B7280;
+    --code-keyword: #E8A924;
+    --code-string: #7AA874;
+    --code-number: #6B9AC4;
+    --code-type: #C4A7E7;
+    --code-operator: #89DDFF;
+    --code-function: #F5F5F7;
+}
+
+/* Apply to all themes to ensure our custom theme takes precedence */
+.ayu,
+.coal,
+.light,
+.navy,
+.rust {
+    /* Background Colors */
+    --bg: var(--lira-night);
+    --fg: var(--lira-snow);
+
+    /* Sidebar */
+    --sidebar-bg: var(--lira-dusk);
+    --sidebar-fg: var(--lira-snow);
+    --sidebar-non-existant: #5c5962;
+    --sidebar-active: var(--lira-gold);
+    --sidebar-spacer: #393939;
+
+    /* Links */
+    --links: var(--lira-starlight);
+
+    /* Inline code */
+    --inline-code-color: var(--lira-gold);
+
+    /* Theme picker / icons */
+    --theme-popup-bg: var(--lira-dusk);
+    --theme-popup-border: #6B7280;
+    --theme-hover: var(--lira-gold);
+
+    /* Quote */
+    --quote-bg: var(--lira-dusk);
+    --quote-border: var(--lira-gold);
+
+    /* Table */
+    --table-border-color: #6B7280;
+    --table-header-bg: var(--lira-dusk);
+    --table-alternate-bg: rgba(45, 47, 61, 0.5);
+
+    /* Searchbar */
+    --searchbar-border-color: #6B7280;
+    --searchbar-bg: var(--lira-dusk);
+    --searchbar-fg: var(--lira-snow);
+    --searchbar-shadow-color: rgba(0, 0, 0, 0.3);
+    --searchresults-header-fg: var(--lira-gold);
+    --searchresults-border-color: #6B7280;
+    --searchresults-li-bg: var(--lira-dusk);
+    --search-mark-bg: var(--lira-gold);
+}
+
+/* ============================================================
+ * Typography
+ * ============================================================ */
+
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+code, pre, .hljs {
+    font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+}
+
+/* Headers */
+h1, h2, h3, h4, h5, h6 {
+    font-weight: 700;
+    color: var(--lira-snow);
+}
+
+h1 {
+    border-bottom: 2px solid var(--lira-gold);
+    padding-bottom: 0.5rem;
+}
+
+h2 {
+    border-bottom: 1px solid var(--lira-dusk);
+    padding-bottom: 0.3rem;
+}
+
+/* ============================================================
+ * Sidebar Styling
+ * ============================================================ */
+
+.sidebar {
+    background: var(--lira-dusk);
+}
+
+.sidebar .sidebar-scrollbox {
+    background: var(--lira-dusk);
+}
+
+/* Active chapter */
+.sidebar .chapter li.chapter-item a.active {
+    color: var(--lira-gold);
+    font-weight: 600;
+    border-left: 3px solid var(--lira-gold);
+    padding-left: 20px;
+    margin-left: -3px;
+}
+
+/* Chapter hover */
+.sidebar .chapter li.chapter-item a:hover {
+    color: var(--lira-gold);
+}
+
+/* Section headers in sidebar */
+.sidebar .chapter li.part-title {
+    color: var(--lira-gold);
+    font-weight: 700;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+    margin-top: 1.5rem;
+}
+
+/* ============================================================
+ * Code Blocks - Lira Night Syntax Theme
+ * ============================================================ */
+
+pre {
+    background: var(--code-bg) !important;
+    border-radius: 8px;
+    border: 1px solid var(--lira-dusk);
+    padding: 1rem;
+}
+
+code {
+    background: var(--code-bg);
+    color: var(--code-fg);
+    border-radius: 4px;
+    padding: 0.1rem 0.3rem;
+}
+
+/* Inline code */
+:not(pre) > code {
+    background: var(--lira-dusk);
+    color: var(--lira-gold);
+    border-radius: 4px;
+    padding: 0.15rem 0.4rem;
+    font-size: 0.9em;
+}
+
+/* Syntax highlighting classes */
+.hljs {
+    background: var(--code-bg) !important;
+    color: var(--code-fg);
+}
+
+.hljs-comment,
+.hljs-quote {
+    color: var(--code-comment);
+    font-style: italic;
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal {
+    color: var(--code-keyword);
+}
+
+.hljs-string,
+.hljs-doctag,
+.hljs-regexp {
+    color: var(--code-string);
+}
+
+.hljs-number,
+.hljs-literal {
+    color: var(--code-number);
+}
+
+.hljs-type,
+.hljs-class,
+.hljs-title {
+    color: var(--code-type);
+}
+
+.hljs-function,
+.hljs-name {
+    color: var(--code-function);
+}
+
+.hljs-built_in,
+.hljs-builtin-name {
+    color: var(--lira-starlight);
+}
+
+.hljs-params {
+    color: var(--code-fg);
+}
+
+.hljs-symbol,
+.hljs-bullet,
+.hljs-attribute {
+    color: var(--code-operator);
+}
+
+.hljs-meta,
+.hljs-meta-keyword {
+    color: var(--lira-gold);
+}
+
+.hljs-addition {
+    color: var(--lira-moss);
+    background: rgba(122, 168, 116, 0.2);
+}
+
+.hljs-deletion {
+    color: var(--lira-ember);
+    background: rgba(232, 90, 79, 0.2);
+}
+
+/* ============================================================
+ * Links
+ * ============================================================ */
+
+a {
+    color: var(--lira-starlight);
+    text-decoration: none;
+    transition: color 0.15s ease;
+}
+
+a:hover {
+    color: var(--lira-gold);
+    text-decoration: underline;
+}
+
+/* ============================================================
+ * Tables
+ * ============================================================ */
+
+table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 1rem 0;
+}
+
+table th {
+    background: var(--lira-dusk);
+    color: var(--lira-gold);
+    font-weight: 600;
+    text-align: left;
+    padding: 0.75rem 1rem;
+    border-bottom: 2px solid var(--lira-gold);
+}
+
+table td {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--lira-dusk);
+}
+
+table tr:nth-child(even) {
+    background: rgba(45, 47, 61, 0.3);
+}
+
+table tr:hover {
+    background: rgba(232, 169, 36, 0.1);
+}
+
+/* ============================================================
+ * Blockquotes / Admonitions
+ * ============================================================ */
+
+blockquote {
+    background: var(--lira-dusk);
+    border-left: 4px solid var(--lira-gold);
+    padding: 1rem 1.5rem;
+    margin: 1rem 0;
+    border-radius: 0 8px 8px 0;
+}
+
+blockquote p {
+    margin: 0;
+}
+
+/* ============================================================
+ * Navigation Buttons
+ * ============================================================ */
+
+.nav-chapters {
+    color: var(--lira-snow);
+    opacity: 0.7;
+    transition: all 0.2s ease;
+}
+
+.nav-chapters:hover {
+    color: var(--lira-gold);
+    opacity: 1;
+}
+
+/* ============================================================
+ * Menu Bar
+ * ============================================================ */
+
+#menu-bar {
+    background: var(--lira-night);
+    border-bottom: 1px solid var(--lira-dusk);
+}
+
+#menu-bar .icon-button {
+    color: var(--lira-snow);
+}
+
+#menu-bar .icon-button:hover {
+    color: var(--lira-gold);
+}
+
+/* ============================================================
+ * Search
+ * ============================================================ */
+
+#searchbar {
+    background: var(--lira-dusk);
+    border: 1px solid #6B7280;
+    color: var(--lira-snow);
+    border-radius: 6px;
+}
+
+#searchbar:focus {
+    border-color: var(--lira-gold);
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(232, 169, 36, 0.2);
+}
+
+.search-results .search-results-title {
+    color: var(--lira-gold);
+}
+
+.search-results .search-results-item {
+    background: var(--lira-dusk);
+    border-radius: 6px;
+    margin: 0.5rem 0;
+}
+
+.search-results .search-results-item:hover {
+    background: rgba(232, 169, 36, 0.1);
+}
+
+mark {
+    background: rgba(232, 169, 36, 0.3);
+    color: var(--lira-snow);
+    border-radius: 2px;
+    padding: 0 2px;
+}
+
+/* ============================================================
+ * Theme Picker
+ * ============================================================ */
+
+#theme-list {
+    background: var(--lira-dusk);
+    border: 1px solid #6B7280;
+    border-radius: 6px;
+}
+
+#theme-list li {
+    color: var(--lira-snow);
+}
+
+#theme-list li:hover {
+    background: rgba(232, 169, 36, 0.2);
+    color: var(--lira-gold);
+}
+
+/* ============================================================
+ * Scrollbar
+ * ============================================================ */
+
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--lira-night);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--lira-dusk);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--lira-gold);
+}
+
+/* ============================================================
+ * Print Styles
+ * ============================================================ */
+
+@media print {
+    .sidebar,
+    #menu-bar,
+    .nav-chapters {
+        display: none;
+    }
+
+    .content {
+        max-width: 100%;
+    }
+
+    pre, code {
+        border: 1px solid #ccc;
+    }
+}
+
+/* ============================================================
+ * Responsive Adjustments
+ * ============================================================ */
+
+@media (max-width: 768px) {
+    .sidebar {
+        background: var(--lira-night);
+    }
+
+    pre {
+        font-size: 0.85rem;
+    }
+}
+
+/* ============================================================
+ * Custom Lira Branding Elements
+ * ============================================================ */
+
+/* Page title with gold accent */
+.content main > h1:first-child {
+    position: relative;
+}
+
+.content main > h1:first-child::before {
+    content: "";
+    position: absolute;
+    left: -1rem;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background: linear-gradient(135deg, #E8A924 0%, #F0C14B 100%);
+    border-radius: 2px;
+}
+
+/* Gold text utility */
+.gold {
+    color: var(--lira-gold);
+}
+
+/* Warning/Note boxes */
+.warning {
+    background: rgba(232, 90, 79, 0.1);
+    border-left: 4px solid var(--lira-ember);
+    padding: 1rem 1.5rem;
+    margin: 1rem 0;
+    border-radius: 0 8px 8px 0;
+}
+
+.note {
+    background: rgba(107, 154, 196, 0.1);
+    border-left: 4px solid var(--lira-starlight);
+    padding: 1rem 1.5rem;
+    margin: 1rem 0;
+    border-radius: 0 8px 8px 0;
+}
+
+.tip {
+    background: rgba(122, 168, 116, 0.1);
+    border-left: 4px solid var(--lira-moss);
+    padding: 1rem 1.5rem;
+    margin: 1rem 0;
+    border-radius: 0 8px 8px 0;
+}

@@ -111,7 +111,22 @@ doc-build: doc-book
 # Serve mdBook documentation locally (requires mdbook)
 [group('docs')]
 doc-serve: doc-book
-    cd docs/book && mdbook serve
+    #!/usr/bin/env bash
+    set -e
+    cd docs/book
+
+    # Find an available port starting from 3000
+    PORT=3000
+    while lsof -Pi :$PORT -sTCP:LISTEN -t >/dev/null 2>&1; do
+        PORT=$((PORT + 1))
+        if [ $PORT -gt 3100 ]; then
+            echo "Error: Could not find an available port between 3000-3100"
+            exit 1
+        fi
+    done
+
+    echo "Serving documentation at http://localhost:$PORT"
+    mdbook serve -p $PORT
 
 # Generate stdlib-only mdBook
 [group('docs')]

@@ -27,8 +27,9 @@ editors/intellij-lira/gradle/
 editors/intellij-lira/gradlew
 editors/intellij-lira/gradlew.bat
 
-# Generated documentation
-docs/book/
+# Generated documentation (keep theme/ for custom mdBook styling)
+docs/book/*
+!docs/book/theme/
 docs/stdlib/
 
 # Misc

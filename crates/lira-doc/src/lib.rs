@@ -206,6 +206,7 @@ build-dir = "book"
 default-theme = "ayu"
 preferred-dark-theme = "ayu"
 git-repository-url = "https://github.com/HelgeSverre/lira"
+additional-css = ["theme/lira.css"]
 "#,
         title
     )
