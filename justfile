@@ -259,6 +259,11 @@ install: release-all
     cp target/release/lira-spec ~/.local/bin/
     cp target/release/lira-playground ~/.local/bin/
 
+# Install only the LSP server to cargo bin
+[group('install')]
+lsp-install:
+    cargo install --path crates/lira-lsp --force
+
 # Install Vim/Neovim syntax highlighting
 [group('install')]
 vim-install:
@@ -337,9 +342,19 @@ nvim-test:
 zed-test:
     zed examples/hello.li
 
+# Open Zed in development mode (rebuilds LSP first)
+[group('editor')]
+zed-dev: lsp-install
+    zed examples/hello.li
+
 # Open Helix with a test file
 [group('editor')]
 helix-test:
+    hx examples/hello.li
+
+# Open Helix in development mode (rebuilds LSP first)
+[group('editor')]
+helix-dev: lsp-install
     hx examples/hello.li
 
 # Build IntelliJ plugin
@@ -366,10 +381,15 @@ vscode-build:
 vscode-test:
     code examples/hello.li
 
-# Open VS Code in extension development mode
+# Open VS Code in extension development mode (rebuilds LSP first)
 [group('editor')]
-vscode-dev:
-    cd editors/vscode-lira && code --extensionDevelopmentPath=$(pwd) ../../examples/hello.li
+vscode-dev: lsp-install
+    cd editors/vscode-lira && code --extensionDevelopmentPath=$(pwd) ../../examples/
+
+# Open VS Code in extension development mode (skip LSP rebuild)
+[group('editor')]
+vscode-dev-quick:
+    cd editors/vscode-lira && code --extensionDevelopmentPath=$(pwd) ../../examples/
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Tree-sitter - Grammar development
