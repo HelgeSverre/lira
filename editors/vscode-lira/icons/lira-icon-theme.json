@@ -1,0 +1,11 @@
+{
+  "iconDefinitions": {
+    "lira-file": { "iconPath": "./lira-file.svg" },
+    "lira-bytecode": { "iconPath": "./lira-bytecode.svg" }
+  },
+  "fileExtensions": {
+    "li": "lira-file",
+    "lira": "lira-file",
+    "lic": "lira-bytecode"
+  }
+}
