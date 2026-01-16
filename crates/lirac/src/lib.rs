@@ -108,3 +108,24 @@ pub fn check_with_imports(source_file: &str, source: &str) -> Result<(), String>
 
     Ok(())
 }
+
+/// Parse a Lira source file and return the AST
+pub fn parse_file(input: &str) -> Result<ast::Program, String> {
+    let source =
+        fs::read_to_string(input).map_err(|e| format!("Failed to read {}: {}", input, e))?;
+
+    parse_source(&source)
+}
+
+/// Parse Lira source code and return the AST
+pub fn parse_source(source: &str) -> Result<ast::Program, String> {
+    let tokens = lexer::tokenize(source)?;
+    parser::parse(&tokens)
+}
+
+/// Parse a Lira source file and return the AST as JSON
+#[cfg(feature = "serde")]
+pub fn parse_file_json(input: &str) -> Result<String, String> {
+    let ast = parse_file(input)?;
+    serde_json::to_string_pretty(&ast).map_err(|e| format!("Failed to serialize AST: {}", e))
+}

@@ -10,5 +10,6 @@ name = "lira"
 path = "src/main.rs"
 
 [dependencies]
-lirac = { path = "../lirac" }
+lirac = { path = "../lirac", features = ["serde"] }
 liravm = { path = "../liravm" }
+lira-core = { path = "../lira-core" }
