@@ -4,28 +4,35 @@
 //! - Diagnostics (syntax and type errors)
 //! - Completion (keywords, built-ins, snippets, user symbols)
 //! - Hover (type info and documentation)
-//! - Go-to-definition, find references
+//! - Go-to-definition, find references, type definition
 //! - Signature help (parameter hints)
 //! - Folding ranges (code folding)
 //! - Document links (clickable imports)
 //! - Call hierarchy (incoming/outgoing calls)
 //! - Code actions (quick fixes, refactoring)
+//! - Document highlight (highlight symbol occurrences)
+//! - Selection range (smart selection expand/shrink)
+//! - Workspace symbols (search across files)
 
 mod call_hierarchy;
 mod code_actions;
 mod completion;
-mod utils;
 mod definition;
 mod diagnostics;
+mod document_highlight;
 mod document_links;
 mod folding;
 mod hover;
 mod inlay_hints;
 mod references;
 mod rename;
+mod selection_range;
 mod semantic_tokens;
 mod signature_help;
 mod symbols;
+mod type_definition;
+mod utils;
+mod workspace_symbols;
 
 use dashmap::DashMap;
 use ropey::Rope;
@@ -142,6 +149,14 @@ impl LanguageServer for LiraLanguageServer {
                         ..Default::default()
                     },
                 )),
+                // Document highlight (highlight all occurrences of symbol)
+                document_highlight_provider: Some(OneOf::Left(true)),
+                // Selection range (smart expand/shrink selection)
+                selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
+                // Workspace symbols (search across all files)
+                workspace_symbol_provider: Some(OneOf::Left(true)),
+                // Go to type definition
+                type_definition_provider: Some(TypeDefinitionProviderCapability::Simple(true)),
                 ..Default::default()
             },
             server_info: Some(ServerInfo {
@@ -457,5 +472,84 @@ impl LanguageServer for LiraLanguageServer {
         } else {
             Ok(Some(actions))
         }
+    }
+
+    async fn document_highlight(
+        &self,
+        params: DocumentHighlightParams,
+    ) -> Result<Option<Vec<DocumentHighlight>>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        let content = match self.documents.get(&uri) {
+            Some(doc) => doc.content.to_string(),
+            None => return Ok(None),
+        };
+
+        let highlights = document_highlight::get_document_highlights(&content, position);
+        if highlights.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(highlights))
+        }
+    }
+
+    async fn selection_range(
+        &self,
+        params: SelectionRangeParams,
+    ) -> Result<Option<Vec<SelectionRange>>> {
+        let uri = params.text_document.uri;
+
+        let content = match self.documents.get(&uri) {
+            Some(doc) => doc.content.to_string(),
+            None => return Ok(None),
+        };
+
+        let ranges = selection_range::get_selection_ranges(&content, &params.positions);
+        if ranges.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(ranges))
+        }
+    }
+
+    async fn symbol(
+        &self,
+        params: WorkspaceSymbolParams,
+    ) -> Result<Option<Vec<SymbolInformation>>> {
+        let query = &params.query;
+
+        // Collect symbols from all open documents
+        let mut all_symbols = Vec::new();
+
+        for entry in self.documents.iter() {
+            let uri = entry.key();
+            let content = entry.value().content.to_string();
+            let symbols = workspace_symbols::extract_symbols(uri, &content);
+            all_symbols.extend(symbols);
+        }
+
+        let filtered = workspace_symbols::filter_symbols(&all_symbols, query);
+        if filtered.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(filtered))
+        }
+    }
+
+    async fn goto_type_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        let content = match self.documents.get(&uri) {
+            Some(doc) => doc.content.to_string(),
+            None => return Ok(None),
+        };
+
+        let location = type_definition::find_type_definition(&uri, &content, position);
+        Ok(location.map(GotoDefinitionResponse::Scalar))
     }
 }

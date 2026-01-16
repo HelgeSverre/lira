@@ -10,12 +10,16 @@ Language Server Protocol implementation for Lira.
 | **Completion** | Keywords, builtins, types, snippets, and user-defined symbols |
 | **Hover** | Type information and documentation on hover |
 | **Go to Definition** | Navigate to symbol definitions |
+| **Go to Type Definition** | Jump to the type definition of a variable |
 | **Find References** | Find all references to a symbol |
 | **Document Symbols** | Outline view with functions, structs, enums, etc. |
+| **Workspace Symbols** | Search symbols across all open files |
 | **Semantic Tokens** | Enhanced syntax highlighting |
 | **Signature Help** | Parameter hints while typing function calls |
 | **Folding Ranges** | Code folding for functions, blocks, and imports |
 | **Document Links** | Clickable import paths to navigate to files |
+| **Document Highlight** | Highlight all occurrences of symbol under cursor |
+| **Selection Range** | Smart expand/shrink selection |
 | **Inlay Hints** | Inline type annotations for inferred types |
 | **Rename Symbol** | Rename variables and functions across the document |
 | **Call Hierarchy** | Show callers and callees of functions |
@@ -76,23 +80,28 @@ Install the [zed-lira](../../editors/zed-lira) extension.
 ```
 lira-lsp/
 ├── src/
-│   ├── lib.rs            # Main LSP server
-│   ├── call_hierarchy.rs # Callers/callees
-│   ├── code_actions.rs   # Quick fixes & refactoring
-│   ├── completion.rs     # Completion provider
-│   ├── definition.rs     # Go to definition
-│   ├── diagnostics.rs    # Error reporting
-│   ├── document_links.rs # Clickable imports
-│   ├── folding.rs        # Code folding
-│   ├── hover.rs          # Hover information
-│   ├── inlay_hints.rs    # Inline type hints
-│   ├── references.rs     # Find references
-│   ├── rename.rs         # Rename symbol
-│   ├── semantic_tokens.rs# Enhanced highlighting
-│   ├── signature_help.rs # Parameter hints
-│   └── symbols.rs        # Document symbols
+│   ├── lib.rs              # Main LSP server
+│   ├── call_hierarchy.rs   # Callers/callees
+│   ├── code_actions.rs     # Quick fixes & refactoring
+│   ├── completion.rs       # Completion provider
+│   ├── definition.rs       # Go to definition
+│   ├── diagnostics.rs      # Error reporting
+│   ├── document_highlight.rs # Highlight occurrences
+│   ├── document_links.rs   # Clickable imports
+│   ├── folding.rs          # Code folding
+│   ├── hover.rs            # Hover information
+│   ├── inlay_hints.rs      # Inline type hints
+│   ├── references.rs       # Find references
+│   ├── rename.rs           # Rename symbol
+│   ├── selection_range.rs  # Smart selection
+│   ├── semantic_tokens.rs  # Enhanced highlighting
+│   ├── signature_help.rs   # Parameter hints
+│   ├── symbols.rs          # Document symbols
+│   ├── type_definition.rs  # Go to type definition
+│   ├── utils.rs            # Shared utilities
+│   └── workspace_symbols.rs # Workspace-wide search
 └── tests/
-    └── lsp_tests.rs      # Integration tests
+    └── lsp_tests.rs        # Integration tests
 ```
 
 ## Testing

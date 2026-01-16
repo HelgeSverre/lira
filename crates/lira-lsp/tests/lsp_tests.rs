@@ -482,6 +482,87 @@ impl TestClient {
         serde_json::from_value(response["result"].clone()).unwrap_or_default()
     }
 
+    /// Request document highlights
+    async fn document_highlight(
+        &mut self,
+        uri: &str,
+        line: u32,
+        character: u32,
+    ) -> Vec<DocumentHighlight> {
+        let id = self
+            .send_request(
+                "textDocument/documentHighlight",
+                json!({
+                    "textDocument": { "uri": uri },
+                    "position": { "line": line, "character": character }
+                }),
+            )
+            .await;
+
+        let response = self.wait_for_response(id).await;
+        serde_json::from_value(response["result"].clone()).unwrap_or_default()
+    }
+
+    /// Request selection ranges
+    async fn selection_range(
+        &mut self,
+        uri: &str,
+        positions: Vec<Position>,
+    ) -> Vec<SelectionRange> {
+        let id = self
+            .send_request(
+                "textDocument/selectionRange",
+                json!({
+                    "textDocument": { "uri": uri },
+                    "positions": positions
+                }),
+            )
+            .await;
+
+        let response = self.wait_for_response(id).await;
+        serde_json::from_value(response["result"].clone()).unwrap_or_default()
+    }
+
+    /// Request workspace symbols
+    async fn workspace_symbol(&mut self, query: &str) -> Vec<SymbolInformation> {
+        let id = self
+            .send_request(
+                "workspace/symbol",
+                json!({
+                    "query": query
+                }),
+            )
+            .await;
+
+        let response = self.wait_for_response(id).await;
+        serde_json::from_value(response["result"].clone()).unwrap_or_default()
+    }
+
+    /// Request go to type definition
+    async fn goto_type_definition(
+        &mut self,
+        uri: &str,
+        line: u32,
+        character: u32,
+    ) -> Option<Location> {
+        let id = self
+            .send_request(
+                "textDocument/typeDefinition",
+                json!({
+                    "textDocument": { "uri": uri },
+                    "position": { "line": line, "character": character }
+                }),
+            )
+            .await;
+
+        let response = self.wait_for_response(id).await;
+        if response["result"].is_null() {
+            None
+        } else {
+            serde_json::from_value(response["result"].clone()).ok()
+        }
+    }
+
     /// Wait for diagnostics for a specific URI
     async fn wait_for_diagnostics(&mut self, uri: &str, timeout_ms: u64) -> Vec<Diagnostic> {
         if let Some(msg) = self
@@ -1339,5 +1420,300 @@ fn main() {}
         titles.iter().any(|t| t.contains("Organize imports")),
         "Should have 'Organize imports' action, got: {:?}",
         titles
+    );
+}
+
+// ============================================================================
+// Document Highlight Tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_document_highlight_variable() {
+    let mut client = TestClient::new().await;
+    client.initialize().await;
+
+    let uri = "file:///test.li";
+    client
+        .did_open(
+            uri,
+            r#"fn main() {
+    let x = 5
+    println(x)
+    let y = x + 1
+}
+"#,
+        )
+        .await;
+
+    // Get highlights for "x"
+    let highlights = client.document_highlight(uri, 1, 8).await;
+
+    assert_eq!(highlights.len(), 3, "Should find 3 occurrences of x");
+
+    // First occurrence (definition) should be WRITE
+    assert_eq!(highlights[0].kind, Some(DocumentHighlightKind::WRITE));
+    // Others should be READ
+    assert_eq!(highlights[1].kind, Some(DocumentHighlightKind::READ));
+    assert_eq!(highlights[2].kind, Some(DocumentHighlightKind::READ));
+}
+
+#[tokio::test]
+async fn test_document_highlight_function() {
+    let mut client = TestClient::new().await;
+    client.initialize().await;
+
+    let uri = "file:///test.li";
+    client
+        .did_open(
+            uri,
+            r#"fn add(a: int, b: int) -> int {
+    a + b
+}
+
+fn main() {
+    add(1, 2)
+    add(3, 4)
+}
+"#,
+        )
+        .await;
+
+    // Get highlights for "add"
+    let highlights = client.document_highlight(uri, 5, 4).await;
+
+    assert_eq!(highlights.len(), 3, "Should find 3 occurrences of add");
+}
+
+// ============================================================================
+// Selection Range Tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_selection_range_basic() {
+    let mut client = TestClient::new().await;
+    client.initialize().await;
+
+    let uri = "file:///test.li";
+    client
+        .did_open(
+            uri,
+            r#"fn main() {
+    let x = 42
+}
+"#,
+        )
+        .await;
+
+    // Get selection range for position on "x"
+    let ranges = client
+        .selection_range(uri, vec![Position { line: 1, character: 8 }])
+        .await;
+
+    assert_eq!(ranges.len(), 1, "Should have one selection range");
+
+    // Should start with "x" and expand to larger ranges
+    let range = &ranges[0];
+    assert!(range.parent.is_some(), "Should have parent ranges");
+}
+
+#[tokio::test]
+async fn test_selection_range_nested() {
+    let mut client = TestClient::new().await;
+    client.initialize().await;
+
+    let uri = "file:///test.li";
+    client
+        .did_open(
+            uri,
+            r#"fn main() {
+    if true {
+        let x = 1
+    }
+}
+"#,
+        )
+        .await;
+
+    // Get selection range inside the if block
+    let ranges = client
+        .selection_range(uri, vec![Position { line: 2, character: 12 }])
+        .await;
+
+    assert_eq!(ranges.len(), 1);
+
+    // Count nesting depth
+    let mut depth = 0;
+    let mut current = Some(&ranges[0]);
+    while let Some(r) = current {
+        depth += 1;
+        current = r.parent.as_ref().map(|b| b.as_ref());
+    }
+
+    // Should have multiple nesting levels (word -> line -> if block -> fn block -> doc)
+    assert!(depth >= 4, "Should have nested selection ranges, got depth {}", depth);
+}
+
+// ============================================================================
+// Workspace Symbol Tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_workspace_symbol_search() {
+    let mut client = TestClient::new().await;
+    client.initialize().await;
+
+    // Open multiple documents
+    let uri1 = "file:///file1.li";
+    client
+        .did_open(
+            uri1,
+            r#"fn getUserName() -> string {
+    "alice"
+}
+
+struct User {
+    name: string,
+}
+"#,
+        )
+        .await;
+
+    let uri2 = "file:///file2.li";
+    client
+        .did_open(
+            uri2,
+            r#"fn getUser() -> User {
+    User { name: "bob" }
+}
+
+fn createUser(name: string) -> User {
+    User { name: name }
+}
+"#,
+        )
+        .await;
+
+    // Search for "User" - should find across both files
+    let symbols = client.workspace_symbol("User").await;
+
+    assert!(symbols.len() >= 2, "Should find symbols matching 'User', got {}", symbols.len());
+
+    let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
+    assert!(names.iter().any(|n| *n == "User"), "Should find User struct");
+    assert!(names.iter().any(|n| n.contains("User")), "Should find getUser function");
+}
+
+#[tokio::test]
+async fn test_workspace_symbol_fuzzy() {
+    let mut client = TestClient::new().await;
+    client.initialize().await;
+
+    let uri = "file:///test.li";
+    client
+        .did_open(
+            uri,
+            r#"fn getUserName() -> string {
+    "alice"
+}
+
+fn getProduct() -> string {
+    "widget"
+}
+"#,
+        )
+        .await;
+
+    // Fuzzy search "gun" should match "getUserName"
+    let symbols = client.workspace_symbol("gun").await;
+
+    assert_eq!(symbols.len(), 1, "Should find exactly 1 match for 'gun'");
+    assert_eq!(symbols[0].name, "getUserName");
+}
+
+// ============================================================================
+// Type Definition Tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_type_definition_explicit_type() {
+    let mut client = TestClient::new().await;
+    client.initialize().await;
+
+    let uri = "file:///test.li";
+    client
+        .did_open(
+            uri,
+            r#"struct Point {
+    x: int,
+    y: int,
+}
+
+fn main() {
+    let p: Point = Point { x: 1, y: 2 }
+    println(p)
+}
+"#,
+        )
+        .await;
+
+    // Go to type definition of "p"
+    let location = client.goto_type_definition(uri, 7, 12).await;
+
+    assert!(location.is_some(), "Should find type definition");
+    let loc = location.unwrap();
+    assert_eq!(loc.range.start.line, 0, "Should jump to Point struct definition");
+}
+
+#[tokio::test]
+async fn test_type_definition_builtin_returns_none() {
+    let mut client = TestClient::new().await;
+    client.initialize().await;
+
+    let uri = "file:///test.li";
+    client
+        .did_open(
+            uri,
+            r#"fn main() {
+    let x: int = 42
+    println(x)
+}
+"#,
+        )
+        .await;
+
+    // Go to type definition of "x" with builtin type int
+    let location = client.goto_type_definition(uri, 2, 12).await;
+
+    // int is a builtin type, should return None
+    assert!(location.is_none(), "Should not return location for builtin type");
+}
+
+// ============================================================================
+// New Capabilities Test
+// ============================================================================
+
+#[tokio::test]
+async fn test_new_capabilities_registered() {
+    let mut client = TestClient::new().await;
+    let result = client.initialize().await;
+
+    let caps = result.capabilities;
+
+    // Check new capabilities
+    assert!(
+        caps.document_highlight_provider.is_some(),
+        "Should have document highlight"
+    );
+    assert!(
+        caps.selection_range_provider.is_some(),
+        "Should have selection range"
+    );
+    assert!(
+        caps.workspace_symbol_provider.is_some(),
+        "Should have workspace symbol"
+    );
+    assert!(
+        caps.type_definition_provider.is_some(),
+        "Should have type definition"
     );
 }
