@@ -2970,6 +2970,13 @@ impl TypeChecker {
     }
 
     fn check_expression(&mut self, expr: &Expression) -> Type {
+        let ty = self.check_expression_inner(expr);
+        // Record the type in semantic tables
+        self.sema.expr_types.insert(expr.id, ty.clone());
+        ty
+    }
+
+    fn check_expression_inner(&mut self, expr: &Expression) -> Type {
         match &expr.kind {
             ExpressionKind::IntLiteral(_) => Type::Int,
             ExpressionKind::FloatLiteral(_) => Type::Float,
@@ -6988,11 +6995,9 @@ mod tests {
         let ast = parse(&tokens).unwrap();
         let checked = check(&ast).unwrap();
 
-        // SemanticTables should be created (even if empty for now)
-        // The important thing is that it's populated during checking
-        // For now, just verify the check succeeds and sema is accessible
-        assert!(checked.sema.generic_instantiations.is_empty(),
-            "SemanticTables should be created");
+        // SemanticTables should be created and populated with expression types
+        assert!(!checked.sema.expr_types.is_empty(),
+            "SemanticTables should have expression types after checking");
     }
 
     #[test]
