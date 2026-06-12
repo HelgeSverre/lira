@@ -14,6 +14,7 @@ pub mod ids;
 pub mod lexer;
 pub mod module_loader;
 pub mod parser;
+pub mod sema;
 
 use std::fs;
 
