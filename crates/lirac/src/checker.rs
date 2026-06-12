@@ -3011,7 +3011,19 @@ impl TypeChecker {
                 }
 
                 if let Some(symbol) = self.env.lookup(name) {
-                    symbol.ty.clone()
+                    let sym_ty = symbol.ty.clone();
+                    drop(symbol);
+                    // Record the symbol reference
+                    let sym_id = self.next_symbol_id();
+                    self.sema.symbols.insert(sym_id, crate::sema::SymbolEntry {
+                        id: sym_id,
+                        name: name.clone(),
+                        ty: sym_ty.clone(),
+                        kind: crate::sema::SymbolKind::Variable,
+                        decl_node: expr.id,
+                    });
+                    self.sema.symbol_refs.insert(expr.id, sym_id);
+                    sym_ty
                 } else if let Some(type_def) = self.env.lookup_type(name) {
                     // If it's a type name, return the corresponding type
                     // This allows static method calls like Counter.new()
@@ -3200,6 +3212,27 @@ impl TypeChecker {
                     None
                 };
 
+                // Record call resolution
+                let resolution = match &callee.kind {
+                    ExpressionKind::Identifier(name) => {
+                        Some(crate::sema::CallResolution::Function { name: name.clone() })
+                    }
+                    ExpressionKind::FieldAccess { object, field } => {
+                        if let ExpressionKind::Identifier(type_name) = &object.kind {
+                            Some(crate::sema::CallResolution::Method {
+                                type_name: type_name.clone(),
+                                method_name: field.clone(),
+                            })
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                };
+                if let Some(res) = resolution {
+                    self.sema.call_resolution.insert(expr.id, res);
+                }
+
                 // Check if this is a variadic built-in function
                 let is_variadic_builtin = if let ExpressionKind::Identifier(name) = &callee.kind {
                     matches!(name.as_str(), "chan" | "print" | "println")
@@ -3318,238 +3351,15 @@ impl TypeChecker {
 
             ExpressionKind::FieldAccess { object, field } => {
                 let obj_type = self.check_expression(object);
-
-                match &obj_type {
-                    Type::Enum(_) => {
-                        // Enum values are objects with __enum and __variant fields
-                        if field == "__enum" || field == "__variant" {
-                            Type::String
-                        } else {
-                            self.env.error(
-                                &expr.span,
-                                format!(
-                                    "Enum values only have __enum and __variant fields, not '{}'",
-                                    field
-                                ),
-                            );
-                            Type::Unknown
-                        }
-                    }
-                    Type::Class(name) => {
-                        // For classes, check inherited fields and methods
-                        let all_fields = self.env.get_class_fields(name);
-                        for (field_name, field_type, _) in &all_fields {
-                            if field_name == field {
-                                return field_type.clone();
-                            }
-                        }
-                        let all_methods = self.env.get_class_methods(name);
-                        for (method_name, method_type, _) in &all_methods {
-                            if method_name == field {
-                                return method_type.clone();
-                            }
-                        }
-                        // Check methods from impl blocks
-                        if let Some(impl_method) = self.env.lookup_method(name, field) {
-                            let param_types: Vec<Type> = impl_method
-                                .params
-                                .iter()
-                                .map(|(_, ty)| ty.clone())
-                                .collect();
-                            return Type::Function {
-                                params: param_types.clone(),
-                                return_type: Box::new(impl_method.return_type.clone()),
-                                required_params: param_types.len(),
-                            };
-                        }
-                        self.env.error(
-                            &expr.span,
-                            format!("Unknown field or method: {} on type {}", field, name),
-                        );
-                        Type::Unknown
-                    }
-                    Type::Struct(name) => {
-                        if let Some(type_def) = self.env.lookup_type(name) {
-                            if let TypeDefKind::Struct { fields, methods } = &type_def.kind {
-                                // Check fields first
-                                for (field_name, field_type, _) in fields {
-                                    if field_name == field {
-                                        return field_type.clone();
-                                    }
-                                }
-                                // Check methods in type definition
-                                for (method_name, method_type, _) in methods {
-                                    if method_name == field {
-                                        return method_type.clone();
-                                    }
-                                }
-                                // Check methods from impl blocks
-                                if let Some(impl_method) = self.env.lookup_method(name, field) {
-                                    let param_types: Vec<Type> = impl_method
-                                        .params
-                                        .iter()
-                                        .map(|(_, ty)| ty.clone())
-                                        .collect();
-                                    return Type::Function {
-                                        params: param_types.clone(),
-                                        return_type: Box::new(impl_method.return_type.clone()),
-                                        required_params: param_types.len(),
-                                    };
-                                }
-                                self.env.error(
-                                    &expr.span,
-                                    format!("Unknown field or method: {} on type {}", field, name),
-                                );
-                            }
-                        }
-                        Type::Unknown
-                    }
-                    // Check if this is a static method call on a type name
-                    // e.g., Counter.new() where Counter is the type
-                    Type::Unknown => {
-                        // The object might be a type name used for static method access
-                        if let ExpressionKind::Identifier(type_name) = &object.kind {
-                            if let Some(impl_method) = self.env.lookup_method(type_name, field) {
-                                if !impl_method.has_self {
-                                    // Static method
-                                    let param_types: Vec<Type> = impl_method
-                                        .params
-                                        .iter()
-                                        .map(|(_, ty)| ty.clone())
-                                        .collect();
-                                    return Type::Function {
-                                        params: param_types.clone(),
-                                        return_type: Box::new(impl_method.return_type.clone()),
-                                        required_params: param_types.len(),
-                                    };
-                                }
-                            }
-                        }
-                        Type::Unknown
-                    }
-                    Type::Any => Type::Any, // Allow field access on Any type
-                    // Check impl methods for built-in types (e.g., impl int { ... })
-                    Type::Int => {
-                        if let Some(impl_method) = self.env.lookup_method("int", field) {
-                            let param_types: Vec<Type> = impl_method
-                                .params
-                                .iter()
-                                .map(|(_, ty)| ty.clone())
-                                .collect();
-                            return Type::Function {
-                                params: param_types.clone(),
-                                return_type: Box::new(impl_method.return_type.clone()),
-                                required_params: param_types.len(),
-                            };
-                        }
-                        self.env
-                            .error(&expr.span, format!("Unknown method: {} on int", field));
-                        Type::Unknown
-                    }
-                    Type::Float => {
-                        if let Some(impl_method) = self.env.lookup_method("float", field) {
-                            let param_types: Vec<Type> = impl_method
-                                .params
-                                .iter()
-                                .map(|(_, ty)| ty.clone())
-                                .collect();
-                            return Type::Function {
-                                params: param_types.clone(),
-                                return_type: Box::new(impl_method.return_type.clone()),
-                                required_params: param_types.len(),
-                            };
-                        }
-                        self.env
-                            .error(&expr.span, format!("Unknown method: {} on float", field));
-                        Type::Unknown
-                    }
-                    Type::String => {
-                        if let Some(impl_method) = self.env.lookup_method("string", field) {
-                            let param_types: Vec<Type> = impl_method
-                                .params
-                                .iter()
-                                .map(|(_, ty)| ty.clone())
-                                .collect();
-                            return Type::Function {
-                                params: param_types.clone(),
-                                return_type: Box::new(impl_method.return_type.clone()),
-                                required_params: param_types.len(),
-                            };
-                        }
-                        // Fallback to built-in string methods like len()
-                        if field == "len" {
-                            return Type::Function {
-                                params: vec![],
-                                return_type: Box::new(Type::Int),
-                                required_params: 0,
-                            };
-                        }
-                        self.env
-                            .error(&expr.span, format!("Unknown method: {} on string", field));
-                        Type::Unknown
-                    }
-                    Type::Array(inner) => {
-                        // Check impl methods for specific array type like [int] or [string]
-                        let specific_type_name = format!("[{}]", inner.display_name());
-                        if let Some(impl_method) = self.env.lookup_method(&specific_type_name, field) {
-                            let param_types: Vec<Type> = impl_method
-                                .params
-                                .iter()
-                                .map(|(_, ty)| ty.clone())
-                                .collect();
-                            return Type::Function {
-                                params: param_types.clone(),
-                                return_type: Box::new(impl_method.return_type.clone()),
-                                required_params: param_types.len(),
-                            };
-                        }
-                        // Fall back to generic array impl methods
-                        if let Some(impl_method) = self.env.lookup_method("array", field) {
-                            let param_types: Vec<Type> = impl_method
-                                .params
-                                .iter()
-                                .map(|(_, ty)| ty.clone())
-                                .collect();
-                            return Type::Function {
-                                params: param_types.clone(),
-                                return_type: Box::new(impl_method.return_type.clone()),
-                                required_params: param_types.len(),
-                            };
-                        }
-                        // Built-in array methods
-                        match field.as_str() {
-                            "len" => Type::Function {
-                                params: vec![],
-                                return_type: Box::new(Type::Int),
-                                required_params: 0,
-                            },
-                            "push" => Type::Function {
-                                params: vec![*inner.clone()],
-                                return_type: Box::new(Type::Void),
-                                required_params: 1,
-                            },
-                            "pop" => Type::Function {
-                                params: vec![],
-                                return_type: Box::new(Type::Optional(inner.clone())),
-                                required_params: 0,
-                            },
-                            _ => {
-                                self.env.error(
-                                    &expr.span,
-                                    format!("Unknown method: {} on array", field),
-                                );
-                                Type::Unknown
-                            }
-                        }
-                    }
-                    _ => {
-                        self.env.error(
-                            &expr.span,
-                            format!("Cannot access field on type: '{}'", obj_type.display_name()),
-                        );
-                        Type::Unknown
-                    }
-                }
+                let resolved_type = self.resolve_field_access(&obj_type, object, field, &expr.span);
+                // Record field resolution
+                self.sema.field_resolution.insert(expr.id, crate::sema::FieldResolution {
+                    owner_type: obj_type,
+                    field_name: field.clone(),
+                    is_method: matches!(&resolved_type, Type::Function { .. }),
+                    resolved_type: resolved_type.clone(),
+                });
+                resolved_type
             }
 
             ExpressionKind::OptionalAccess { object, field: _ } => {
@@ -4374,6 +4184,179 @@ impl TypeChecker {
                 } else {
                     Type::Unknown
                 }
+            }
+        }
+    }
+
+    /// Resolve field access on a type
+    fn resolve_field_access(&mut self, obj_type: &Type, object: &Expression, field: &str, span: &Span) -> Type {
+        match obj_type {
+            Type::Enum(_) => {
+                if field == "__enum" || field == "__variant" {
+                    Type::String
+                } else {
+                    self.env.error(
+                        span,
+                        format!(
+                            "Enum values only have __enum and __variant fields, not '{}'",
+                            field
+                        ),
+                    );
+                    Type::Unknown
+                }
+            }
+            Type::Class(name) => {
+                let all_fields = self.env.get_class_fields(name);
+                for (field_name, field_type, _) in &all_fields {
+                    if field_name == field {
+                        return field_type.clone();
+                    }
+                }
+                let all_methods = self.env.get_class_methods(name);
+                for (method_name, method_type, _) in &all_methods {
+                    if method_name == field {
+                        return method_type.clone();
+                    }
+                }
+                if let Some(impl_method) = self.env.lookup_method(name, field) {
+                    let param_types: Vec<Type> = impl_method.params.iter().map(|(_, ty)| ty.clone()).collect();
+                    return Type::Function {
+                        params: param_types.clone(),
+                        return_type: Box::new(impl_method.return_type.clone()),
+                        required_params: param_types.len(),
+                    };
+                }
+                self.env.error(span, format!("Unknown field or method: {} on type {}", field, name));
+                Type::Unknown
+            }
+            Type::Struct(name) => {
+                if let Some(type_def) = self.env.lookup_type(name) {
+                    if let TypeDefKind::Struct { fields, methods } = &type_def.kind {
+                        for (field_name, field_type, _) in fields {
+                            if field_name == field {
+                                return field_type.clone();
+                            }
+                        }
+                        for (method_name, method_type, _) in methods {
+                            if method_name == field {
+                                return method_type.clone();
+                            }
+                        }
+                        if let Some(impl_method) = self.env.lookup_method(name, field) {
+                            let param_types: Vec<Type> = impl_method.params.iter().map(|(_, ty)| ty.clone()).collect();
+                            return Type::Function {
+                                params: param_types.clone(),
+                                return_type: Box::new(impl_method.return_type.clone()),
+                                required_params: param_types.len(),
+                            };
+                        }
+                        self.env.error(span, format!("Unknown field or method: {} on type {}", field, name));
+                    }
+                }
+                Type::Unknown
+            }
+            Type::Unknown => {
+                if let ExpressionKind::Identifier(type_name) = &object.kind {
+                    if let Some(impl_method) = self.env.lookup_method(type_name, field) {
+                        if !impl_method.has_self {
+                            let param_types: Vec<Type> = impl_method.params.iter().map(|(_, ty)| ty.clone()).collect();
+                            return Type::Function {
+                                params: param_types.clone(),
+                                return_type: Box::new(impl_method.return_type.clone()),
+                                required_params: param_types.len(),
+                            };
+                        }
+                    }
+                }
+                Type::Unknown
+            }
+            Type::Any => Type::Any,
+            Type::Int => {
+                if let Some(impl_method) = self.env.lookup_method("int", field) {
+                    let param_types: Vec<Type> = impl_method.params.iter().map(|(_, ty)| ty.clone()).collect();
+                    return Type::Function {
+                        params: param_types.clone(),
+                        return_type: Box::new(impl_method.return_type.clone()),
+                        required_params: param_types.len(),
+                    };
+                }
+                self.env.error(span, format!("Unknown method: {} on int", field));
+                Type::Unknown
+            }
+            Type::Float => {
+                if let Some(impl_method) = self.env.lookup_method("float", field) {
+                    let param_types: Vec<Type> = impl_method.params.iter().map(|(_, ty)| ty.clone()).collect();
+                    return Type::Function {
+                        params: param_types.clone(),
+                        return_type: Box::new(impl_method.return_type.clone()),
+                        required_params: param_types.len(),
+                    };
+                }
+                self.env.error(span, format!("Unknown method: {} on float", field));
+                Type::Unknown
+            }
+            Type::String => {
+                if let Some(impl_method) = self.env.lookup_method("string", field) {
+                    let param_types: Vec<Type> = impl_method.params.iter().map(|(_, ty)| ty.clone()).collect();
+                    return Type::Function {
+                        params: param_types.clone(),
+                        return_type: Box::new(impl_method.return_type.clone()),
+                        required_params: param_types.len(),
+                    };
+                }
+                if field == "len" {
+                    return Type::Function {
+                        params: vec![],
+                        return_type: Box::new(Type::Int),
+                        required_params: 0,
+                    };
+                }
+                self.env.error(span, format!("Unknown method: {} on string", field));
+                Type::Unknown
+            }
+            Type::Array(inner) => {
+                let specific_type_name = format!("[{}]", inner.display_name());
+                if let Some(impl_method) = self.env.lookup_method(&specific_type_name, field) {
+                    let param_types: Vec<Type> = impl_method.params.iter().map(|(_, ty)| ty.clone()).collect();
+                    return Type::Function {
+                        params: param_types.clone(),
+                        return_type: Box::new(impl_method.return_type.clone()),
+                        required_params: param_types.len(),
+                    };
+                }
+                if let Some(impl_method) = self.env.lookup_method("array", field) {
+                    let param_types: Vec<Type> = impl_method.params.iter().map(|(_, ty)| ty.clone()).collect();
+                    return Type::Function {
+                        params: param_types.clone(),
+                        return_type: Box::new(impl_method.return_type.clone()),
+                        required_params: param_types.len(),
+                    };
+                }
+                match field.as_ref() {
+                    "len" => Type::Function {
+                        params: vec![],
+                        return_type: Box::new(Type::Int),
+                        required_params: 0,
+                    },
+                    "push" => Type::Function {
+                        params: vec![*inner.clone()],
+                        return_type: Box::new(Type::Void),
+                        required_params: 1,
+                    },
+                    "pop" => Type::Function {
+                        params: vec![],
+                        return_type: Box::new(Type::Optional(inner.clone())),
+                        required_params: 0,
+                    },
+                    _ => {
+                        self.env.error(span, format!("Unknown method: {} on array", field));
+                        Type::Unknown
+                    }
+                }
+            }
+            _ => {
+                self.env.error(span, format!("Cannot access field on type: '{}'", obj_type.display_name()));
+                Type::Unknown
             }
         }
     }
@@ -7051,5 +7034,154 @@ mod tests {
         // For now, just verify the check succeeds
         assert!(!checked.sema.symbols.is_empty() || checked.sema.generic_instantiations.is_empty(),
             "SemanticTables should be populated after checking");
+    }
+
+    // ========================================================================
+    // Symbol Reference Tests
+    // ========================================================================
+
+    #[test]
+    fn test_sema_symbol_ref_recorded() {
+        let source = r#"
+            let x = 42
+            let y = x
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let ast = parse(&tokens).unwrap();
+        let checked = check(&ast).unwrap();
+
+        // The second statement references x
+        if let StatementKind::VarDecl { initializer: Some(init), .. } = &checked.program.statements[1].kind {
+            assert!(checked.sema.symbol_refs.contains_key(&init.id),
+                "Symbol reference should be recorded for identifier 'x'");
+        }
+    }
+
+    #[test]
+    fn test_sema_symbol_entry_created() {
+        let source = r#"
+            let x = 42
+            let y = x
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let ast = parse(&tokens).unwrap();
+        let checked = check(&ast).unwrap();
+
+        // A symbol entry should be created when referencing a variable
+        assert!(!checked.sema.symbols.is_empty(),
+            "Symbols should be recorded after checking variable references");
+    }
+
+    // ========================================================================
+    // Call Resolution Tests
+    // ========================================================================
+
+    #[test]
+    fn test_sema_function_call_resolution() {
+        let source = r#"
+            fn add(x: int, y: int) -> int {
+                return x + y
+            }
+            let result = add(1, 2)
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let ast = parse(&tokens).unwrap();
+        let checked = check(&ast).unwrap();
+
+        // The call to add() should have call resolution
+        if let StatementKind::VarDecl { initializer: Some(init), .. } = &checked.program.statements[1].kind {
+            if let Some(resolution) = checked.sema.call_resolution.get(&init.id) {
+                match resolution {
+                    crate::sema::CallResolution::Function { name } => {
+                        assert_eq!(name, "add", "Should resolve to function 'add'");
+                    }
+                    _ => panic!("Expected Function call resolution"),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_sema_enum_constructor_resolution() {
+        let source = r#"
+            enum Color {
+                Red
+                Green
+            }
+            let c = Color::Green
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let ast = parse(&tokens).unwrap();
+        let checked = check(&ast).unwrap();
+
+        // The enum constructor Color::Green should be resolved
+        if let StatementKind::VarDecl { initializer: Some(init), .. } = &checked.program.statements[1].kind {
+            assert!(checked.sema.expr_types.contains_key(&init.id),
+                "Expression type should be recorded for enum constructor");
+        }
+    }
+
+    #[test]
+    fn test_sema_method_call_resolution() {
+        let source = r#"
+            struct Point {
+                x: int
+                y: int
+            }
+
+            impl Point {
+                fn add(self, other: Point) -> Point {
+                    return Point { x: self.x + other.x, y: self.y + other.y }
+                }
+            }
+
+            let p = Point { x: 1, y: 2 }
+            let q = Point { x: 3, y: 4 }
+            let r = p.add(q)
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let ast = parse(&tokens).unwrap();
+        let checked = check(&ast).unwrap();
+
+        // The call to p.add(q) should have call resolution
+        if let StatementKind::VarDecl { initializer: Some(init), .. } = &checked.program.statements[3].kind {
+            if let Some(resolution) = checked.sema.call_resolution.get(&init.id) {
+                match resolution {
+                    crate::sema::CallResolution::Method { type_name, method_name } => {
+                        assert_eq!(type_name, "Point", "Should resolve to type 'Point'");
+                        assert_eq!(method_name, "add", "Should resolve to method 'add'");
+                    }
+                    _ => panic!("Expected Method call resolution"),
+                }
+            }
+        }
+    }
+
+    // ========================================================================
+    // Field Resolution Tests
+    // ========================================================================
+
+    #[test]
+    fn test_sema_field_resolution() {
+        let source = r#"
+            struct Point {
+                x: int
+                y: int
+            }
+
+            let p = Point { x: 1, y: 2 }
+            let px = p.x
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let ast = parse(&tokens).unwrap();
+        let checked = check(&ast).unwrap();
+
+        // The field access p.x should have field resolution
+        if let StatementKind::VarDecl { initializer: Some(init), .. } = &checked.program.statements[1].kind {
+            if let Some(resolution) = checked.sema.field_resolution.get(&init.id) {
+                assert_eq!(resolution.field_name, "x", "Should resolve field 'x'");
+                assert!(!resolution.is_method, "Should not be a method");
+            }
+        }
     }
 }
