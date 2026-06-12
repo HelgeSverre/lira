@@ -6,6 +6,7 @@
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+use crate::ids::NodeId;
 use crate::lexer::Token;
 
 /// Source location information
@@ -44,6 +45,7 @@ pub struct Program {
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Statement {
+    pub id: NodeId,
     pub kind: StatementKind,
     pub span: Span,
 }
@@ -168,6 +170,7 @@ pub struct Block {
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Parameter {
+    pub id: NodeId,
     pub name: String,
     pub type_ann: TypeExpr,
     pub default: Option<Expression>,
@@ -256,6 +259,7 @@ pub enum TypeExprKind {
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Expression {
+    pub id: NodeId,
     pub kind: ExpressionKind,
     pub span: Span,
 }
@@ -488,6 +492,7 @@ pub enum SelectArmKind {
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Pattern {
+    pub id: NodeId,
     pub kind: PatternKind,
     pub span: Span,
 }

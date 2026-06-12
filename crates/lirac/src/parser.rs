@@ -3,6 +3,7 @@
 //! Parses tokens into an AST using recursive descent with Pratt parsing for expressions.
 
 use crate::ast::*;
+use crate::ids::NodeIdGen;
 use crate::lexer::{Token, TokenKind};
 
 /// The parser
@@ -13,6 +14,8 @@ pub struct Parser {
     errors: Vec<String>,
     /// Whether we're in panic mode (after an error)
     panic_mode: bool,
+    /// Generates unique IDs for AST nodes
+    node_id: NodeIdGen,
 }
 
 impl Parser {
@@ -22,6 +25,7 @@ impl Parser {
             current: 0,
             errors: Vec::new(),
             panic_mode: false,
+            node_id: NodeIdGen::new(),
         }
     }
 
@@ -180,6 +184,44 @@ impl Parser {
         Span::from(self.previous())
     }
 
+    /// Create a Statement with an auto-generated NodeId
+    fn stmt(&mut self, kind: StatementKind, span: Span) -> Statement {
+        Statement {
+            id: self.node_id.next(),
+            kind,
+            span,
+        }
+    }
+
+    /// Create an Expression with an auto-generated NodeId
+    fn expr(&mut self, kind: ExpressionKind, span: Span) -> Expression {
+        Expression {
+            id: self.node_id.next(),
+            kind,
+            span,
+        }
+    }
+
+    /// Create a Pattern with an auto-generated NodeId
+    fn pat(&mut self, kind: PatternKind, span: Span) -> Pattern {
+        Pattern {
+            id: self.node_id.next(),
+            kind,
+            span,
+        }
+    }
+
+    /// Create a Parameter with an auto-generated NodeId
+    fn param(&mut self, name: String, type_ann: TypeExpr, default: Option<Expression>, span: Span) -> Parameter {
+        Parameter {
+            id: self.node_id.next(),
+            name,
+            type_ann,
+            default,
+            span,
+        }
+    }
+
     // Parsing methods
 
     pub fn parse(&mut self) -> Result<Program, String> {
@@ -259,15 +301,12 @@ impl Parser {
             None
         };
 
-        Ok(Statement {
-            kind: StatementKind::VarDecl {
-                pattern,
-                mutable,
-                type_ann,
-                initializer,
-            },
-            span,
-        })
+        Ok(self.stmt(StatementKind::VarDecl {
+            pattern,
+            mutable,
+            type_ann,
+            initializer,
+        }, span))
     }
 
     /// Parse a binding pattern for let/var declarations
@@ -287,10 +326,7 @@ impl Parser {
                 }
             }
             self.consume(&TokenKind::RParen, "Expected ')' after tuple pattern")?;
-            return Ok(Pattern {
-                kind: PatternKind::Tuple(patterns),
-                span,
-            });
+            return Ok(self.pat(PatternKind::Tuple(patterns), span));
         }
 
         // Struct pattern: { x, y } or { x: a, y: b }
@@ -304,10 +340,7 @@ impl Parser {
                         self.binding_pattern()?
                     } else {
                         // Shorthand: { x } means { x: x }
-                        Pattern {
-                            kind: PatternKind::Variable(field_name.clone()),
-                            span: self.span(),
-                        }
+                        self.pat(PatternKind::Variable(field_name.clone()), self.span())
                     };
                     fields.push((field_name, field_pattern));
                     if !self.match_token(&TokenKind::Comma) {
@@ -316,14 +349,11 @@ impl Parser {
                 }
             }
             self.consume(&TokenKind::RBrace, "Expected '}' after struct pattern")?;
-            return Ok(Pattern {
-                kind: PatternKind::Struct {
-                    name: String::new(), // Inferred from RHS
-                    fields,
-                    rest: false,
-                },
-                span,
-            });
+            return Ok(self.pat(PatternKind::Struct {
+                name: String::new(), // Inferred from RHS
+                fields,
+                rest: false,
+            }, span));
         }
 
         // Wildcard pattern: _
@@ -331,18 +361,12 @@ impl Parser {
             || (matches!(self.peek().kind, TokenKind::Identifier(_)) && self.peek().lexeme == "_")
         {
             self.advance();
-            return Ok(Pattern {
-                kind: PatternKind::Wildcard,
-                span,
-            });
+            return Ok(self.pat(PatternKind::Wildcard, span));
         }
 
         // Simple variable binding
         let name = self.expect_identifier("Expected variable name or pattern")?;
-        Ok(Pattern {
-            kind: PatternKind::Variable(name),
-            span,
-        })
+        Ok(self.pat(PatternKind::Variable(name), span))
     }
 
     fn const_declaration(&mut self, span: Span) -> Result<Statement, String> {
@@ -357,14 +381,11 @@ impl Parser {
         self.consume(&TokenKind::Eq, "Expected '=' after constant name")?;
         let initializer = self.expression()?;
 
-        Ok(Statement {
-            kind: StatementKind::ConstDecl {
-                name,
-                type_ann,
-                initializer,
-            },
-            span,
-        })
+        Ok(self.stmt(StatementKind::ConstDecl {
+            name,
+            type_ann,
+            initializer,
+        }, span))
     }
 
     fn fn_declaration(
@@ -402,30 +423,10 @@ impl Parser {
         if self.match_token(&TokenKind::FatArrow) {
             let expr = self.expression()?;
             let body = Block {
-                statements: vec![Statement {
-                    kind: StatementKind::Return(Some(expr)),
-                    span: span.clone(),
-                }],
+                statements: vec![self.stmt(StatementKind::Return(Some(expr)), span.clone())],
                 span: span.clone(),
             };
-            return Ok(Statement {
-                kind: StatementKind::FnDecl {
-                    name,
-                    type_params,
-                    params,
-                    return_type,
-                    body,
-                    is_public,
-                    is_override,
-                },
-                span,
-            });
-        }
-
-        let body = self.block()?;
-
-        Ok(Statement {
-            kind: StatementKind::FnDecl {
+            return Ok(self.stmt(StatementKind::FnDecl {
                 name,
                 type_params,
                 params,
@@ -433,9 +434,20 @@ impl Parser {
                 body,
                 is_public,
                 is_override,
-            },
-            span,
-        })
+            }, span));
+        }
+
+        let body = self.block()?;
+
+        Ok(self.stmt(StatementKind::FnDecl {
+            name,
+            type_params,
+            params,
+            return_type,
+            body,
+            is_public,
+            is_override,
+        }, span))
     }
 
     fn parameters(&mut self) -> Result<Vec<Parameter>, String> {
@@ -450,15 +462,15 @@ impl Parser {
                     self.advance();
                     // Check for 'self mut' or just 'self'
                     let _is_mut = self.match_token(&TokenKind::Mut);
-                    params.push(Parameter {
-                        name: "self".to_string(),
-                        type_ann: TypeExpr {
+                    params.push(self.param(
+                        "self".to_string(),
+                        TypeExpr {
                             kind: TypeExprKind::Named("Self".to_string()),
                             span: span.clone(),
                         },
-                        default: None,
+                        None,
                         span,
-                    });
+                    ));
                     if !self.match_token(&TokenKind::Comma) {
                         break;
                     }
@@ -469,15 +481,15 @@ impl Parser {
 
                 // Check for 'self' written as identifier (in case it's not a keyword)
                 if name == "self" && !self.check(&TokenKind::Colon) {
-                    params.push(Parameter {
-                        name: "self".to_string(),
-                        type_ann: TypeExpr {
+                    params.push(self.param(
+                        "self".to_string(),
+                        TypeExpr {
                             kind: TypeExprKind::Named("Self".to_string()),
                             span: span.clone(),
                         },
-                        default: None,
+                        None,
                         span,
-                    });
+                    ));
                     if !self.match_token(&TokenKind::Comma) {
                         break;
                     }
@@ -493,12 +505,7 @@ impl Parser {
                     None
                 };
 
-                params.push(Parameter {
-                    name,
-                    type_ann,
-                    default,
-                    span,
-                });
+                params.push(self.param(name, type_ann, default, span));
 
                 if !self.match_token(&TokenKind::Comma) {
                     break;
@@ -629,15 +636,12 @@ impl Parser {
 
         self.consume(&TokenKind::RBrace, "Expected '}' after struct body")?;
 
-        Ok(Statement {
-            kind: StatementKind::StructDecl {
-                name,
-                type_params,
-                fields,
-                methods,
-            },
-            span,
-        })
+        Ok(self.stmt(StatementKind::StructDecl {
+            name,
+            type_params,
+            fields,
+            methods,
+        }, span))
     }
 
     fn class_declaration(&mut self, span: Span) -> Result<Statement, String> {
@@ -700,16 +704,13 @@ impl Parser {
 
         self.consume(&TokenKind::RBrace, "Expected '}' after class body")?;
 
-        Ok(Statement {
-            kind: StatementKind::ClassDecl {
-                name,
-                parent,
-                interfaces,
-                fields,
-                methods,
-            },
-            span,
-        })
+        Ok(self.stmt(StatementKind::ClassDecl {
+            name,
+            parent,
+            interfaces,
+            fields,
+            methods,
+        }, span))
     }
 
     fn enum_declaration(&mut self, span: Span) -> Result<Statement, String> {
@@ -749,10 +750,7 @@ impl Parser {
 
         self.consume(&TokenKind::RBrace, "Expected '}' after enum body")?;
 
-        Ok(Statement {
-            kind: StatementKind::EnumDecl { name, variants },
-            span,
-        })
+        Ok(self.stmt(StatementKind::EnumDecl { name, variants }, span))
     }
 
     fn interface_declaration(&mut self, span: Span) -> Result<Statement, String> {
@@ -786,10 +784,7 @@ impl Parser {
 
         self.consume(&TokenKind::RBrace, "Expected '}' after interface body")?;
 
-        Ok(Statement {
-            kind: StatementKind::InterfaceDecl { name, methods },
-            span,
-        })
+        Ok(self.stmt(StatementKind::InterfaceDecl { name, methods }, span))
     }
 
     fn trait_declaration(&mut self, is_public: bool, span: Span) -> Result<Statement, String> {
@@ -869,15 +864,12 @@ impl Parser {
 
         self.consume(&TokenKind::RBrace, "Expected '}' after trait body")?;
 
-        Ok(Statement {
-            kind: StatementKind::TraitDecl {
-                name,
-                type_params,
-                methods,
-                is_public,
-            },
-            span,
-        })
+        Ok(self.stmt(StatementKind::TraitDecl {
+            name,
+            type_params,
+            methods,
+            is_public,
+        }, span))
     }
 
     fn impl_declaration(&mut self, span: Span) -> Result<Statement, String> {
@@ -939,15 +931,12 @@ impl Parser {
 
         self.consume(&TokenKind::RBrace, "Expected '}' after impl body")?;
 
-        Ok(Statement {
-            kind: StatementKind::ImplDecl {
-                trait_name,
-                type_name,
-                type_params,
-                methods,
-            },
-            span,
-        })
+        Ok(self.stmt(StatementKind::ImplDecl {
+            trait_name,
+            type_name,
+            type_params,
+            methods,
+        }, span))
     }
 
     /// Parse a type name for impl blocks. Supports:
@@ -970,10 +959,7 @@ impl Parser {
         self.consume(&TokenKind::Eq, "Expected '=' after type name")?;
         let type_expr = self.type_expr()?;
 
-        Ok(Statement {
-            kind: StatementKind::TypeAlias { name, type_expr },
-            span,
-        })
+        Ok(self.stmt(StatementKind::TypeAlias { name, type_expr }, span))
     }
 
     fn import_declaration(&mut self, span: Span) -> Result<Statement, String> {
@@ -990,21 +976,15 @@ impl Parser {
                     }
                 }
                 self.consume(&TokenKind::RBrace, "Expected '}' after import items")?;
-                return Ok(Statement {
-                    kind: StatementKind::Import {
-                        path,
-                        items: Some(items),
-                    },
-                    span,
-                });
+                return Ok(self.stmt(StatementKind::Import {
+                    path,
+                    items: Some(items),
+                }, span));
             }
             path.push(self.expect_identifier("Expected module name")?);
         }
 
-        Ok(Statement {
-            kind: StatementKind::Import { path, items: None },
-            span,
-        })
+        Ok(self.stmt(StatementKind::Import { path, items: None }, span))
     }
 
     fn statement(&mut self) -> Result<Statement, String> {
@@ -1023,16 +1003,10 @@ impl Parser {
         } else if self.match_token(&TokenKind::Break) {
             self.break_statement(span)
         } else if self.match_token(&TokenKind::Continue) {
-            Ok(Statement {
-                kind: StatementKind::Continue,
-                span,
-            })
+            Ok(self.stmt(StatementKind::Continue, span))
         } else if self.check(&TokenKind::LBrace) {
             let block = self.block()?;
-            Ok(Statement {
-                kind: StatementKind::Block(block),
-                span,
-            })
+            Ok(self.stmt(StatementKind::Block(block), span))
         } else {
             self.expression_statement(span)
         }
@@ -1058,24 +1032,18 @@ impl Parser {
             None
         };
 
-        Ok(Statement {
-            kind: StatementKind::If {
-                condition,
-                then_branch,
-                else_branch,
-            },
-            span,
-        })
+        Ok(self.stmt(StatementKind::If {
+            condition,
+            then_branch,
+            else_branch,
+        }, span))
     }
 
     fn while_statement(&mut self, span: Span) -> Result<Statement, String> {
         let condition = self.expression()?;
         let body = self.block()?;
 
-        Ok(Statement {
-            kind: StatementKind::While { condition, body },
-            span,
-        })
+        Ok(self.stmt(StatementKind::While { condition, body }, span))
     }
 
     fn for_statement(&mut self, span: Span) -> Result<Statement, String> {
@@ -1084,22 +1052,16 @@ impl Parser {
         let iterable = self.expression()?;
         let body = self.block()?;
 
-        Ok(Statement {
-            kind: StatementKind::For {
-                variable,
-                iterable,
-                body,
-            },
-            span,
-        })
+        Ok(self.stmt(StatementKind::For {
+            variable,
+            iterable,
+            body,
+        }, span))
     }
 
     fn loop_statement(&mut self, span: Span) -> Result<Statement, String> {
         let body = self.block()?;
-        Ok(Statement {
-            kind: StatementKind::Loop { body },
-            span,
-        })
+        Ok(self.stmt(StatementKind::Loop { body }, span))
     }
 
     fn return_statement(&mut self, span: Span) -> Result<Statement, String> {
@@ -1109,10 +1071,7 @@ impl Parser {
             Some(self.expression()?)
         };
 
-        Ok(Statement {
-            kind: StatementKind::Return(value),
-            span,
-        })
+        Ok(self.stmt(StatementKind::Return(value), span))
     }
 
     fn break_statement(&mut self, span: Span) -> Result<Statement, String> {
@@ -1124,18 +1083,12 @@ impl Parser {
             None
         };
 
-        Ok(Statement {
-            kind: StatementKind::Break(value),
-            span,
-        })
+        Ok(self.stmt(StatementKind::Break(value), span))
     }
 
     fn expression_statement(&mut self, span: Span) -> Result<Statement, String> {
         let expr = self.expression()?;
-        Ok(Statement {
-            kind: StatementKind::Expression(expr),
-            span,
-        })
+        Ok(self.stmt(StatementKind::Expression(expr), span))
     }
 
     fn block(&mut self) -> Result<Block, String> {
@@ -1315,30 +1268,12 @@ impl Parser {
         let token = self.advance().clone();
 
         match &token.kind {
-            TokenKind::IntLiteral(n) => Ok(Expression {
-                kind: ExpressionKind::IntLiteral(*n),
-                span,
-            }),
-            TokenKind::FloatLiteral(n) => Ok(Expression {
-                kind: ExpressionKind::FloatLiteral(*n),
-                span,
-            }),
-            TokenKind::StringLiteral(s) => Ok(Expression {
-                kind: ExpressionKind::StringLiteral(s.clone()),
-                span,
-            }),
-            TokenKind::CharLiteral(c) => Ok(Expression {
-                kind: ExpressionKind::CharLiteral(*c),
-                span,
-            }),
-            TokenKind::BoolLiteral(b) => Ok(Expression {
-                kind: ExpressionKind::BoolLiteral(*b),
-                span,
-            }),
-            TokenKind::Null => Ok(Expression {
-                kind: ExpressionKind::Null,
-                span,
-            }),
+            TokenKind::IntLiteral(n) => Ok(self.expr(ExpressionKind::IntLiteral(*n), span)),
+            TokenKind::FloatLiteral(n) => Ok(self.expr(ExpressionKind::FloatLiteral(*n), span)),
+            TokenKind::StringLiteral(s) => Ok(self.expr(ExpressionKind::StringLiteral(s.clone()), span)),
+            TokenKind::CharLiteral(c) => Ok(self.expr(ExpressionKind::CharLiteral(*c), span)),
+            TokenKind::BoolLiteral(b) => Ok(self.expr(ExpressionKind::BoolLiteral(*b), span)),
+            TokenKind::Null => Ok(self.expr(ExpressionKind::Null, span)),
             TokenKind::Identifier(name) => {
                 let name = name.clone();
 
@@ -1347,13 +1282,10 @@ impl Parser {
                     self.advance(); // consume ::
                     let variant_name =
                         self.expect_identifier("Expected variant name after '::'")?;
-                    return Ok(Expression {
-                        kind: ExpressionKind::EnumVariant {
-                            enum_name: name,
-                            variant_name,
-                        },
-                        span,
-                    });
+                    return Ok(self.expr(ExpressionKind::EnumVariant {
+                        enum_name: name,
+                        variant_name,
+                    }, span));
                 }
 
                 // Check if this is a struct literal: Identifier { field: value, ... }
@@ -1367,81 +1299,51 @@ impl Parser {
                     if self.is_struct_literal_start() {
                         self.struct_literal(name, span)
                     } else {
-                        Ok(Expression {
-                            kind: ExpressionKind::Identifier(name),
-                            span,
-                        })
+                        Ok(self.expr(ExpressionKind::Identifier(name), span))
                     }
                 } else {
-                    Ok(Expression {
-                        kind: ExpressionKind::Identifier(name),
-                        span,
-                    })
+                    Ok(self.expr(ExpressionKind::Identifier(name), span))
                 }
             }
-            TokenKind::This => Ok(Expression {
-                kind: ExpressionKind::Identifier("this".to_string()),
-                span,
-            }),
-            TokenKind::Super => Ok(Expression {
-                kind: ExpressionKind::Identifier("super".to_string()),
-                span,
-            }),
-            TokenKind::Self_ => Ok(Expression {
-                kind: ExpressionKind::Identifier("self".to_string()),
-                span,
-            }),
+            TokenKind::This => Ok(self.expr(ExpressionKind::Identifier("this".to_string()), span)),
+            TokenKind::Super => Ok(self.expr(ExpressionKind::Identifier("super".to_string()), span)),
+            TokenKind::Self_ => Ok(self.expr(ExpressionKind::Identifier("self".to_string()), span)),
             TokenKind::Minus => {
                 let operand = self.parse_precedence(Precedence::Unary)?;
-                Ok(Expression {
-                    kind: ExpressionKind::Unary {
-                        op: UnaryOp::Neg,
-                        operand: Box::new(operand),
-                    },
-                    span,
-                })
+                Ok(self.expr(ExpressionKind::Unary {
+                    op: UnaryOp::Neg,
+                    operand: Box::new(operand),
+                }, span))
             }
             TokenKind::Bang => {
                 let operand = self.parse_precedence(Precedence::Unary)?;
-                Ok(Expression {
-                    kind: ExpressionKind::Unary {
-                        op: UnaryOp::Not,
-                        operand: Box::new(operand),
-                    },
-                    span,
-                })
+                Ok(self.expr(ExpressionKind::Unary {
+                    op: UnaryOp::Not,
+                    operand: Box::new(operand),
+                }, span))
             }
             TokenKind::Tilde => {
                 let operand = self.parse_precedence(Precedence::Unary)?;
-                Ok(Expression {
-                    kind: ExpressionKind::Unary {
-                        op: UnaryOp::BitNot,
-                        operand: Box::new(operand),
-                    },
-                    span,
-                })
+                Ok(self.expr(ExpressionKind::Unary {
+                    op: UnaryOp::BitNot,
+                    operand: Box::new(operand),
+                }, span))
             }
             TokenKind::PlusPlus => {
                 // Prefix increment: ++x
                 let operand = self.parse_precedence(Precedence::Unary)?;
-                Ok(Expression {
-                    kind: ExpressionKind::Unary {
-                        op: UnaryOp::PreInc,
-                        operand: Box::new(operand),
-                    },
-                    span,
-                })
+                Ok(self.expr(ExpressionKind::Unary {
+                    op: UnaryOp::PreInc,
+                    operand: Box::new(operand),
+                }, span))
             }
             TokenKind::MinusMinus => {
                 // Prefix decrement: --x
                 let operand = self.parse_precedence(Precedence::Unary)?;
-                Ok(Expression {
-                    kind: ExpressionKind::Unary {
-                        op: UnaryOp::PreDec,
-                        operand: Box::new(operand),
-                    },
-                    span,
-                })
+                Ok(self.expr(ExpressionKind::Unary {
+                    op: UnaryOp::PreDec,
+                    operand: Box::new(operand),
+                }, span))
             }
             TokenKind::LParen => {
                 // Tuple or grouped expression
@@ -1458,10 +1360,7 @@ impl Parser {
                         }
                     }
                     self.consume(&TokenKind::RParen, "Expected ')'")?;
-                    Ok(Expression {
-                        kind: ExpressionKind::Tuple(elements),
-                        span,
-                    })
+                    Ok(self.expr(ExpressionKind::Tuple(elements), span))
                 } else {
                     self.consume(&TokenKind::RParen, "Expected ')'")?;
                     Ok(expr)
@@ -1479,19 +1378,13 @@ impl Parser {
                     }
                 }
                 self.consume(&TokenKind::RBracket, "Expected ']'")?;
-                Ok(Expression {
-                    kind: ExpressionKind::Array(elements),
-                    span,
-                })
+                Ok(self.expr(ExpressionKind::Array(elements), span))
             }
             TokenKind::LBrace => {
                 // Block expression or struct literal
                 self.current -= 1; // Put back the brace
                 let block = self.block()?;
-                Ok(Expression {
-                    kind: ExpressionKind::Block(block),
-                    span,
-                })
+                Ok(self.expr(ExpressionKind::Block(block), span))
             }
             TokenKind::If => self.if_expression(span),
             TokenKind::Match => self.match_expression(span),
@@ -1499,20 +1392,14 @@ impl Parser {
             TokenKind::PipePipe => {
                 // Empty lambda: || expr
                 let body = self.expression()?;
-                Ok(Expression {
-                    kind: ExpressionKind::Lambda {
-                        params: Vec::new(),
-                        body: Box::new(body),
-                    },
-                    span,
-                })
+                Ok(self.expr(ExpressionKind::Lambda {
+                    params: Vec::new(),
+                    body: Box::new(body),
+                }, span))
             }
             TokenKind::Spawn => {
                 let expr = self.expression()?;
-                Ok(Expression {
-                    kind: ExpressionKind::Spawn(Box::new(expr)),
-                    span,
-                })
+                Ok(self.expr(ExpressionKind::Spawn(Box::new(expr)), span))
             }
             TokenKind::Select => self.select_expression(span),
             _ => Err(format!(
@@ -1555,13 +1442,10 @@ impl Parser {
             // Assignment
             TokenKind::Eq => {
                 let right = self.parse_precedence(Precedence::Assignment)?;
-                Ok(Expression {
-                    kind: ExpressionKind::Assign {
-                        target: Box::new(left),
-                        value: Box::new(right),
-                    },
-                    span,
-                })
+                Ok(self.expr(ExpressionKind::Assign {
+                    target: Box::new(left),
+                    value: Box::new(right),
+                }, span))
             }
             TokenKind::PlusEq => self.compound_assign(left, BinaryOp::Add, span),
             TokenKind::MinusEq => self.compound_assign(left, BinaryOp::Sub, span),
@@ -1578,93 +1462,69 @@ impl Parser {
             TokenKind::LParen => {
                 let args = self.parse_call_arguments()?;
                 self.consume(&TokenKind::RParen, "Expected ')' after arguments")?;
-                Ok(Expression {
-                    kind: ExpressionKind::Call {
-                        callee: Box::new(left),
-                        type_args: Vec::new(), // TODO: Parse turbofish syntax ::<T>
-                        args,
-                    },
-                    span,
-                })
+                Ok(self.expr(ExpressionKind::Call {
+                    callee: Box::new(left),
+                    type_args: Vec::new(), // TODO: Parse turbofish syntax ::<T>
+                    args,
+                }, span))
             }
 
             // Index
             TokenKind::LBracket => {
                 let index = self.expression()?;
                 self.consume(&TokenKind::RBracket, "Expected ']'")?;
-                Ok(Expression {
-                    kind: ExpressionKind::Index {
-                        object: Box::new(left),
-                        index: Box::new(index),
-                    },
-                    span,
-                })
+                Ok(self.expr(ExpressionKind::Index {
+                    object: Box::new(left),
+                    index: Box::new(index),
+                }, span))
             }
 
             // Field access
             TokenKind::Dot => {
                 let field = self.expect_identifier("Expected field name")?;
-                Ok(Expression {
-                    kind: ExpressionKind::FieldAccess {
-                        object: Box::new(left),
-                        field,
-                    },
-                    span,
-                })
+                Ok(self.expr(ExpressionKind::FieldAccess {
+                    object: Box::new(left),
+                    field,
+                }, span))
             }
 
             // Optional chaining
             TokenKind::QuestionDot => {
                 let field = self.expect_identifier("Expected field name")?;
-                Ok(Expression {
-                    kind: ExpressionKind::OptionalAccess {
-                        object: Box::new(left),
-                        field,
-                    },
-                    span,
-                })
+                Ok(self.expr(ExpressionKind::OptionalAccess {
+                    object: Box::new(left),
+                    field,
+                }, span))
             }
 
             // Postfix increment: x++
-            TokenKind::PlusPlus => Ok(Expression {
-                kind: ExpressionKind::Unary {
-                    op: UnaryOp::PostInc,
-                    operand: Box::new(left),
-                },
-                span,
-            }),
+            TokenKind::PlusPlus => Ok(self.expr(ExpressionKind::Unary {
+                op: UnaryOp::PostInc,
+                operand: Box::new(left),
+            }, span)),
 
             // Postfix decrement: x--
-            TokenKind::MinusMinus => Ok(Expression {
-                kind: ExpressionKind::Unary {
-                    op: UnaryOp::PostDec,
-                    operand: Box::new(left),
-                },
-                span,
-            }),
+            TokenKind::MinusMinus => Ok(self.expr(ExpressionKind::Unary {
+                op: UnaryOp::PostDec,
+                operand: Box::new(left),
+            }, span)),
 
             // Type cast
             TokenKind::As => {
                 let type_expr = self.type_expr()?;
-                Ok(Expression {
-                    kind: ExpressionKind::Cast {
-                        expr: Box::new(left),
-                        type_expr,
-                    },
-                    span,
-                })
+                Ok(self.expr(ExpressionKind::Cast {
+                    expr: Box::new(left),
+                    type_expr,
+                }, span))
             }
 
             // Type check
             TokenKind::Is => {
                 let type_expr = self.type_expr()?;
-                Ok(Expression {
-                    kind: ExpressionKind::TypeCheck {
-                        expr: Box::new(left),
-                        type_expr,
-                    },
-                    span,
-                })
+                Ok(self.expr(ExpressionKind::TypeCheck {
+                    expr: Box::new(left),
+                    type_expr,
+                }, span))
             }
 
             // Range
@@ -1680,33 +1540,24 @@ impl Parser {
                 } else {
                     None
                 };
-                Ok(Expression {
-                    kind: ExpressionKind::Range {
-                        start: Some(Box::new(left)),
-                        end,
-                        inclusive: false,
-                    },
-                    span,
-                })
+                Ok(self.expr(ExpressionKind::Range {
+                    start: Some(Box::new(left)),
+                    end,
+                    inclusive: false,
+                }, span))
             }
 
             TokenKind::DotDotEq => {
                 let end = Some(Box::new(self.parse_precedence(Precedence::Term)?));
-                Ok(Expression {
-                    kind: ExpressionKind::Range {
-                        start: Some(Box::new(left)),
-                        end,
-                        inclusive: true,
-                    },
-                    span,
-                })
+                Ok(self.expr(ExpressionKind::Range {
+                    start: Some(Box::new(left)),
+                    end,
+                    inclusive: true,
+                }, span))
             }
 
             // Try/error propagation: expr?
-            TokenKind::Question => Ok(Expression {
-                kind: ExpressionKind::Try(Box::new(left)),
-                span,
-            }),
+            TokenKind::Question => Ok(self.expr(ExpressionKind::Try(Box::new(left)), span)),
 
             _ => Err(format!(
                 "{}:{}: Unexpected infix token: {:?}",
@@ -1723,14 +1574,11 @@ impl Parser {
         span: Span,
     ) -> Result<Expression, String> {
         let right = self.parse_precedence(prec.next())?;
-        Ok(Expression {
-            kind: ExpressionKind::Binary {
-                left: Box::new(left),
-                op,
-                right: Box::new(right),
-            },
-            span,
-        })
+        Ok(self.expr(ExpressionKind::Binary {
+            left: Box::new(left),
+            op,
+            right: Box::new(right),
+        }, span))
     }
 
     fn compound_assign(
@@ -1740,14 +1588,11 @@ impl Parser {
         span: Span,
     ) -> Result<Expression, String> {
         let right = self.parse_precedence(Precedence::Assignment)?;
-        Ok(Expression {
-            kind: ExpressionKind::CompoundAssign {
-                target: Box::new(left),
-                op,
-                value: Box::new(right),
-            },
-            span,
-        })
+        Ok(self.expr(ExpressionKind::CompoundAssign {
+            target: Box::new(left),
+            op,
+            value: Box::new(right),
+        }, span))
     }
 
     fn if_expression(&mut self, span: Span) -> Result<Expression, String> {
@@ -1761,23 +1606,15 @@ impl Parser {
             self.if_expression(self.prev_span())?
         } else {
             let else_block = self.block()?;
-            Expression {
-                kind: ExpressionKind::Block(else_block),
-                span: span.clone(),
-            }
+            self.expr(ExpressionKind::Block(else_block), span.clone())
         };
 
-        Ok(Expression {
-            kind: ExpressionKind::IfExpr {
-                condition: Box::new(condition),
-                then_expr: Box::new(Expression {
-                    kind: ExpressionKind::Block(then_block),
-                    span: span.clone(),
-                }),
-                else_expr: Box::new(else_expr),
-            },
-            span,
-        })
+        let then_expr = self.expr(ExpressionKind::Block(then_block), span.clone());
+        Ok(self.expr(ExpressionKind::IfExpr {
+            condition: Box::new(condition),
+            then_expr: Box::new(then_expr),
+            else_expr: Box::new(else_expr),
+        }, span))
     }
 
     fn match_expression(&mut self, span: Span) -> Result<Expression, String> {
@@ -1810,13 +1647,10 @@ impl Parser {
 
         self.consume(&TokenKind::RBrace, "Expected '}' after match arms")?;
 
-        Ok(Expression {
-            kind: ExpressionKind::Match {
-                subject: Box::new(subject),
-                arms,
-            },
-            span,
-        })
+        Ok(self.expr(ExpressionKind::Match {
+            subject: Box::new(subject),
+            arms,
+        }, span))
     }
 
     fn struct_literal(&mut self, name: String, span: Span) -> Result<Expression, String> {
@@ -1843,13 +1677,10 @@ impl Parser {
 
         self.consume(&TokenKind::RBrace, "Expected '}' after struct fields")?;
 
-        Ok(Expression {
-            kind: ExpressionKind::StructLiteral {
-                name: Some(name),
-                fields,
-            },
-            span,
-        })
+        Ok(self.expr(ExpressionKind::StructLiteral {
+            name: Some(name),
+            fields,
+        }, span))
     }
 
     fn select_expression(&mut self, span: Span) -> Result<Expression, String> {
@@ -1953,10 +1784,7 @@ impl Parser {
 
         self.consume(&TokenKind::RBrace, "Expected '}' after select arms")?;
 
-        Ok(Expression {
-            kind: ExpressionKind::Select(arms),
-            span,
-        })
+        Ok(self.expr(ExpressionKind::Select(arms), span))
     }
 
     fn lambda_expression(&mut self, span: Span) -> Result<Expression, String> {
@@ -1975,12 +1803,7 @@ impl Parser {
                         span: param_span.clone(),
                     }
                 };
-                params.push(Parameter {
-                    name,
-                    type_ann,
-                    default: None,
-                    span: param_span,
-                });
+                params.push(self.param(name, type_ann, None, param_span));
                 if !self.match_token(&TokenKind::Comma) {
                     break;
                 }
@@ -1990,13 +1813,10 @@ impl Parser {
 
         let body = self.expression()?;
 
-        Ok(Expression {
-            kind: ExpressionKind::Lambda {
-                params,
-                body: Box::new(body),
-            },
-            span,
-        })
+        Ok(self.expr(ExpressionKind::Lambda {
+            params,
+            body: Box::new(body),
+        }, span))
     }
 
     fn pattern(&mut self) -> Result<Pattern, String> {
@@ -2006,10 +1826,7 @@ impl Parser {
         if let TokenKind::Identifier(name) = &self.peek().kind {
             if name == "_" {
                 self.advance();
-                return Ok(Pattern {
-                    kind: PatternKind::Wildcard,
-                    span,
-                });
+            return Ok(self.pat(PatternKind::Wildcard, span));
             }
         }
 
@@ -2022,10 +1839,7 @@ impl Parser {
             | TokenKind::BoolLiteral(_)
             | TokenKind::Null => {
                 let expr = self.prefix()?;
-                return Ok(Pattern {
-                    kind: PatternKind::Literal(expr),
-                    span,
-                });
+                return Ok(self.pat(PatternKind::Literal(expr), span));
             }
             _ => {}
         }
@@ -2052,23 +1866,17 @@ impl Parser {
                         }
                     }
                     self.consume(&TokenKind::RParen, "Expected ')'")?;
-                    return Ok(Pattern {
-                        kind: PatternKind::Constructor {
-                            name: full_name,
-                            fields,
-                        },
-                        span,
-                    });
+                    return Ok(self.pat(PatternKind::Constructor {
+                        name: full_name,
+                        fields,
+                    }, span));
                 }
 
                 // Unit variant: Color::Red
-                return Ok(Pattern {
-                    kind: PatternKind::Constructor {
-                        name: full_name,
-                        fields: vec![],
-                    },
-                    span,
-                });
+                return Ok(self.pat(PatternKind::Constructor {
+                    name: full_name,
+                    fields: vec![],
+                }, span));
             }
 
             if self.match_token(&TokenKind::LParen) {
@@ -2083,17 +1891,11 @@ impl Parser {
                     }
                 }
                 self.consume(&TokenKind::RParen, "Expected ')'")?;
-                return Ok(Pattern {
-                    kind: PatternKind::Constructor { name, fields },
-                    span,
-                });
+                return Ok(self.pat(PatternKind::Constructor { name, fields }, span));
             }
 
             // Variable binding
-            return Ok(Pattern {
-                kind: PatternKind::Variable(name),
-                span,
-            });
+            return Ok(self.pat(PatternKind::Variable(name), span));
         }
 
         // Tuple pattern
@@ -2108,10 +1910,7 @@ impl Parser {
                 }
             }
             self.consume(&TokenKind::RParen, "Expected ')'")?;
-            return Ok(Pattern {
-                kind: PatternKind::Tuple(patterns),
-                span,
-            });
+            return Ok(self.pat(PatternKind::Tuple(patterns), span));
         }
 
         Err(format!("{}:{}: Expected pattern", span.line, span.column))
@@ -3068,6 +2867,132 @@ mod tests {
             assert!(matches!(arms[2].kind, SelectArmKind::Default));
         } else {
             panic!("Expected select expression");
+        }
+    }
+
+    #[test]
+    fn test_node_ids_unique() {
+        let source = r#"
+            let x = 1
+            let y = 2
+            let z = x + y
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let program = parse(&tokens).unwrap();
+
+        let mut ids = std::collections::HashSet::new();
+        for stmt in &program.statements {
+            assert!(ids.insert(stmt.id), "Duplicate statement NodeId: {:?}", stmt.id);
+        }
+    }
+
+    #[test]
+    fn test_node_ids_assigned_in_source_order() {
+        let source = r#"
+            let a = 1
+            let b = 2
+            let c = 3
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let program = parse(&tokens).unwrap();
+
+        assert!(program.statements[0].id.0 < program.statements[1].id.0);
+        assert!(program.statements[1].id.0 < program.statements[2].id.0);
+    }
+
+    #[test]
+    fn test_expression_node_ids() {
+        let source = r#"
+            let x = 1 + 2 * 3
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let program = parse(&tokens).unwrap();
+
+        if let StatementKind::VarDecl { initializer: Some(init), .. } = &program.statements[0].kind {
+            // The expression has an ID that is different from the statement's ID
+            assert_ne!(program.statements[0].id, init.id, "Statement and expression should have different IDs");
+        } else {
+            panic!("Expected VarDecl with initializer");
+        }
+    }
+
+    #[test]
+    fn test_nested_expression_node_ids() {
+        let source = r#"
+            let x = (1 + 2) * (3 + 4)
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let program = parse(&tokens).unwrap();
+
+        if let StatementKind::VarDecl { initializer: Some(init), .. } = &program.statements[0].kind {
+            // The outer expression has an ID
+            let outer_id = init.id;
+            // All nested expressions should have different IDs
+            if let ExpressionKind::Binary { left, right, .. } = &init.kind {
+                assert_ne!(outer_id, left.id, "Outer and left expression should have different IDs");
+                assert_ne!(outer_id, right.id, "Outer and right expression should have different IDs");
+                assert_ne!(left.id, right.id, "Left and right expressions should have different IDs");
+            } else {
+                panic!("Expected Binary expression");
+            }
+        } else {
+            panic!("Expected VarDecl with initializer");
+        }
+    }
+
+    #[test]
+    fn test_pattern_node_ids() {
+        let source = r#"
+            let (a, b) = (1, 2)
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let program = parse(&tokens).unwrap();
+
+        if let StatementKind::VarDecl { pattern, .. } = &program.statements[0].kind {
+            assert_ne!(program.statements[0].id, pattern.id, "Statement and pattern should have different IDs");
+        } else {
+            panic!("Expected VarDecl");
+        }
+    }
+
+    #[test]
+    fn test_parameter_node_ids() {
+        let source = r#"
+            fn add(x: int, y: int) -> int {
+                return x + y
+            }
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let program = parse(&tokens).unwrap();
+
+        if let StatementKind::FnDecl { params, .. } = &program.statements[0].kind {
+            assert_eq!(params.len(), 2);
+            assert_ne!(params[0].id, params[1].id, "Parameters should have different IDs");
+        } else {
+            panic!("Expected FnDecl");
+        }
+    }
+
+    #[test]
+    fn test_function_body_node_ids() {
+        let source = r#"
+            fn test() {
+                let x = 1
+                let y = 2
+                return x + y
+            }
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let program = parse(&tokens).unwrap();
+
+        if let StatementKind::FnDecl { body, .. } = &program.statements[0].kind {
+            // All statements in the body should have unique IDs
+            let mut ids = std::collections::HashSet::new();
+            for stmt in &body.statements {
+                assert!(ids.insert(stmt.id), "Duplicate statement NodeId in function body");
+            }
+        } else {
+            panic!("Expected FnDecl");
         }
     }
 }

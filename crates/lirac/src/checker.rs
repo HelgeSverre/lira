@@ -3801,6 +3801,7 @@ impl TypeChecker {
 
                 // Similar to binary op checking
                 let result_type = self.check_expression(&Expression {
+                    id: crate::ids::NodeId::new(0), // Synthetic expression, no real ID
                     kind: ExpressionKind::Binary {
                         left: target.clone(),
                         op: *op,

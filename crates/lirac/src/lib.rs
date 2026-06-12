@@ -10,6 +10,7 @@
 pub mod ast;
 pub mod checker;
 pub mod codegen;
+pub mod ids;
 pub mod lexer;
 pub mod module_loader;
 pub mod parser;
