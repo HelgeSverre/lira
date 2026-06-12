@@ -50,10 +50,10 @@ pub fn compile(source: &str) -> Result<Vec<u8>, String> {
     let ast = parser::parse(&tokens)?;
 
     // Phase 3: Type checking
-    let typed_ast = checker::check(&ast)?;
+    let checked = checker::check(&ast)?;
 
     // Phase 4: Code generation
-    let bytecode = codegen::generate(&typed_ast)?;
+    let bytecode = codegen::generate(&checked)?;
 
     Ok(bytecode)
 }
@@ -71,10 +71,10 @@ pub fn compile_with_imports(source_file: &str, source: &str) -> Result<Vec<u8>, 
     let merged_ast = loader.process_imports(&ast)?;
 
     // Phase 3: Type checking
-    let typed_ast = checker::check(&merged_ast)?;
+    let checked = checker::check(&merged_ast)?;
 
     // Phase 4: Code generation
-    let bytecode = codegen::generate(&typed_ast)?;
+    let bytecode = codegen::generate(&checked)?;
 
     Ok(bytecode)
 }

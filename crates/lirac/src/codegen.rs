@@ -4,7 +4,7 @@
 //! See docs/lira/10-bytecode-format.md for output format.
 
 use crate::ast::*;
-use crate::checker::TypedProgram;
+use crate::checker::CheckedProgram;
 use lira_core::bytecode::{Constant, DebugInfo};
 use lira_core::opcode::Opcode;
 use lira_core::{BYTECODE_MAGIC, BYTECODE_VERSION};
@@ -119,10 +119,10 @@ impl CodeGenerator {
         }
     }
 
-    /// Generate bytecode from a typed program
-    pub fn generate(&mut self, program: &TypedProgram) -> Result<Vec<u8>, String> {
+    /// Generate bytecode from a type-checked program
+    pub fn generate(&mut self, program: &CheckedProgram) -> Result<Vec<u8>, String> {
         // First pass: collect functions (but don't generate code yet)
-        for stmt in &program.statements {
+        for stmt in &program.program.statements {
             match &stmt.kind {
                 StatementKind::FnDecl { name, params, .. } => {
                     self.functions.push(FunctionInfo {
@@ -182,7 +182,7 @@ impl CodeGenerator {
         self.emit_i16(0); // Placeholder - will be patched
 
         // Second pass: generate function bodies first (so we know their offsets)
-        for stmt in &program.statements {
+        for stmt in &program.program.statements {
             match &stmt.kind {
                 StatementKind::FnDecl { .. } => {
                     self.generate_statement(stmt);
@@ -213,7 +213,7 @@ impl CodeGenerator {
         }
 
         // Third pass: generate main code (non-function statements)
-        for stmt in &program.statements {
+        for stmt in &program.program.statements {
             if !matches!(
                 &stmt.kind,
                 StatementKind::FnDecl { .. }
@@ -4183,7 +4183,7 @@ impl Default for CodeGenerator {
 }
 
 /// Generate bytecode from a type-checked program
-pub fn generate(program: &TypedProgram) -> Result<Vec<u8>, String> {
+pub fn generate(program: &CheckedProgram) -> Result<Vec<u8>, String> {
     let mut generator = CodeGenerator::new();
     generator.generate(program)
 }
