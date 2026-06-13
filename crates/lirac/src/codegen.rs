@@ -515,7 +515,7 @@ impl CodeGenerator {
         match &pattern.kind {
             PatternKind::Variable(name) => {
                 // Try to infer type from initializer for method dispatch
-                if let Some(inferred_type) = self.infer_primitive_type(init) {
+                if let Some(inferred_type) = self.expr_type_name(init) {
                     self.define_local_type(name, &inferred_type);
                 } else if let ExpressionKind::Call { callee, .. } = &init.kind {
                     if let ExpressionKind::FieldAccess { object, .. } = &callee.kind {
@@ -3139,7 +3139,7 @@ impl CodeGenerator {
                                 }
                             } else {
                                 // No type info - check for primitive impl methods
-                                let receiver_type = self.infer_primitive_type(object);
+                                let receiver_type = self.expr_type_name(object);
                                 if let Some(ref type_name) = receiver_type {
                                     if let Some(methods) = self.impl_methods.get(type_name)
                                     {
@@ -3187,7 +3187,7 @@ impl CodeGenerator {
                         }
                     } else {
                         // Object is not an identifier - check for primitive type method
-                        let receiver_type = self.infer_primitive_type(object);
+                        let receiver_type = self.expr_type_name(object);
 
                         if let Some(ref type_name) = receiver_type {
                             // Check if this is a primitive impl method
@@ -4071,7 +4071,7 @@ impl CodeGenerator {
                 type_args: _, // TODO: Handle explicit type args for monomorphization
             } => {
                 // Check if this is a method call on a primitive type
-                let receiver_type = self.infer_primitive_type(receiver);
+                let receiver_type = self.expr_type_name(receiver);
 
                 if let Some(type_name) = receiver_type {
                     // Check if this is a primitive impl method
@@ -4122,24 +4122,22 @@ impl CodeGenerator {
         }
     }
 
-    /// Infer the type of an expression for method dispatch
-    /// Returns the type name (e.g., "int", "float", "string", "[int]", "[string]")
-    fn infer_primitive_type(&self, expr: &Expression) -> Option<String> {
+    /// Get the display name of an expression's type for method dispatch.
+    /// Used for method dispatch (e.g., arr.sum() needs to know arr is [int]).
+    fn expr_type_name(&self, expr: &Expression) -> Option<String> {
         match &expr.kind {
             ExpressionKind::IntLiteral(_) => Some("int".to_string()),
             ExpressionKind::FloatLiteral(_) => Some("float".to_string()),
             ExpressionKind::StringLiteral(_) => Some("string".to_string()),
             ExpressionKind::Array(elements) => {
-                // Infer array element type from first element
                 if let Some(first) = elements.first() {
-                    if let Some(elem_type) = self.infer_primitive_type(first) {
+                    if let Some(elem_type) = self.expr_type_name(first) {
                         return Some(format!("[{}]", elem_type));
                     }
                 }
                 None
             }
             ExpressionKind::Identifier(name) => {
-                // Check local variable types (includes primitives, arrays, structs)
                 for scope in self.local_types.iter().rev() {
                     if let Some(type_name) = scope.get(name) {
                         return Some(type_name.clone());
@@ -4148,20 +4146,17 @@ impl CodeGenerator {
                 None
             }
             ExpressionKind::Unary { operand, op } => {
-                // Unary minus on int/float returns same type
                 if matches!(op, UnaryOp::Neg) {
-                    self.infer_primitive_type(operand)
+                    self.expr_type_name(operand)
                 } else {
                     None
                 }
             }
             ExpressionKind::Binary { left, right, op } => {
-                // Arithmetic operations on primitives return primitives
                 match op {
                     BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
-                        let left_type = self.infer_primitive_type(left);
-                        let right_type = self.infer_primitive_type(right);
-                        // If both are int, result is int; if either is float, result is float
+                        let left_type = self.expr_type_name(left);
+                        let right_type = self.expr_type_name(right);
                         match (left_type.as_deref(), right_type.as_deref()) {
                             (Some("float"), _) | (_, Some("float")) => Some("float".to_string()),
                             (Some("int"), Some("int")) => Some("int".to_string()),
