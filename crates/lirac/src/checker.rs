@@ -134,6 +134,8 @@ impl Type {
             (Type::TypeParam(a), Type::TypeParam(b)) => a == b,
             // Any concrete type can be passed where TypeParam is expected (will be erased at runtime)
             (_, Type::TypeParam(_)) => true,
+            // Array element compatibility (lets an empty-array '[unknown]' satisfy any '[T]')
+            (Type::Array(a), Type::Array(b)) => a.is_compatible_with(b),
             (Type::Null, Type::Optional(_)) => true,
             (Type::Optional(a), Type::Optional(b)) => a.is_compatible_with(b),
             (a, Type::Optional(b)) => a.is_compatible_with(b),

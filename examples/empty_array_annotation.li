@@ -1,0 +1,7 @@
+// Empty array literal should satisfy an annotated array type
+let xs: [int] = []
+println(len(xs))
+push(xs, 3)
+println(len(xs))
+// @expect: 0
+// @expect: 1
