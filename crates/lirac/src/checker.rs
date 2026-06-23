@@ -2088,7 +2088,6 @@ impl TypeChecker {
 
                 if let Some(symbol) = self.env.lookup(name) {
                     let sym_ty = symbol.ty.clone();
-                    drop(symbol);
                     // Record the symbol reference
                     let sym_id = self.next_symbol_id();
                     self.sema.symbols.insert(
