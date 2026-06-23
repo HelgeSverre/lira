@@ -1,0 +1,32 @@
+// String interpolation with ${expr}
+//
+// @expect: x=7
+// @expect: sum=3
+// @expect: 7 more
+// @expect: literal ${x}
+// @expect: costs $5
+// @expect: a 1 b 2 c
+
+fn main() {
+    let x = 7
+    let a = 1
+    let b = 2
+
+    // variable interpolation
+    println("x=${x}")
+
+    // expression interpolation
+    println("sum=${1 + 2}")
+
+    // leading interpolation
+    println("${x} more")
+
+    // escaped \${ stays a literal
+    println("literal \${x}")
+
+    // a lone $ not followed by { stays literal
+    println("costs $5")
+
+    // multiple interpolations
+    println("a ${a} b ${b} c")
+}

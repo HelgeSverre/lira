@@ -1373,6 +1373,90 @@ impl Parser {
         }
     }
 
+    /// Desugar an interpolated string `"L0 ${E1} L1 ${E2} L2"` into the
+    /// left-associative concatenation `("L0" + (E1) + "L1" + (E2) + "L2")`.
+    ///
+    /// The leftmost operand is always a string literal (possibly `""`), so the
+    /// whole chain types and runs as string concatenation even when the first
+    /// thing in the template is an interpolation (e.g. `"${x} more"` becomes
+    /// `"" + (x) + " more"`). Each embedded expression source is lexed and
+    /// parsed with the existing machinery.
+    fn build_template_string(
+        &mut self,
+        parts: Vec<String>,
+        exprs: Vec<String>,
+        span: Span,
+    ) -> Result<Expression, String> {
+        debug_assert_eq!(parts.len(), exprs.len() + 1);
+
+        // Start with the leading literal segment (always present, possibly "").
+        let mut acc = self.expr(
+            ExpressionKind::StringLiteral(parts[0].clone()),
+            span.clone(),
+        );
+
+        for (expr_src, literal) in exprs.iter().zip(parts.iter().skip(1)) {
+            // Parse the embedded expression source via the existing machinery.
+            let embedded = self.parse_embedded_expression(expr_src, &span)?;
+            acc = self.expr(
+                ExpressionKind::Binary {
+                    left: Box::new(acc),
+                    op: BinaryOp::Add,
+                    right: Box::new(embedded),
+                },
+                span.clone(),
+            );
+
+            // Append the following literal segment.
+            let lit = self.expr(ExpressionKind::StringLiteral(literal.clone()), span.clone());
+            acc = self.expr(
+                ExpressionKind::Binary {
+                    left: Box::new(acc),
+                    op: BinaryOp::Add,
+                    right: Box::new(lit),
+                },
+                span.clone(),
+            );
+        }
+
+        Ok(acc)
+    }
+
+    /// Lex and parse a single `${...}` embedded expression source into an
+    /// `Expression`, reusing the parser's NodeId generator so node IDs stay
+    /// unique across the whole program.
+    fn parse_embedded_expression(
+        &mut self,
+        source: &str,
+        span: &Span,
+    ) -> Result<Expression, String> {
+        let tokens = crate::lexer::tokenize(source).map_err(|e| {
+            format!(
+                "{}:{}: invalid interpolation expression `{}`: {}",
+                span.line, span.column, source, e
+            )
+        })?;
+
+        let mut sub = Parser::new(tokens);
+        // Share the NodeId generator so embedded expression nodes don't collide
+        // with the surrounding program's node IDs.
+        sub.node_id = std::mem::take(&mut self.node_id);
+        let result = sub.expression();
+        self.node_id = std::mem::take(&mut sub.node_id);
+
+        match result {
+            Ok(expr) if sub.is_at_end() => Ok(expr),
+            Ok(_) => Err(format!(
+                "{}:{}: trailing tokens in interpolation expression `{}`",
+                span.line, span.column, source
+            )),
+            Err(e) => Err(format!(
+                "{}:{}: invalid interpolation expression `{}`: {}",
+                span.line, span.column, source, e
+            )),
+        }
+    }
+
     fn prefix(&mut self) -> Result<Expression, String> {
         let span = self.span();
         let token = self.advance().clone();
@@ -1382,6 +1466,11 @@ impl Parser {
             TokenKind::FloatLiteral(n) => Ok(self.expr(ExpressionKind::FloatLiteral(*n), span)),
             TokenKind::StringLiteral(s) => {
                 Ok(self.expr(ExpressionKind::StringLiteral(s.clone()), span))
+            }
+            TokenKind::TemplateString { parts, exprs } => {
+                let parts = parts.clone();
+                let exprs = exprs.clone();
+                self.build_template_string(parts, exprs, span)
             }
             TokenKind::CharLiteral(c) => Ok(self.expr(ExpressionKind::CharLiteral(*c), span)),
             TokenKind::BoolLiteral(b) => Ok(self.expr(ExpressionKind::BoolLiteral(*b), span)),
@@ -2310,6 +2399,61 @@ mod tests {
 
         let expr = parse_expr("true").unwrap();
         assert!(matches!(expr.kind, ExpressionKind::BoolLiteral(true)));
+    }
+
+    #[test]
+    fn test_template_string_desugars_to_concat() {
+        // `"${x} more"` must desugar to `("" + (x)) + " more"` so the leftmost
+        // operand is a string literal and the whole chain is string concat.
+        let expr = parse_expr(r#""${x} more""#).unwrap();
+        let ExpressionKind::Binary { left, op, right } = &expr.kind else {
+            panic!("expected Binary, got {:?}", expr.kind);
+        };
+        assert_eq!(*op, BinaryOp::Add);
+        assert!(matches!(&right.kind, ExpressionKind::StringLiteral(s) if s == " more"));
+        // left == "" + (x)
+        let ExpressionKind::Binary {
+            left: ll,
+            op: lop,
+            right: lr,
+        } = &left.kind
+        else {
+            panic!("expected nested Binary, got {:?}", left.kind);
+        };
+        assert_eq!(*lop, BinaryOp::Add);
+        assert!(matches!(&ll.kind, ExpressionKind::StringLiteral(s) if s.is_empty()));
+        assert!(matches!(&lr.kind, ExpressionKind::Identifier(n) if n == "x"));
+    }
+
+    #[test]
+    fn test_template_string_expression_interpolation() {
+        // `"sum=${1 + 2}"` desugars to `("sum=" + (1 + 2)) + ""` (trailing empty
+        // literal segment). The embedded `1 + 2` must be a parsed inner add.
+        let expr = parse_expr(r#""sum=${1 + 2}""#).unwrap();
+        let ExpressionKind::Binary { left, op, right } = &expr.kind else {
+            panic!("expected Binary, got {:?}", expr.kind);
+        };
+        assert_eq!(*op, BinaryOp::Add);
+        // Trailing literal segment is "".
+        assert!(matches!(&right.kind, ExpressionKind::StringLiteral(s) if s.is_empty()));
+        // left == "sum=" + (1 + 2)
+        let ExpressionKind::Binary {
+            left: ll,
+            op: lop,
+            right: lr,
+        } = &left.kind
+        else {
+            panic!("expected nested Binary, got {:?}", left.kind);
+        };
+        assert_eq!(*lop, BinaryOp::Add);
+        assert!(matches!(&ll.kind, ExpressionKind::StringLiteral(s) if s == "sum="));
+        assert!(matches!(
+            &lr.kind,
+            ExpressionKind::Binary {
+                op: BinaryOp::Add,
+                ..
+            }
+        ));
     }
 
     #[test]

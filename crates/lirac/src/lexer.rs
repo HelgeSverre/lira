@@ -33,6 +33,16 @@ pub enum TokenKind {
     IntLiteral(i64),
     FloatLiteral(f64),
     StringLiteral(String),
+    /// Interpolated string literal: `"a ${x} b"`.
+    ///
+    /// `parts` holds the literal text segments (with escapes already resolved)
+    /// and `exprs` holds the raw source of each `${...}` embedded expression.
+    /// The invariant `parts.len() == exprs.len() + 1` always holds, so the
+    /// template desugars to `parts[0] + exprs[0] + parts[1] + ... + parts[n]`.
+    TemplateString {
+        parts: Vec<String>,
+        exprs: Vec<String>,
+    },
     CharLiteral(char),
     BoolLiteral(bool),
     Null,
@@ -516,12 +526,32 @@ impl<'a> Lexer<'a> {
     }
 
     fn scan_string(&mut self) -> Token {
+        // Literal text segments (escapes resolved) split at each `${...}`, and
+        // the raw source of each embedded interpolation expression.
+        let mut parts: Vec<String> = Vec::new();
+        let mut exprs: Vec<String> = Vec::new();
         let mut value = String::new();
 
         while let Some(ch) = self.peek() {
             if ch == '"' {
                 self.advance(); // consume closing quote
-                return self.make_token(TokenKind::StringLiteral(value));
+                if exprs.is_empty() {
+                    // No interpolation: behave exactly as a plain string literal.
+                    return self.make_token(TokenKind::StringLiteral(value));
+                }
+                parts.push(value);
+                return self.make_token(TokenKind::TemplateString { parts, exprs });
+            } else if ch == '$' && self.peek_next() == Some('{') {
+                // Start of an interpolation: flush the current literal segment,
+                // then capture the embedded expression source up to the matching
+                // closing brace (tracking nested `{}` so balanced braces work).
+                self.advance(); // consume $
+                self.advance(); // consume {
+                parts.push(std::mem::take(&mut value));
+                match self.scan_interpolation_source() {
+                    Ok(src) => exprs.push(src),
+                    Err(token) => return token,
+                }
             } else if ch == '\\' {
                 self.advance(); // consume backslash
                 match self.peek() {
@@ -548,6 +578,11 @@ impl<'a> Lexer<'a> {
                     Some('\'') => {
                         self.advance();
                         value.push('\'');
+                    }
+                    Some('$') => {
+                        // `\$` escapes interpolation: emit a literal `$`.
+                        self.advance();
+                        value.push('$');
                     }
                     Some('0') => {
                         self.advance();
@@ -585,6 +620,62 @@ impl<'a> Lexer<'a> {
         }
 
         self.error_token("Unterminated string")
+    }
+
+    /// Capture the raw source of a `${...}` interpolation expression.
+    ///
+    /// The opening `${` has already been consumed. Collects characters up to the
+    /// matching `}`, tracking nested brace depth so balanced `{}` inside the
+    /// expression (e.g. struct literals) is preserved. String literals inside
+    /// the expression are passed through verbatim so braces or quotes within
+    /// them don't disturb the depth tracking.
+    fn scan_interpolation_source(&mut self) -> Result<String, Token> {
+        let mut src = String::new();
+        let mut depth: usize = 0;
+
+        while let Some(ch) = self.peek() {
+            match ch {
+                '}' if depth == 0 => {
+                    self.advance(); // consume closing }
+                    return Ok(src);
+                }
+                '{' => {
+                    depth += 1;
+                    self.advance();
+                    src.push('{');
+                }
+                '}' => {
+                    depth -= 1;
+                    self.advance();
+                    src.push('}');
+                }
+                '"' => {
+                    // Pass through a nested string literal verbatim, including
+                    // its escapes, so its contents don't affect brace tracking.
+                    self.advance();
+                    src.push('"');
+                    while let Some(c) = self.peek() {
+                        self.advance();
+                        src.push(c);
+                        if c == '\\' {
+                            if let Some(next) = self.peek() {
+                                self.advance();
+                                src.push(next);
+                            }
+                        } else if c == '"' {
+                            break;
+                        }
+                    }
+                }
+                '\n' => return Err(self.error_token("Unterminated string interpolation")),
+                _ => {
+                    self.advance();
+                    src.push(ch);
+                }
+            }
+        }
+
+        Err(self.error_token("Unterminated string interpolation"))
     }
 
     fn scan_char(&mut self) -> Token {
@@ -886,6 +977,51 @@ mod tests {
         let tokens = tokenize(r#""hello" "world\n""#).unwrap();
         assert!(matches!(&tokens[0].kind, TokenKind::StringLiteral(s) if s == "hello"));
         assert!(matches!(&tokens[1].kind, TokenKind::StringLiteral(s) if s == "world\n"));
+    }
+
+    #[test]
+    fn test_template_string() {
+        let tokens = tokenize(r#""a ${x} b ${1 + 2} c""#).unwrap();
+        match &tokens[0].kind {
+            TokenKind::TemplateString { parts, exprs } => {
+                assert_eq!(
+                    parts,
+                    &vec!["a ".to_string(), " b ".to_string(), " c".to_string()]
+                );
+                assert_eq!(exprs, &vec!["x".to_string(), "1 + 2".to_string()]);
+            }
+            other => panic!("expected TemplateString, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_template_string_leading_and_trailing() {
+        let tokens = tokenize(r#""${x} more""#).unwrap();
+        match &tokens[0].kind {
+            TokenKind::TemplateString { parts, exprs } => {
+                assert_eq!(parts, &vec!["".to_string(), " more".to_string()]);
+                assert_eq!(exprs, &vec!["x".to_string()]);
+            }
+            other => panic!("expected TemplateString, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_escaped_interpolation_is_plain_string() {
+        // `\${x}` is a literal and a lone `$` stays literal: no TemplateString.
+        let tokens = tokenize(r#""literal \${x} costs $5""#).unwrap();
+        assert!(
+            matches!(&tokens[0].kind, TokenKind::StringLiteral(s) if s == "literal ${x} costs $5"),
+            "got {:?}",
+            tokens[0].kind
+        );
+    }
+
+    #[test]
+    fn test_plain_string_unaffected() {
+        // A string with no `${...}` is still a plain StringLiteral.
+        let tokens = tokenize(r#""hello world""#).unwrap();
+        assert!(matches!(&tokens[0].kind, TokenKind::StringLiteral(s) if s == "hello world"));
     }
 
     #[test]

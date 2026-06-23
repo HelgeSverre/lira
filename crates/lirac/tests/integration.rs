@@ -221,6 +221,7 @@ example_test!(test_prime_checker, "prime_checker.li");
 // Data types
 example_test!(test_integer_types, "integer_types.li");
 example_test!(test_string_ops, "string_ops.li");
+example_test!(test_string_interpolation, "string_interpolation.li");
 example_test!(test_array_ops, "array_ops.li");
 example_test!(test_array_types, "array_types.li");
 example_test!(test_structs, "structs.li");
