@@ -3190,6 +3190,8 @@ impl TypeChecker {
 
     fn resolve_type_expr(&mut self, type_expr: &TypeExpr) -> Type {
         match &type_expr.kind {
+            // Un-annotated parameter: accept any argument, dynamically typed.
+            TypeExprKind::Infer => Type::Any,
             TypeExprKind::Named(name) => {
                 match name.as_str() {
                     "int" => Type::Int,

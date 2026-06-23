@@ -526,6 +526,7 @@ impl CodeGenerator {
             TypeExprKind::Generic { .. } => 6,
             TypeExprKind::Result { .. } => 6, // Result is object-like
             TypeExprKind::Path(_) => 6,       // Paths resolve to object types
+            TypeExprKind::Infer => 6,         // Un-annotated: any/object at runtime
         }
     }
 
@@ -659,6 +660,7 @@ impl CodeGenerator {
                 )
             }
             TypeExprKind::Path(parts) => parts.join("::"),
+            TypeExprKind::Infer => "any".to_string(),
         }
     }
 

@@ -253,6 +253,9 @@ pub enum TypeExprKind {
     },
     /// Path type: std::fs::File
     Path(Vec<String>),
+    /// Inferred type — used for un-annotated function parameters.
+    /// Resolves to `Type::Any` in the checker (the VM is dynamically typed).
+    Infer,
 }
 
 /// Expressions

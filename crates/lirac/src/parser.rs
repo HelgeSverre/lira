@@ -535,8 +535,17 @@ impl Parser {
                     continue;
                 }
 
-                self.consume(&TokenKind::Colon, "Expected ':' after parameter name")?;
-                let type_ann = self.type_expr()?;
+                // The type annotation is optional. An un-annotated parameter
+                // (e.g. `fn f(x)`) is recorded with an inferred type, which the
+                // checker resolves to `Any` (the VM is dynamically typed).
+                let type_ann = if self.match_token(&TokenKind::Colon) {
+                    self.type_expr()?
+                } else {
+                    TypeExpr {
+                        kind: TypeExprKind::Infer,
+                        span: span.clone(),
+                    }
+                };
 
                 let default = if self.match_token(&TokenKind::Eq) {
                     Some(self.expression()?)

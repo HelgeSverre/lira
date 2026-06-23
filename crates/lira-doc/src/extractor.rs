@@ -730,5 +730,6 @@ fn format_type(type_expr: &TypeExpr) -> String {
             )
         }
         TypeExprKind::Path(segments) => segments.join("::"),
+        TypeExprKind::Infer => "any".to_string(),
     }
 }

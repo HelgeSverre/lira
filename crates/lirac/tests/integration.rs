@@ -507,6 +507,61 @@ fn test_multiple_while_function_calls_with_concat() {
 // =============================================================================
 
 #[test]
+fn test_untyped_parameter() {
+    // Untyped parameters should be accepted and treated as Any.
+    let source = r#"
+        fn f(x) -> int { return 1 }
+        println(f(5))
+    "#;
+
+    let bytecode = lirac::compile(source).expect("Compilation failed");
+    let (_, output) = liravm::run_with_capture(&bytecode).expect("Execution failed");
+
+    assert_eq!(output, vec!["1"]);
+}
+
+#[test]
+fn test_untyped_parameter_body_uses_param() {
+    // An untyped param used in the body must not trigger spurious type errors.
+    let source = r#"
+        fn id(x) { return x }
+        println(id(42))
+        println(id("hello"))
+    "#;
+
+    let bytecode = lirac::compile(source).expect("Compilation failed");
+    let (_, output) = liravm::run_with_capture(&bytecode).expect("Execution failed");
+
+    assert_eq!(output, vec!["42", "hello"]);
+}
+
+#[test]
+fn test_import_std_json_roundtrip() {
+    // stdlib/json.li uses untyped parameters; importing it and doing a
+    // parse/stringify round-trip must compile and run.
+    let source_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("examples")
+        .join("_untyped_param_json_test.li");
+    let source_path = source_path.to_string_lossy().to_string();
+    let source = r#"
+        import std.json
+        let v = json_parse("{\"a\": 1}")
+        println(json_stringify(v))
+        println(json_has(v, "a"))
+        println(json_get(v, "a"))
+    "#;
+
+    let bytecode = lirac::compile_with_imports(&source_path, source).expect("Compilation failed");
+    let (_, output) = liravm::run_with_capture(&bytecode).expect("Execution failed");
+
+    assert_eq!(output, vec![r#"{"a":1}"#, "true", "1"]);
+}
+
+#[test]
 fn test_basic_arithmetic() {
     let source = r#"
         println(1 + 2)
