@@ -1972,6 +1972,173 @@ impl VM {
     }
 
     fn handle_syscall(&mut self, num: u8) -> Result<(), String> {
+        // The vast majority of syscalls follow one uniform shape: pop N typed
+        // arguments (in reverse-of-push order), call a single `self.runtime`
+        // method, then push the wrapped result. The `syscall!` macro below
+        // generates those arms so they stay byte-for-byte equivalent to the
+        // hand-written form: all arguments are popped first, then matched as one
+        // tuple against the expected types (preserving the same pop order and the
+        // same single "requires ... arguments" error on a type mismatch).
+        //
+        // Irregular arms (sys_exit, print/println, env_get's Option->Null,
+        // json passthrough, http Result-tuple->Array, and the few syscalls with
+        // bespoke error/Option handling) are left explicit and individually
+        // commented further down.
+        //
+        // Result specifiers wrap the runtime method's return into a Value:
+        //   Str      String      -> Value::String
+        //   Int      i64         -> Value::Int
+        //   Bool     bool        -> Value::Bool
+        //   Float    f64         -> Value::Float
+        //   StrArray Vec<String> -> Value::Array of Value::String
+        //   IntArray Vec<i64>    -> Value::Array of Value::Int
+        macro_rules! sys_wrap {
+            (Str, $e:expr) => {
+                Value::String(Rc::new($e))
+            };
+            (Int, $e:expr) => {
+                Value::Int($e)
+            };
+            (Bool, $e:expr) => {
+                Value::Bool($e)
+            };
+            (Float, $e:expr) => {
+                Value::Float($e)
+            };
+            (StrArray, $e:expr) => {
+                Value::Array(Rc::new(RefCell::new(
+                    $e.into_iter()
+                        .map(|s| Value::String(Rc::new(s)))
+                        .collect::<Vec<_>>(),
+                )))
+            };
+            (IntArray, $e:expr) => {
+                Value::Array(Rc::new(RefCell::new(
+                    $e.into_iter().map(Value::Int).collect::<Vec<_>>(),
+                )))
+            };
+        }
+        // `sys_typed!` covers the str/int-argument arms: it pops every argument
+        // first (in last-pushed-first order), then matches them all as a single
+        // tuple so a type mismatch yields one combined error and never leaves a
+        // partially-drained stack -- identical to the original hand-written form.
+        //
+        //   sys_pat!  -> the per-arg match pattern (binds the inner value)
+        //   sys_call! -> how the bound value is passed to the runtime method
+        //   sys_desc! -> the type word used in the mismatch error message
+        macro_rules! sys_pat {
+            (str, $b:ident) => {
+                Value::String($b)
+            };
+            (int, $b:ident) => {
+                Value::Int($b)
+            };
+        }
+        macro_rules! sys_call {
+            (str, $b:ident) => {
+                &$b
+            };
+            (int, $b:ident) => {
+                $b
+            };
+        }
+        macro_rules! sys_desc {
+            (str) => {
+                "string"
+            };
+            (int) => {
+                "int"
+            };
+        }
+        macro_rules! sys_typed {
+            // Single argument: error reads "NAME requires <type> argument".
+            ($name:literal, $a:ident $b:ident => $ret:ident : $method:ident) => {{
+                let $b = self.pop()?;
+                match $b {
+                    sys_pat!($a, $b) => {
+                        let result = self.runtime.$method(sys_call!($a, $b));
+                        self.stack.push(sys_wrap!($ret, result));
+                        Ok(())
+                    }
+                    _ => Err(concat!($name, " requires ", sys_desc!($a), " argument").to_string()),
+                }
+            }};
+            // Multiple arguments: error reads "NAME requires (t1, t2, ...) arguments".
+            ($name:literal, $($a:ident $b:ident),+ => $ret:ident : $method:ident) => {{
+                // Reverse-pop so the right-most (last-pushed) arg is popped first.
+                sys_typed!(@pop_rev self, $($a $b),+);
+                match ( $( $b ),+ , ) {
+                    ( $( sys_pat!($a, $b) ),+ , ) => {
+                        let result = self.runtime.$method( $( sys_call!($a, $b) ),+ );
+                        self.stack.push(sys_wrap!($ret, result));
+                        Ok(())
+                    }
+                    _ => Err(concat!(
+                        $name, " requires (",
+                        sys_typed!(@desc_list $($a),+),
+                        ") arguments"
+                    ).to_string()),
+                }
+            }};
+            // Pop the argument list right-to-left, recursing on the tail first so
+            // the last-declared (last-pushed) binding is popped before the rest.
+            (@pop_rev $s:ident, $a0:ident $b0:ident) => {
+                let $b0 = $s.pop()?;
+            };
+            (@pop_rev $s:ident, $a0:ident $b0:ident, $($a:ident $b:ident),+) => {
+                sys_typed!(@pop_rev $s, $($a $b),+);
+                let $b0 = $s.pop()?;
+            };
+            // Comma-joined type words, evaluated at compile time via concat!.
+            (@desc_list $a:ident) => { sys_desc!($a) };
+            (@desc_list $a0:ident, $($a:ident),+) => {
+                concat!(sys_desc!($a0), ", ", sys_typed!(@desc_list $($a),+))
+            };
+        }
+        // `sys_noarg!` covers the zero-argument arms: call the runtime method and
+        // push the wrapped result.
+        macro_rules! sys_noarg {
+            ($ret:ident : $method:ident) => {{
+                let result = self.runtime.$method();
+                self.stack.push(sys_wrap!($ret, result));
+                Ok(())
+            }};
+        }
+        // `sys_math1!` / `sys_math2!` cover the float-math arms: pop the
+        // argument(s), coerce Int|Float -> f64 (erroring otherwise with the
+        // original "requires numeric argument(s)" message), call, push the result.
+        macro_rules! sys_math1 {
+            ($name:literal => $ret:ident : $method:ident) => {{
+                let x = self.pop()?;
+                let x = match x {
+                    Value::Float(f) => f,
+                    Value::Int(i) => i as f64,
+                    _ => return Err(concat!($name, " requires numeric argument").to_string()),
+                };
+                let result = self.runtime.$method(x);
+                self.stack.push(sys_wrap!($ret, result));
+                Ok(())
+            }};
+        }
+        macro_rules! sys_math2 {
+            ($name:literal => $ret:ident : $method:ident) => {{
+                let b = self.pop()?;
+                let a = self.pop()?;
+                let a = match a {
+                    Value::Float(f) => f,
+                    Value::Int(i) => i as f64,
+                    _ => return Err(concat!($name, " requires numeric arguments").to_string()),
+                };
+                let b = match b {
+                    Value::Float(f) => f,
+                    Value::Int(i) => i as f64,
+                    _ => return Err(concat!($name, " requires numeric arguments").to_string()),
+                };
+                let result = self.runtime.$method(a, b);
+                self.stack.push(sys_wrap!($ret, result));
+                Ok(())
+            }};
+        }
         match num {
             // sys_exit
             0 => {
@@ -2000,11 +2167,7 @@ impl VM {
                 Ok(())
             }
             // sys_time_ms
-            4 => {
-                let ms = self.runtime.current_time_millis();
-                self.stack.push(Value::Int(ms));
-                Ok(())
-            }
+            4 => sys_noarg!(Int: current_time_millis),
             // sys_sleep_ms
             5 => {
                 let millis = self.pop()?;
@@ -2017,23 +2180,11 @@ impl VM {
                 }
             }
             // time_secs() -> int
-            6 => {
-                let secs = self.runtime.current_time_secs();
-                self.stack.push(Value::Int(secs));
-                Ok(())
-            }
+            6 => sys_noarg!(Int: current_time_secs),
             // time_micros() -> int
-            7 => {
-                let micros = self.runtime.current_time_micros();
-                self.stack.push(Value::Int(micros));
-                Ok(())
-            }
+            7 => sys_noarg!(Int: current_time_micros),
             // time_nanos() -> int
-            8 => {
-                let nanos = self.runtime.current_time_nanos();
-                self.stack.push(Value::Int(nanos));
-                Ok(())
-            }
+            8 => sys_noarg!(Int: current_time_nanos),
 
             // ================================================================
             // File I/O syscalls (10-19)
@@ -2116,17 +2267,7 @@ impl VM {
                 }
             }
             // file_exists(path: string) -> bool
-            14 => {
-                let path = self.pop()?;
-                match path {
-                    Value::String(path) => {
-                        let exists = self.runtime.file_exists(&path);
-                        self.stack.push(Value::Bool(exists));
-                        Ok(())
-                    }
-                    _ => Err("file_exists requires string argument".to_string()),
-                }
-            }
+            14 => sys_typed!("file_exists", str path => Bool: file_exists),
             // file_size(path: string) -> int
             15 => {
                 let path = self.pop()?;
@@ -2160,270 +2301,69 @@ impl VM {
                 }
             }
             // env_args() -> array of strings
-            21 => {
-                let args = self.runtime.env_args();
-                let arr: Vec<Value> = args
-                    .into_iter()
-                    .map(|s| Value::String(Rc::new(s)))
-                    .collect();
-                self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
-                Ok(())
-            }
+            21 => sys_noarg!(StrArray: env_args),
 
             // ================================================================
             // Extended environment syscalls (200-207)
             // ================================================================
 
             // env_set(name: string, value: string) -> bool
-            200 => {
-                let value = self.pop()?;
-                let name = self.pop()?;
-                match (name, value) {
-                    (Value::String(name), Value::String(value)) => {
-                        let result = self.runtime.env_set(&name, &value);
-                        self.stack.push(Value::Bool(result));
-                        Ok(())
-                    }
-                    _ => Err("env_set requires (string, string) arguments".to_string()),
-                }
-            }
+            200 => sys_typed!("env_set", str name, str value => Bool: env_set),
             // env_remove(name: string) -> bool
-            201 => {
-                let name = self.pop()?;
-                match name {
-                    Value::String(name) => {
-                        let result = self.runtime.env_remove(&name);
-                        self.stack.push(Value::Bool(result));
-                        Ok(())
-                    }
-                    _ => Err("env_remove requires string argument".to_string()),
-                }
-            }
+            201 => sys_typed!("env_remove", str name => Bool: env_remove),
             // env_all() -> [string] (key=value pairs)
-            202 => {
-                let vars = self.runtime.env_all();
-                let arr: Vec<Value> = vars
-                    .into_iter()
-                    .map(|s| Value::String(Rc::new(s)))
-                    .collect();
-                self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
-                Ok(())
-            }
+            202 => sys_noarg!(StrArray: env_all),
             // env_keys() -> [string]
-            203 => {
-                let keys = self.runtime.env_keys();
-                let arr: Vec<Value> = keys
-                    .into_iter()
-                    .map(|s| Value::String(Rc::new(s)))
-                    .collect();
-                self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
-                Ok(())
-            }
+            203 => sys_noarg!(StrArray: env_keys),
             // env_has(name: string) -> bool
-            204 => {
-                let name = self.pop()?;
-                match name {
-                    Value::String(name) => {
-                        let result = self.runtime.env_has(&name);
-                        self.stack.push(Value::Bool(result));
-                        Ok(())
-                    }
-                    _ => Err("env_has requires string argument".to_string()),
-                }
-            }
+            204 => sys_typed!("env_has", str name => Bool: env_has),
             // env_exe() -> string
-            205 => {
-                let path = self.runtime.env_exe();
-                self.stack.push(Value::String(Rc::new(path)));
-                Ok(())
-            }
+            205 => sys_noarg!(Str: env_exe),
             // env_temp_dir() -> string
-            206 => {
-                let path = self.runtime.env_temp_dir();
-                self.stack.push(Value::String(Rc::new(path)));
-                Ok(())
-            }
+            206 => sys_noarg!(Str: env_temp_dir),
             // env_home_dir() -> string
-            207 => {
-                let path = self.runtime.env_home_dir();
-                self.stack.push(Value::String(Rc::new(path)));
-                Ok(())
-            }
+            207 => sys_noarg!(Str: env_home_dir),
 
             // ================================================================
             // String operation syscalls (30-39)
             // ================================================================
 
             // str_char_code(str: string, index: int) -> int
-            30 => {
-                let index = self.pop()?;
-                let s = self.pop()?;
-                match (s, index) {
-                    (Value::String(s), Value::Int(idx)) => {
-                        let code = self.runtime.str_char_code(&s, idx);
-                        self.stack.push(Value::Int(code));
-                        Ok(())
-                    }
-                    _ => Err("str_char_code requires (string, int) arguments".to_string()),
-                }
-            }
+            30 => sys_typed!("str_char_code", str s, int index => Int: str_char_code),
             // str_from_char_code(code: int) -> string
-            31 => {
-                let code = self.pop()?;
-                match code {
-                    Value::Int(code) => {
-                        let s = self.runtime.str_from_char_code(code);
-                        self.stack.push(Value::String(Rc::new(s)));
-                        Ok(())
-                    }
-                    _ => Err("str_from_char_code requires int argument".to_string()),
-                }
-            }
+            31 => sys_typed!("str_from_char_code", int code => Str: str_from_char_code),
             // str_to_upper(str: string) -> string
-            32 => {
-                let s = self.pop()?;
-                match s {
-                    Value::String(s) => {
-                        let result = self.runtime.str_to_upper(&s);
-                        self.stack.push(Value::String(Rc::new(result)));
-                        Ok(())
-                    }
-                    _ => Err("str_to_upper requires string argument".to_string()),
-                }
-            }
+            32 => sys_typed!("str_to_upper", str s => Str: str_to_upper),
             // str_to_lower(str: string) -> string
-            33 => {
-                let s = self.pop()?;
-                match s {
-                    Value::String(s) => {
-                        let result = self.runtime.str_to_lower(&s);
-                        self.stack.push(Value::String(Rc::new(result)));
-                        Ok(())
-                    }
-                    _ => Err("str_to_lower requires string argument".to_string()),
-                }
-            }
+            33 => sys_typed!("str_to_lower", str s => Str: str_to_lower),
             // str_substring(str: string, start: int, end: int) -> string
-            34 => {
-                let end = self.pop()?;
-                let start = self.pop()?;
-                let s = self.pop()?;
-                match (s, start, end) {
-                    (Value::String(s), Value::Int(start), Value::Int(end)) => {
-                        let result = self.runtime.str_substring(&s, start, end);
-                        self.stack.push(Value::String(Rc::new(result)));
-                        Ok(())
-                    }
-                    _ => Err("str_substring requires (string, int, int) arguments".to_string()),
-                }
-            }
+            34 => sys_typed!("str_substring", str s, int start, int end => Str: str_substring),
             // str_index_of(str: string, substr: string) -> int
-            35 => {
-                let substr = self.pop()?;
-                let s = self.pop()?;
-                match (s, substr) {
-                    (Value::String(s), Value::String(substr)) => {
-                        let idx = self.runtime.str_index_of(&s, &substr);
-                        self.stack.push(Value::Int(idx));
-                        Ok(())
-                    }
-                    _ => Err("str_index_of requires (string, string) arguments".to_string()),
-                }
-            }
+            35 => sys_typed!("str_index_of", str s, str substr => Int: str_index_of),
             // str_split(str: string, delimiter: string) -> [string]
-            36 => {
-                let delimiter = self.pop()?;
-                let s = self.pop()?;
-                match (s, delimiter) {
-                    (Value::String(s), Value::String(delimiter)) => {
-                        let parts = self.runtime.str_split(&s, &delimiter);
-                        let arr: Vec<Value> = parts
-                            .into_iter()
-                            .map(|s| Value::String(Rc::new(s)))
-                            .collect();
-                        self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
-                        Ok(())
-                    }
-                    _ => Err("str_split requires (string, string) arguments".to_string()),
-                }
-            }
+            36 => sys_typed!("str_split", str s, str delimiter => StrArray: str_split),
             // str_trim(str: string) -> string
-            37 => {
-                let s = self.pop()?;
-                match s {
-                    Value::String(s) => {
-                        let result = self.runtime.str_trim(&s);
-                        self.stack.push(Value::String(Rc::new(result)));
-                        Ok(())
-                    }
-                    _ => Err("str_trim requires string argument".to_string()),
-                }
-            }
+            37 => sys_typed!("str_trim", str s => Str: str_trim),
             // str_trim_start(str: string) -> string
-            38 => {
-                let s = self.pop()?;
-                match s {
-                    Value::String(s) => {
-                        let result = self.runtime.str_trim_start(&s);
-                        self.stack.push(Value::String(Rc::new(result)));
-                        Ok(())
-                    }
-                    _ => Err("str_trim_start requires string argument".to_string()),
-                }
-            }
+            38 => sys_typed!("str_trim_start", str s => Str: str_trim_start),
             // str_trim_end(str: string) -> string
-            39 => {
-                let s = self.pop()?;
-                match s {
-                    Value::String(s) => {
-                        let result = self.runtime.str_trim_end(&s);
-                        self.stack.push(Value::String(Rc::new(result)));
-                        Ok(())
-                    }
-                    _ => Err("str_trim_end requires string argument".to_string()),
-                }
-            }
+            39 => sys_typed!("str_trim_end", str s => Str: str_trim_end),
 
             // ================================================================
             // Random number generation syscalls (40-41)
             // ================================================================
 
             // random_float() -> float (0.0 to 1.0)
-            40 => {
-                let value = self.runtime.random_float();
-                self.stack.push(Value::Float(value));
-                Ok(())
-            }
+            40 => sys_noarg!(Float: random_float),
             // random_int(min: int, max: int) -> int
-            41 => {
-                let max = self.pop()?;
-                let min = self.pop()?;
-                match (min, max) {
-                    (Value::Int(min), Value::Int(max)) => {
-                        let value = self.runtime.random_int(min, max);
-                        self.stack.push(Value::Int(value));
-                        Ok(())
-                    }
-                    _ => Err("random_int requires (int, int) arguments".to_string()),
-                }
-            }
+            41 => sys_typed!("random_int", int min, int max => Int: random_int),
 
             // ================================================================
             // Base64 encoding/decoding syscalls (60-63)
             // ================================================================
 
             // base64_encode(input: string) -> string
-            60 => {
-                let input = self.pop()?;
-                match input {
-                    Value::String(s) => {
-                        let encoded = self.runtime.base64_encode(&s);
-                        self.stack.push(Value::String(Rc::new(encoded)));
-                        Ok(())
-                    }
-                    _ => Err("base64_encode requires string argument".to_string()),
-                }
-            }
+            60 => sys_typed!("base64_encode", str s => Str: base64_encode),
             // base64_decode(input: string) -> string
             61 => {
                 let input = self.pop()?;
@@ -2446,17 +2386,7 @@ impl VM {
                 }
             }
             // base64_encode_url(input: string) -> string
-            62 => {
-                let input = self.pop()?;
-                match input {
-                    Value::String(s) => {
-                        let encoded = self.runtime.base64_encode_url(&s);
-                        self.stack.push(Value::String(Rc::new(encoded)));
-                        Ok(())
-                    }
-                    _ => Err("base64_encode_url requires string argument".to_string()),
-                }
-            }
+            62 => sys_typed!("base64_encode_url", str s => Str: base64_encode_url),
             // base64_decode_url(input: string) -> string
             63 => {
                 let input = self.pop()?;
@@ -2484,53 +2414,13 @@ impl VM {
             // ================================================================
 
             // md5(input: string) -> string (hex)
-            70 => {
-                let input = self.pop()?;
-                match input {
-                    Value::String(s) => {
-                        let hash = self.runtime.hash_md5(&s);
-                        self.stack.push(Value::String(Rc::new(hash)));
-                        Ok(())
-                    }
-                    _ => Err("md5 requires string argument".to_string()),
-                }
-            }
+            70 => sys_typed!("md5", str s => Str: hash_md5),
             // sha1(input: string) -> string (hex)
-            71 => {
-                let input = self.pop()?;
-                match input {
-                    Value::String(s) => {
-                        let hash = self.runtime.hash_sha1(&s);
-                        self.stack.push(Value::String(Rc::new(hash)));
-                        Ok(())
-                    }
-                    _ => Err("sha1 requires string argument".to_string()),
-                }
-            }
+            71 => sys_typed!("sha1", str s => Str: hash_sha1),
             // sha256(input: string) -> string (hex)
-            72 => {
-                let input = self.pop()?;
-                match input {
-                    Value::String(s) => {
-                        let hash = self.runtime.hash_sha256(&s);
-                        self.stack.push(Value::String(Rc::new(hash)));
-                        Ok(())
-                    }
-                    _ => Err("sha256 requires string argument".to_string()),
-                }
-            }
+            72 => sys_typed!("sha256", str s => Str: hash_sha256),
             // sha512(input: string) -> string (hex)
-            73 => {
-                let input = self.pop()?;
-                match input {
-                    Value::String(s) => {
-                        let hash = self.runtime.hash_sha512(&s);
-                        self.stack.push(Value::String(Rc::new(hash)));
-                        Ok(())
-                    }
-                    _ => Err("sha512 requires string argument".to_string()),
-                }
-            }
+            73 => sys_typed!("sha512", str s => Str: hash_sha512),
 
             // ================================================================
             // JSON syscalls (50-52)
@@ -2575,246 +2465,53 @@ impl VM {
             // ================================================================
 
             // tcp_connect(host: string, port: int) -> int (socket id or -1)
-            80 => {
-                let port = self.pop()?;
-                let host = self.pop()?;
-                match (host, port) {
-                    (Value::String(host), Value::Int(port)) => {
-                        let socket_id = self.runtime.tcp_connect(&host, port);
-                        self.stack.push(Value::Int(socket_id));
-                        Ok(())
-                    }
-                    _ => Err("tcp_connect requires (string, int) arguments".to_string()),
-                }
-            }
+            80 => sys_typed!("tcp_connect", str host, int port => Int: tcp_connect),
             // tcp_write(socket_id: int, data: string) -> int (bytes written or -1)
-            81 => {
-                let data = self.pop()?;
-                let socket_id = self.pop()?;
-                match (socket_id, data) {
-                    (Value::Int(socket_id), Value::String(data)) => {
-                        let bytes = self.runtime.tcp_write(socket_id, &data);
-                        self.stack.push(Value::Int(bytes));
-                        Ok(())
-                    }
-                    _ => Err("tcp_write requires (int, string) arguments".to_string()),
-                }
-            }
+            81 => sys_typed!("tcp_write", int socket_id, str data => Int: tcp_write),
             // tcp_read(socket_id: int, max_bytes: int) -> string
-            82 => {
-                let max_bytes = self.pop()?;
-                let socket_id = self.pop()?;
-                match (socket_id, max_bytes) {
-                    (Value::Int(socket_id), Value::Int(max_bytes)) => {
-                        let data = self.runtime.tcp_read(socket_id, max_bytes);
-                        self.stack.push(Value::String(Rc::new(data)));
-                        Ok(())
-                    }
-                    _ => Err("tcp_read requires (int, int) arguments".to_string()),
-                }
-            }
+            82 => sys_typed!("tcp_read", int socket_id, int max_bytes => Str: tcp_read),
             // tcp_close(socket_id: int) -> bool
-            83 => {
-                let socket_id = self.pop()?;
-                match socket_id {
-                    Value::Int(socket_id) => {
-                        let success = self.runtime.tcp_close(socket_id);
-                        self.stack.push(Value::Bool(success));
-                        Ok(())
-                    }
-                    _ => Err("tcp_close requires int argument".to_string()),
-                }
-            }
+            83 => sys_typed!("tcp_close", int socket_id => Bool: tcp_close),
             // dns_lookup(hostname: string) -> string (IP address or empty)
-            84 => {
-                let hostname = self.pop()?;
-                match hostname {
-                    Value::String(hostname) => {
-                        let ip = self.runtime.dns_lookup(&hostname);
-                        self.stack.push(Value::String(Rc::new(ip)));
-                        Ok(())
-                    }
-                    _ => Err("dns_lookup requires string argument".to_string()),
-                }
-            }
+            84 => sys_typed!("dns_lookup", str hostname => Str: dns_lookup),
 
             // ================================================================
             // OS syscalls (90-101)
             // ================================================================
 
             // getcwd() -> string
-            90 => {
-                let cwd = self.runtime.os_getcwd();
-                self.stack.push(Value::String(Rc::new(cwd)));
-                Ok(())
-            }
+            90 => sys_noarg!(Str: os_getcwd),
             // chdir(path: string) -> bool
-            91 => {
-                let path = self.pop()?;
-                match path {
-                    Value::String(path) => {
-                        let success = self.runtime.os_chdir(&path);
-                        self.stack.push(Value::Bool(success));
-                        Ok(())
-                    }
-                    _ => Err("chdir requires string argument".to_string()),
-                }
-            }
+            91 => sys_typed!("chdir", str path => Bool: os_chdir),
             // mkdir(path: string) -> bool
-            92 => {
-                let path = self.pop()?;
-                match path {
-                    Value::String(path) => {
-                        let success = self.runtime.os_mkdir(&path);
-                        self.stack.push(Value::Bool(success));
-                        Ok(())
-                    }
-                    _ => Err("mkdir requires string argument".to_string()),
-                }
-            }
+            92 => sys_typed!("mkdir", str path => Bool: os_mkdir),
             // mkdir_all(path: string) -> bool
-            93 => {
-                let path = self.pop()?;
-                match path {
-                    Value::String(path) => {
-                        let success = self.runtime.os_mkdir_all(&path);
-                        self.stack.push(Value::Bool(success));
-                        Ok(())
-                    }
-                    _ => Err("mkdir_all requires string argument".to_string()),
-                }
-            }
+            93 => sys_typed!("mkdir_all", str path => Bool: os_mkdir_all),
             // rmdir(path: string) -> bool
-            94 => {
-                let path = self.pop()?;
-                match path {
-                    Value::String(path) => {
-                        let success = self.runtime.os_rmdir(&path);
-                        self.stack.push(Value::Bool(success));
-                        Ok(())
-                    }
-                    _ => Err("rmdir requires string argument".to_string()),
-                }
-            }
+            94 => sys_typed!("rmdir", str path => Bool: os_rmdir),
             // remove(path: string) -> bool
-            95 => {
-                let path = self.pop()?;
-                match path {
-                    Value::String(path) => {
-                        let success = self.runtime.os_remove(&path);
-                        self.stack.push(Value::Bool(success));
-                        Ok(())
-                    }
-                    _ => Err("remove requires string argument".to_string()),
-                }
-            }
+            95 => sys_typed!("remove", str path => Bool: os_remove),
             // remove_all(path: string) -> bool
-            96 => {
-                let path = self.pop()?;
-                match path {
-                    Value::String(path) => {
-                        let success = self.runtime.os_remove_all(&path);
-                        self.stack.push(Value::Bool(success));
-                        Ok(())
-                    }
-                    _ => Err("remove_all requires string argument".to_string()),
-                }
-            }
+            96 => sys_typed!("remove_all", str path => Bool: os_remove_all),
             // listdir(path: string) -> [string]
-            97 => {
-                let path = self.pop()?;
-                match path {
-                    Value::String(path) => {
-                        let entries = self.runtime.os_listdir(&path);
-                        let arr: Vec<Value> = entries
-                            .into_iter()
-                            .map(|s| Value::String(Rc::new(s)))
-                            .collect();
-                        self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
-                        Ok(())
-                    }
-                    _ => Err("listdir requires string argument".to_string()),
-                }
-            }
+            97 => sys_typed!("listdir", str path => StrArray: os_listdir),
             // is_dir(path: string) -> bool
-            98 => {
-                let path = self.pop()?;
-                match path {
-                    Value::String(path) => {
-                        let is_dir = self.runtime.os_is_dir(&path);
-                        self.stack.push(Value::Bool(is_dir));
-                        Ok(())
-                    }
-                    _ => Err("is_dir requires string argument".to_string()),
-                }
-            }
+            98 => sys_typed!("is_dir", str path => Bool: os_is_dir),
             // is_file(path: string) -> bool
-            99 => {
-                let path = self.pop()?;
-                match path {
-                    Value::String(path) => {
-                        let is_file = self.runtime.os_is_file(&path);
-                        self.stack.push(Value::Bool(is_file));
-                        Ok(())
-                    }
-                    _ => Err("is_file requires string argument".to_string()),
-                }
-            }
+            99 => sys_typed!("is_file", str path => Bool: os_is_file),
             // rename(from: string, to: string) -> bool
-            100 => {
-                let to = self.pop()?;
-                let from = self.pop()?;
-                match (from, to) {
-                    (Value::String(from), Value::String(to)) => {
-                        let success = self.runtime.os_rename(&from, &to);
-                        self.stack.push(Value::Bool(success));
-                        Ok(())
-                    }
-                    _ => Err("rename requires (string, string) arguments".to_string()),
-                }
-            }
+            100 => sys_typed!("rename", str from, str to => Bool: os_rename),
             // copy(from: string, to: string) -> bool
-            101 => {
-                let to = self.pop()?;
-                let from = self.pop()?;
-                match (from, to) {
-                    (Value::String(from), Value::String(to)) => {
-                        let success = self.runtime.os_copy(&from, &to);
-                        self.stack.push(Value::Bool(success));
-                        Ok(())
-                    }
-                    _ => Err("copy requires (string, string) arguments".to_string()),
-                }
-            }
+            101 => sys_typed!("copy", str from, str to => Bool: os_copy),
 
             // ================================================================
             // URL encoding/decoding syscalls (110-111)
             // ================================================================
 
             // url_encode(input: string) -> string
-            110 => {
-                let input = self.pop()?;
-                match input {
-                    Value::String(s) => {
-                        let encoded = self.runtime.url_encode(&s);
-                        self.stack.push(Value::String(Rc::new(encoded)));
-                        Ok(())
-                    }
-                    _ => Err("url_encode requires string argument".to_string()),
-                }
-            }
+            110 => sys_typed!("url_encode", str s => Str: url_encode),
             // url_decode(input: string) -> string
-            111 => {
-                let input = self.pop()?;
-                match input {
-                    Value::String(s) => {
-                        let decoded = self.runtime.url_decode(&s);
-                        self.stack.push(Value::String(Rc::new(decoded)));
-                        Ok(())
-                    }
-                    _ => Err("url_decode requires string argument".to_string()),
-                }
-            }
+            111 => sys_typed!("url_decode", str s => Str: url_decode),
 
             // ================================================================
             // HTTP Client syscalls (120-122)
@@ -2904,366 +2601,68 @@ impl VM {
             // ================================================================
 
             // sqrt(x: float) -> float
-            140 => {
-                let x = self.pop()?;
-                let x = match x {
-                    Value::Float(f) => f,
-                    Value::Int(i) => i as f64,
-                    _ => return Err("sqrt requires numeric argument".to_string()),
-                };
-                let result = self.runtime.math_sqrt(x);
-                self.stack.push(Value::Float(result));
-                Ok(())
-            }
+            140 => sys_math1!("sqrt" => Float: math_sqrt),
             // pow(base: float, exp: float) -> float
-            141 => {
-                let exp = self.pop()?;
-                let base = self.pop()?;
-                let base = match base {
-                    Value::Float(f) => f,
-                    Value::Int(i) => i as f64,
-                    _ => return Err("pow requires numeric arguments".to_string()),
-                };
-                let exp = match exp {
-                    Value::Float(f) => f,
-                    Value::Int(i) => i as f64,
-                    _ => return Err("pow requires numeric arguments".to_string()),
-                };
-                let result = self.runtime.math_pow(base, exp);
-                self.stack.push(Value::Float(result));
-                Ok(())
-            }
+            141 => sys_math2!("pow" => Float: math_pow),
             // exp(x: float) -> float
-            142 => {
-                let x = self.pop()?;
-                let x = match x {
-                    Value::Float(f) => f,
-                    Value::Int(i) => i as f64,
-                    _ => return Err("exp requires numeric argument".to_string()),
-                };
-                let result = self.runtime.math_exp(x);
-                self.stack.push(Value::Float(result));
-                Ok(())
-            }
+            142 => sys_math1!("exp" => Float: math_exp),
             // ln(x: float) -> float
-            143 => {
-                let x = self.pop()?;
-                let x = match x {
-                    Value::Float(f) => f,
-                    Value::Int(i) => i as f64,
-                    _ => return Err("ln requires numeric argument".to_string()),
-                };
-                let result = self.runtime.math_ln(x);
-                self.stack.push(Value::Float(result));
-                Ok(())
-            }
+            143 => sys_math1!("ln" => Float: math_ln),
             // log10(x: float) -> float
-            144 => {
-                let x = self.pop()?;
-                let x = match x {
-                    Value::Float(f) => f,
-                    Value::Int(i) => i as f64,
-                    _ => return Err("log10 requires numeric argument".to_string()),
-                };
-                let result = self.runtime.math_log10(x);
-                self.stack.push(Value::Float(result));
-                Ok(())
-            }
+            144 => sys_math1!("log10" => Float: math_log10),
             // log2(x: float) -> float
-            145 => {
-                let x = self.pop()?;
-                let x = match x {
-                    Value::Float(f) => f,
-                    Value::Int(i) => i as f64,
-                    _ => return Err("log2 requires numeric argument".to_string()),
-                };
-                let result = self.runtime.math_log2(x);
-                self.stack.push(Value::Float(result));
-                Ok(())
-            }
+            145 => sys_math1!("log2" => Float: math_log2),
             // sin(x: float) -> float
-            146 => {
-                let x = self.pop()?;
-                let x = match x {
-                    Value::Float(f) => f,
-                    Value::Int(i) => i as f64,
-                    _ => return Err("sin requires numeric argument".to_string()),
-                };
-                let result = self.runtime.math_sin(x);
-                self.stack.push(Value::Float(result));
-                Ok(())
-            }
+            146 => sys_math1!("sin" => Float: math_sin),
             // cos(x: float) -> float
-            147 => {
-                let x = self.pop()?;
-                let x = match x {
-                    Value::Float(f) => f,
-                    Value::Int(i) => i as f64,
-                    _ => return Err("cos requires numeric argument".to_string()),
-                };
-                let result = self.runtime.math_cos(x);
-                self.stack.push(Value::Float(result));
-                Ok(())
-            }
+            147 => sys_math1!("cos" => Float: math_cos),
             // tan(x: float) -> float
-            148 => {
-                let x = self.pop()?;
-                let x = match x {
-                    Value::Float(f) => f,
-                    Value::Int(i) => i as f64,
-                    _ => return Err("tan requires numeric argument".to_string()),
-                };
-                let result = self.runtime.math_tan(x);
-                self.stack.push(Value::Float(result));
-                Ok(())
-            }
+            148 => sys_math1!("tan" => Float: math_tan),
             // asin(x: float) -> float
-            149 => {
-                let x = self.pop()?;
-                let x = match x {
-                    Value::Float(f) => f,
-                    Value::Int(i) => i as f64,
-                    _ => return Err("asin requires numeric argument".to_string()),
-                };
-                let result = self.runtime.math_asin(x);
-                self.stack.push(Value::Float(result));
-                Ok(())
-            }
+            149 => sys_math1!("asin" => Float: math_asin),
             // acos(x: float) -> float
-            150 => {
-                let x = self.pop()?;
-                let x = match x {
-                    Value::Float(f) => f,
-                    Value::Int(i) => i as f64,
-                    _ => return Err("acos requires numeric argument".to_string()),
-                };
-                let result = self.runtime.math_acos(x);
-                self.stack.push(Value::Float(result));
-                Ok(())
-            }
+            150 => sys_math1!("acos" => Float: math_acos),
             // atan(x: float) -> float
-            151 => {
-                let x = self.pop()?;
-                let x = match x {
-                    Value::Float(f) => f,
-                    Value::Int(i) => i as f64,
-                    _ => return Err("atan requires numeric argument".to_string()),
-                };
-                let result = self.runtime.math_atan(x);
-                self.stack.push(Value::Float(result));
-                Ok(())
-            }
+            151 => sys_math1!("atan" => Float: math_atan),
             // atan2(y: float, x: float) -> float
-            152 => {
-                let x = self.pop()?;
-                let y = self.pop()?;
-                let y = match y {
-                    Value::Float(f) => f,
-                    Value::Int(i) => i as f64,
-                    _ => return Err("atan2 requires numeric arguments".to_string()),
-                };
-                let x = match x {
-                    Value::Float(f) => f,
-                    Value::Int(i) => i as f64,
-                    _ => return Err("atan2 requires numeric arguments".to_string()),
-                };
-                let result = self.runtime.math_atan2(y, x);
-                self.stack.push(Value::Float(result));
-                Ok(())
-            }
+            152 => sys_math2!("atan2" => Float: math_atan2),
             // sinh(x: float) -> float
-            153 => {
-                let x = self.pop()?;
-                let x = match x {
-                    Value::Float(f) => f,
-                    Value::Int(i) => i as f64,
-                    _ => return Err("sinh requires numeric argument".to_string()),
-                };
-                let result = self.runtime.math_sinh(x);
-                self.stack.push(Value::Float(result));
-                Ok(())
-            }
+            153 => sys_math1!("sinh" => Float: math_sinh),
             // cosh(x: float) -> float
-            154 => {
-                let x = self.pop()?;
-                let x = match x {
-                    Value::Float(f) => f,
-                    Value::Int(i) => i as f64,
-                    _ => return Err("cosh requires numeric argument".to_string()),
-                };
-                let result = self.runtime.math_cosh(x);
-                self.stack.push(Value::Float(result));
-                Ok(())
-            }
+            154 => sys_math1!("cosh" => Float: math_cosh),
             // tanh(x: float) -> float
-            155 => {
-                let x = self.pop()?;
-                let x = match x {
-                    Value::Float(f) => f,
-                    Value::Int(i) => i as f64,
-                    _ => return Err("tanh requires numeric argument".to_string()),
-                };
-                let result = self.runtime.math_tanh(x);
-                self.stack.push(Value::Float(result));
-                Ok(())
-            }
+            155 => sys_math1!("tanh" => Float: math_tanh),
             // floor(x: float) -> float
-            156 => {
-                let x = self.pop()?;
-                let x = match x {
-                    Value::Float(f) => f,
-                    Value::Int(i) => i as f64,
-                    _ => return Err("floor requires numeric argument".to_string()),
-                };
-                let result = self.runtime.math_floor(x);
-                self.stack.push(Value::Float(result));
-                Ok(())
-            }
+            156 => sys_math1!("floor" => Float: math_floor),
             // ceil(x: float) -> float
-            157 => {
-                let x = self.pop()?;
-                let x = match x {
-                    Value::Float(f) => f,
-                    Value::Int(i) => i as f64,
-                    _ => return Err("ceil requires numeric argument".to_string()),
-                };
-                let result = self.runtime.math_ceil(x);
-                self.stack.push(Value::Float(result));
-                Ok(())
-            }
+            157 => sys_math1!("ceil" => Float: math_ceil),
             // round(x: float) -> float
-            158 => {
-                let x = self.pop()?;
-                let x = match x {
-                    Value::Float(f) => f,
-                    Value::Int(i) => i as f64,
-                    _ => return Err("round requires numeric argument".to_string()),
-                };
-                let result = self.runtime.math_round(x);
-                self.stack.push(Value::Float(result));
-                Ok(())
-            }
+            158 => sys_math1!("round" => Float: math_round),
             // trunc(x: float) -> float
-            159 => {
-                let x = self.pop()?;
-                let x = match x {
-                    Value::Float(f) => f,
-                    Value::Int(i) => i as f64,
-                    _ => return Err("trunc requires numeric argument".to_string()),
-                };
-                let result = self.runtime.math_trunc(x);
-                self.stack.push(Value::Float(result));
-                Ok(())
-            }
+            159 => sys_math1!("trunc" => Float: math_trunc),
             // is_nan(x: float) -> bool
-            160 => {
-                let x = self.pop()?;
-                let x = match x {
-                    Value::Float(f) => f,
-                    Value::Int(i) => i as f64,
-                    _ => return Err("is_nan requires numeric argument".to_string()),
-                };
-                let result = self.runtime.math_is_nan(x);
-                self.stack.push(Value::Bool(result));
-                Ok(())
-            }
+            160 => sys_math1!("is_nan" => Bool: math_is_nan),
             // is_infinite(x: float) -> bool
-            161 => {
-                let x = self.pop()?;
-                let x = match x {
-                    Value::Float(f) => f,
-                    Value::Int(i) => i as f64,
-                    _ => return Err("is_infinite requires numeric argument".to_string()),
-                };
-                let result = self.runtime.math_is_infinite(x);
-                self.stack.push(Value::Bool(result));
-                Ok(())
-            }
+            161 => sys_math1!("is_infinite" => Bool: math_is_infinite),
             // is_finite(x: float) -> bool
-            162 => {
-                let x = self.pop()?;
-                let x = match x {
-                    Value::Float(f) => f,
-                    Value::Int(i) => i as f64,
-                    _ => return Err("is_finite requires numeric argument".to_string()),
-                };
-                let result = self.runtime.math_is_finite(x);
-                self.stack.push(Value::Bool(result));
-                Ok(())
-            }
+            162 => sys_math1!("is_finite" => Bool: math_is_finite),
             // abs(x: float) -> float
-            163 => {
-                let x = self.pop()?;
-                let x = match x {
-                    Value::Float(f) => f,
-                    Value::Int(i) => i as f64,
-                    _ => return Err("abs requires numeric argument".to_string()),
-                };
-                let result = self.runtime.math_abs_float(x);
-                self.stack.push(Value::Float(result));
-                Ok(())
-            }
+            163 => sys_math1!("abs" => Float: math_abs_float),
 
             // ================================================================
             // Extended Time syscalls (130-135)
             // ================================================================
 
             // time_format_iso(timestamp_ms: int) -> string
-            130 => {
-                let timestamp_ms = self.pop()?;
-                match timestamp_ms {
-                    Value::Int(ms) => {
-                        let result = self.runtime.time_format_iso(ms);
-                        self.stack.push(Value::String(Rc::new(result)));
-                        Ok(())
-                    }
-                    _ => Err("time_format_iso requires int argument".to_string()),
-                }
-            }
+            130 => sys_typed!("time_format_iso", int ms => Str: time_format_iso),
             // time_format(timestamp_ms: int, format: string) -> string
-            131 => {
-                let format = self.pop()?;
-                let timestamp_ms = self.pop()?;
-                match (timestamp_ms, format) {
-                    (Value::Int(ms), Value::String(fmt)) => {
-                        let result = self.runtime.time_format(ms, &fmt);
-                        self.stack.push(Value::String(Rc::new(result)));
-                        Ok(())
-                    }
-                    _ => Err("time_format requires (int, string) arguments".to_string()),
-                }
-            }
+            131 => sys_typed!("time_format", int ms, str fmt => Str: time_format),
             // time_parse_iso(string) -> int
-            132 => {
-                let s = self.pop()?;
-                match s {
-                    Value::String(s) => {
-                        let result = self.runtime.time_parse_iso(&s);
-                        self.stack.push(Value::Int(result));
-                        Ok(())
-                    }
-                    _ => Err("time_parse_iso requires string argument".to_string()),
-                }
-            }
+            132 => sys_typed!("time_parse_iso", str s => Int: time_parse_iso),
             // time_timezone_offset() -> int
-            133 => {
-                let offset = self.runtime.time_timezone_offset();
-                self.stack.push(Value::Int(offset));
-                Ok(())
-            }
+            133 => sys_noarg!(Int: time_timezone_offset),
             // time_components(timestamp_ms: int) -> [int]
-            134 => {
-                let timestamp_ms = self.pop()?;
-                match timestamp_ms {
-                    Value::Int(ms) => {
-                        let components = self.runtime.time_components(ms);
-                        let arr: Vec<Value> = components.into_iter().map(Value::Int).collect();
-                        self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
-                        Ok(())
-                    }
-                    _ => Err("time_components requires int argument".to_string()),
-                }
-            }
+            134 => sys_typed!("time_components", int ms => IntArray: time_components),
             // time_from_components(year, month, day, hour, min, sec) -> int
             135 => {
                 let sec = self.pop()?;
@@ -3294,163 +2693,38 @@ impl VM {
             // ================================================================
 
             // regex_match(pattern: string, text: string) -> bool
-            170 => {
-                let text = self.pop()?;
-                let pattern = self.pop()?;
-                match (pattern, text) {
-                    (Value::String(pattern), Value::String(text)) => {
-                        let result = self.runtime.regex_match(&pattern, &text);
-                        self.stack.push(Value::Bool(result));
-                        Ok(())
-                    }
-                    _ => Err("regex_match requires (string, string) arguments".to_string()),
-                }
-            }
+            170 => sys_typed!("regex_match", str pattern, str text => Bool: regex_match),
             // regex_find(pattern: string, text: string) -> string
-            171 => {
-                let text = self.pop()?;
-                let pattern = self.pop()?;
-                match (pattern, text) {
-                    (Value::String(pattern), Value::String(text)) => {
-                        let result = self.runtime.regex_find(&pattern, &text);
-                        self.stack.push(Value::String(Rc::new(result)));
-                        Ok(())
-                    }
-                    _ => Err("regex_find requires (string, string) arguments".to_string()),
-                }
-            }
+            171 => sys_typed!("regex_find", str pattern, str text => Str: regex_find),
             // regex_find_all(pattern: string, text: string) -> [string]
-            172 => {
-                let text = self.pop()?;
-                let pattern = self.pop()?;
-                match (pattern, text) {
-                    (Value::String(pattern), Value::String(text)) => {
-                        let matches = self.runtime.regex_find_all(&pattern, &text);
-                        let arr: Vec<Value> = matches
-                            .into_iter()
-                            .map(|s| Value::String(Rc::new(s)))
-                            .collect();
-                        self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
-                        Ok(())
-                    }
-                    _ => Err("regex_find_all requires (string, string) arguments".to_string()),
-                }
-            }
+            172 => sys_typed!("regex_find_all", str pattern, str text => StrArray: regex_find_all),
             // regex_replace(pattern: string, text: string, replacement: string) -> string
             173 => {
-                let replacement = self.pop()?;
-                let text = self.pop()?;
-                let pattern = self.pop()?;
-                match (pattern, text, replacement) {
-                    (Value::String(pattern), Value::String(text), Value::String(replacement)) => {
-                        let result = self.runtime.regex_replace(&pattern, &text, &replacement);
-                        self.stack.push(Value::String(Rc::new(result)));
-                        Ok(())
-                    }
-                    _ => {
-                        Err("regex_replace requires (string, string, string) arguments".to_string())
-                    }
-                }
+                sys_typed!("regex_replace", str pattern, str text, str replacement => Str: regex_replace)
             }
             // regex_replace_all(pattern: string, text: string, replacement: string) -> string
             174 => {
-                let replacement = self.pop()?;
-                let text = self.pop()?;
-                let pattern = self.pop()?;
-                match (pattern, text, replacement) {
-                    (Value::String(pattern), Value::String(text), Value::String(replacement)) => {
-                        let result = self
-                            .runtime
-                            .regex_replace_all(&pattern, &text, &replacement);
-                        self.stack.push(Value::String(Rc::new(result)));
-                        Ok(())
-                    }
-                    _ => Err(
-                        "regex_replace_all requires (string, string, string) arguments".to_string(),
-                    ),
-                }
+                sys_typed!("regex_replace_all", str pattern, str text, str replacement => Str: regex_replace_all)
             }
             // regex_split(pattern: string, text: string) -> [string]
-            175 => {
-                let text = self.pop()?;
-                let pattern = self.pop()?;
-                match (pattern, text) {
-                    (Value::String(pattern), Value::String(text)) => {
-                        let parts = self.runtime.regex_split(&pattern, &text);
-                        let arr: Vec<Value> = parts
-                            .into_iter()
-                            .map(|s| Value::String(Rc::new(s)))
-                            .collect();
-                        self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
-                        Ok(())
-                    }
-                    _ => Err("regex_split requires (string, string) arguments".to_string()),
-                }
-            }
+            175 => sys_typed!("regex_split", str pattern, str text => StrArray: regex_split),
             // regex_captures(pattern: string, text: string) -> [string]
-            176 => {
-                let text = self.pop()?;
-                let pattern = self.pop()?;
-                match (pattern, text) {
-                    (Value::String(pattern), Value::String(text)) => {
-                        let captures = self.runtime.regex_captures(&pattern, &text);
-                        let arr: Vec<Value> = captures
-                            .into_iter()
-                            .map(|s| Value::String(Rc::new(s)))
-                            .collect();
-                        self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
-                        Ok(())
-                    }
-                    _ => Err("regex_captures requires (string, string) arguments".to_string()),
-                }
-            }
+            176 => sys_typed!("regex_captures", str pattern, str text => StrArray: regex_captures),
             // regex_is_valid(pattern: string) -> bool
-            177 => {
-                let pattern = self.pop()?;
-                match pattern {
-                    Value::String(pattern) => {
-                        let result = self.runtime.regex_is_valid(&pattern);
-                        self.stack.push(Value::Bool(result));
-                        Ok(())
-                    }
-                    _ => Err("regex_is_valid requires string argument".to_string()),
-                }
-            }
+            177 => sys_typed!("regex_is_valid", str pattern => Bool: regex_is_valid),
 
             // ================================================================
             // UUID syscalls (190-193)
             // ================================================================
 
             // uuid_v4() -> string
-            190 => {
-                let uuid = self.runtime.uuid_v4();
-                self.stack.push(Value::String(Rc::new(uuid)));
-                Ok(())
-            }
+            190 => sys_noarg!(Str: uuid_v4),
             // uuid_v7() -> string
-            191 => {
-                let uuid = self.runtime.uuid_v7();
-                self.stack.push(Value::String(Rc::new(uuid)));
-                Ok(())
-            }
+            191 => sys_noarg!(Str: uuid_v7),
             // uuid_is_valid(s: string) -> bool
-            192 => {
-                let s = self.pop()?;
-                match s {
-                    Value::String(s) => {
-                        let result = self.runtime.uuid_is_valid(&s);
-                        self.stack.push(Value::Bool(result));
-                        Ok(())
-                    }
-                    _ => Err("uuid_is_valid requires string argument".to_string()),
-                }
-            }
+            192 => sys_typed!("uuid_is_valid", str s => Bool: uuid_is_valid),
             // uuid_nil() -> string
-            193 => {
-                let uuid = self.runtime.uuid_nil();
-                self.stack.push(Value::String(Rc::new(uuid)));
-                Ok(())
-            }
+            193 => sys_noarg!(Str: uuid_nil),
 
             _ => Err(format!("Unknown syscall: {}", num)),
         }
