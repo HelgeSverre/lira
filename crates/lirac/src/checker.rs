@@ -2019,7 +2019,7 @@ impl TypeChecker {
                     BinaryOp::And | BinaryOp::Or => {
                         if left_type != Type::Bool || right_type != Type::Bool {
                             self.env.record_error(CheckerError::RequiresBoolOperand {
-                                plural: true,
+                                arity: crate::errors::OperandArity::Multiple,
                                 span: expr.span.clone(),
                             });
                         }
@@ -2040,7 +2040,7 @@ impl TypeChecker {
                             );
                         } else if !left_type.is_integer() || !right_type.is_integer() {
                             self.env.record_error(CheckerError::RequiresIntegerOperand {
-                                plural: true,
+                                arity: crate::errors::OperandArity::Multiple,
                                 span: expr.span.clone(),
                             });
                         }
@@ -2069,7 +2069,7 @@ impl TypeChecker {
                     UnaryOp::Not => {
                         if operand_type != Type::Bool {
                             self.env.record_error(CheckerError::RequiresBoolOperand {
-                                plural: false,
+                                arity: crate::errors::OperandArity::Single,
                                 span: expr.span.clone(),
                             });
                         }
@@ -2078,7 +2078,7 @@ impl TypeChecker {
                     UnaryOp::BitNot => {
                         if !operand_type.is_integer() {
                             self.env.record_error(CheckerError::RequiresIntegerOperand {
-                                plural: false,
+                                arity: crate::errors::OperandArity::Single,
                                 span: expr.span.clone(),
                             });
                         }
@@ -2364,13 +2364,13 @@ impl TypeChecker {
                         let vt = self.check_expression(v);
                         if !kt.is_compatible_with(&key_type) {
                             self.env.record_error(CheckerError::MapEntryTypeMismatch {
-                                value: false,
+                                entry: crate::errors::MapEntry::Key,
                                 span: k.span.clone(),
                             });
                         }
                         if !vt.is_compatible_with(&value_type) {
                             self.env.record_error(CheckerError::MapEntryTypeMismatch {
-                                value: true,
+                                entry: crate::errors::MapEntry::Value,
                                 span: v.span.clone(),
                             });
                         }
@@ -6336,9 +6336,13 @@ mod tests {
     fn test_logical_not_requires_bool_operand() {
         let errors = collect_errors("let x = !5");
         assert!(
-            errors
-                .iter()
-                .any(|e| matches!(e, CheckerError::RequiresBoolOperand { plural: false, .. })),
+            errors.iter().any(|e| matches!(
+                e,
+                CheckerError::RequiresBoolOperand {
+                    arity: crate::errors::OperandArity::Single,
+                    ..
+                }
+            )),
             "expected singular RequiresBoolOperand, got: {:?}",
             errors
         );

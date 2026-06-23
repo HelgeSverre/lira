@@ -32,6 +32,21 @@ pub enum IntContext {
     RangeEnd,
 }
 
+/// Whether an operand-type error concerns a single operand (unary operator) or
+/// multiple operands (binary operator).
+#[derive(Debug, Clone)]
+pub enum OperandArity {
+    Single,
+    Multiple,
+}
+
+/// Which side of a map entry carried a type mismatch.
+#[derive(Debug, Clone)]
+pub enum MapEntry {
+    Key,
+    Value,
+}
+
 /// Structured error from the type checker
 #[derive(Debug, Clone)]
 pub enum CheckerError {
@@ -116,22 +131,17 @@ pub enum CheckerError {
     },
     /// An operand must be bool (logical not / logical operators).
     RequiresBoolOperand {
-        /// `true` => "Logical operators require bool operands",
-        /// `false` => "Logical not requires bool operand".
-        plural: bool,
+        arity: OperandArity,
         span: Span,
     },
     /// An operand must be an integer (bitwise not / bitwise operators).
     RequiresIntegerOperand {
-        /// `true` => "Bitwise operators require integer operands",
-        /// `false` => "Bitwise not requires integer operand".
-        plural: bool,
+        arity: OperandArity,
         span: Span,
     },
     /// Map literal key/value type mismatch (no Types in original text).
     MapEntryTypeMismatch {
-        /// `false` => "Map key type mismatch", `true` => "Map value type mismatch".
-        value: bool,
+        entry: MapEntry,
         span: Span,
     },
     /// Compound assignment operand types do not match.
@@ -197,254 +207,140 @@ impl CheckerError {
         }
     }
 
-    /// Format as a human-readable error message with location
-    pub fn message(&self) -> String {
+    /// The message text without the leading "line:column: " location prefix.
+    /// [`message`](Self::message) prepends the location to this exactly once,
+    /// so each arm here is the single source of truth for its wording.
+    pub fn body(&self) -> String {
         match self {
-            Self::TypeMismatch {
-                expected,
-                got,
-                span,
-            } => {
-                format!(
-                    "{}:{}: Type mismatch: expected '{}', got '{}'",
-                    span.line,
-                    span.column,
-                    expected.display_name(),
-                    got.display_name()
-                )
-            }
-            Self::UndefinedVariable { name, span } => {
-                format!(
-                    "{}:{}: Undefined variable: {}",
-                    span.line, span.column, name
-                )
+            Self::TypeMismatch { expected, got, .. } => format!(
+                "Type mismatch: expected '{}', got '{}'",
+                expected.display_name(),
+                got.display_name()
+            ),
+            Self::UndefinedVariable { name, .. } => {
+                format!("Undefined variable: {}", name)
             }
             Self::UnknownMethod {
-                method,
-                on_type,
-                span,
+                method, on_type, ..
             } => {
-                format!(
-                    "{}:{}: Unknown method: {} on type {}",
-                    span.line, span.column, method, on_type
-                )
+                format!("Unknown method: {} on type {}", method, on_type)
             }
-            Self::UnknownField {
-                field,
-                on_type,
-                span,
-            } => {
-                format!(
-                    "{}:{}: Unknown field: {} on type {}",
-                    span.line, span.column, field, on_type
-                )
+            Self::UnknownField { field, on_type, .. } => {
+                format!("Unknown field: {} on type {}", field, on_type)
             }
             Self::UnknownEnumVariant {
-                variant,
-                enum_name,
-                span,
+                variant, enum_name, ..
             } => {
-                format!(
-                    "{}:{}: Unknown variant '{}' for enum '{}'",
-                    span.line, span.column, variant, enum_name
-                )
+                format!("Unknown variant '{}' for enum '{}'", variant, enum_name)
             }
-            Self::NotAnEnum { type_name, span } => {
-                format!(
-                    "{}:{}: '{}' is not an enum",
-                    span.line, span.column, type_name
-                )
+            Self::NotAnEnum { type_name, .. } => {
+                format!("'{}' is not an enum", type_name)
             }
-            Self::UnknownType { name, span } => {
-                format!("{}:{}: Unknown type: {}", span.line, span.column, name)
+            Self::UnknownType { name, .. } => format!("Unknown type: {}", name),
+            Self::ArgumentCountMismatch { expected, got, .. } => {
+                format!("Expected {} arguments, got {}", expected, got)
             }
-            Self::ArgumentCountMismatch {
-                expected,
-                got,
-                span,
-            } => {
-                format!(
-                    "{}:{}: Expected {} arguments, got {}",
-                    span.line, span.column, expected, got
-                )
+            Self::NotCallable { ty, .. } => {
+                format!("Type '{}' is not callable", ty.display_name())
             }
-            Self::NotCallable { ty, span } => {
-                format!(
-                    "{}:{}: Type '{}' is not callable",
-                    span.line,
-                    span.column,
-                    ty.display_name()
-                )
+            Self::ImmutableAssignment { name, .. } => {
+                format!("Cannot assign to immutable variable '{}'", name)
             }
-            Self::ImmutableAssignment { name, span } => {
-                format!(
-                    "{}:{}: Cannot assign to immutable variable '{}'",
-                    span.line, span.column, name
-                )
-            }
-            Self::BreakOutsideLoop { span } => {
-                format!("{}:{}: break outside of loop", span.line, span.column)
-            }
-            Self::ContinueOutsideLoop { span } => {
-                format!("{}:{}: continue outside of loop", span.line, span.column)
-            }
+            Self::BreakOutsideLoop { .. } => "break outside of loop".to_string(),
+            Self::ContinueOutsideLoop { .. } => "continue outside of loop".to_string(),
             Self::TraitNotImplemented {
                 trait_name,
                 type_name,
-                span,
+                ..
             } => {
                 format!(
-                    "{}:{}: Trait '{}' is not implemented for type '{}'",
-                    span.line, span.column, trait_name, type_name
+                    "Trait '{}' is not implemented for type '{}'",
+                    trait_name, type_name
                 )
             }
-            Self::MissingSelfParameter { method, span } => {
-                format!(
-                    "{}:{}: Method '{}' must have 'self' as first parameter",
-                    span.line, span.column, method
-                )
+            Self::MissingSelfParameter { method, .. } => {
+                format!("Method '{}' must have 'self' as first parameter", method)
             }
             Self::TypeMismatchContext {
                 context,
                 expected,
                 got,
-                span,
+                ..
             } => {
                 let e = expected.display_name();
                 let g = got.display_name();
                 match context {
-                    TypeContext::VarInit => format!(
-                        "{}:{}: Type mismatch: expected '{}', got '{}'",
-                        span.line, span.column, e, g
-                    ),
-                    TypeContext::Return => format!(
-                        "{}:{}: Return type mismatch: expected '{}', got '{}'",
-                        span.line, span.column, e, g
-                    ),
-                    TypeContext::Assignment => format!(
-                        "{}:{}: Assignment type mismatch: expected '{}', got '{}'",
-                        span.line, span.column, e, g
-                    ),
-                    TypeContext::Argument => format!(
-                        "{}:{}: Argument type mismatch: expected '{}', got '{}'",
-                        span.line, span.column, e, g
-                    ),
-                    TypeContext::ArrayElement => format!(
-                        "{}:{}: Array element type mismatch: expected '{}', got '{}'",
-                        span.line, span.column, e, g
-                    ),
-                    TypeContext::MatchArm => format!(
-                        "{}:{}: Match arm type mismatch: expected '{}', got '{}'",
-                        span.line, span.column, e, g
-                    ),
+                    TypeContext::VarInit => {
+                        format!("Type mismatch: expected '{}', got '{}'", e, g)
+                    }
+                    TypeContext::Return => {
+                        format!("Return type mismatch: expected '{}', got '{}'", e, g)
+                    }
+                    TypeContext::Assignment => {
+                        format!("Assignment type mismatch: expected '{}', got '{}'", e, g)
+                    }
+                    TypeContext::Argument => {
+                        format!("Argument type mismatch: expected '{}', got '{}'", e, g)
+                    }
+                    TypeContext::ArrayElement => {
+                        format!("Array element type mismatch: expected '{}', got '{}'", e, g)
+                    }
+                    TypeContext::MatchArm => {
+                        format!("Match arm type mismatch: expected '{}', got '{}'", e, g)
+                    }
                     TypeContext::DefaultValue { param } => format!(
-                        "{}:{}: Default value type mismatch: parameter '{}' expects '{}', got '{}'",
-                        span.line, span.column, param, e, g
+                        "Default value type mismatch: parameter '{}' expects '{}', got '{}'",
+                        param, e, g
                     ),
                 }
             }
-            Self::ConditionMustBeBool { got, span } => match got {
-                Some(t) => format!(
-                    "{}:{}: Condition must be bool, got '{}'",
-                    span.line,
-                    span.column,
-                    t.display_name()
-                ),
-                None => format!("{}:{}: If condition must be bool", span.line, span.column),
+            Self::ConditionMustBeBool { got, .. } => match got {
+                Some(t) => format!("Condition must be bool, got '{}'", t.display_name()),
+                None => "If condition must be bool".to_string(),
             },
-            Self::MustBeInteger { context, span } => {
+            Self::MustBeInteger { context, .. } => {
                 let what = match context {
                     IntContext::ArrayIndex => "Array index",
                     IntContext::StringIndex => "String index",
                     IntContext::RangeStart => "Range start",
                     IntContext::RangeEnd => "Range end",
                 };
-                format!("{}:{}: {} must be integer", span.line, span.column, what)
+                format!("{} must be integer", what)
             }
-            Self::RequiresBoolOperand { plural, span } => {
-                if *plural {
-                    format!(
-                        "{}:{}: Logical operators require bool operands",
-                        span.line, span.column
-                    )
-                } else {
-                    format!(
-                        "{}:{}: Logical not requires bool operand",
-                        span.line, span.column
-                    )
-                }
+            Self::RequiresBoolOperand { arity, .. } => match arity {
+                OperandArity::Multiple => "Logical operators require bool operands".to_string(),
+                OperandArity::Single => "Logical not requires bool operand".to_string(),
+            },
+            Self::RequiresIntegerOperand { arity, .. } => match arity {
+                OperandArity::Multiple => "Bitwise operators require integer operands".to_string(),
+                OperandArity::Single => "Bitwise not requires integer operand".to_string(),
+            },
+            Self::MapEntryTypeMismatch { entry, .. } => match entry {
+                MapEntry::Value => "Map value type mismatch".to_string(),
+                MapEntry::Key => "Map key type mismatch".to_string(),
+            },
+            Self::CompoundAssignmentTypeMismatch { .. } => {
+                "Compound assignment type mismatch".to_string()
             }
-            Self::RequiresIntegerOperand { plural, span } => {
-                if *plural {
-                    format!(
-                        "{}:{}: Bitwise operators require integer operands",
-                        span.line, span.column
-                    )
-                } else {
-                    format!(
-                        "{}:{}: Bitwise not requires integer operand",
-                        span.line, span.column
-                    )
-                }
+            Self::NotAFunction { ty, .. } => {
+                format!("Cannot call non-function type: '{}'", ty.display_name())
             }
-            Self::MapEntryTypeMismatch { value, span } => {
-                if *value {
-                    format!("{}:{}: Map value type mismatch", span.line, span.column)
-                } else {
-                    format!("{}:{}: Map key type mismatch", span.line, span.column)
-                }
+            Self::CannotIndex { ty, .. } => {
+                format!("Cannot index type: '{}'", ty.display_name())
             }
-            Self::CompoundAssignmentTypeMismatch { span } => {
-                format!(
-                    "{}:{}: Compound assignment type mismatch",
-                    span.line, span.column
-                )
+            Self::CannotAccessField { ty, .. } => {
+                format!("Cannot access field on type: '{}'", ty.display_name())
             }
-            Self::NotAFunction { ty, span } => {
-                format!(
-                    "{}:{}: Cannot call non-function type: '{}'",
-                    span.line,
-                    span.column,
-                    ty.display_name()
-                )
-            }
-            Self::CannotIndex { ty, span } => {
-                format!(
-                    "{}:{}: Cannot index type: '{}'",
-                    span.line,
-                    span.column,
-                    ty.display_name()
-                )
-            }
-            Self::CannotAccessField { ty, span } => {
-                format!(
-                    "{}:{}: Cannot access field on type: '{}'",
-                    span.line,
-                    span.column,
-                    ty.display_name()
-                )
-            }
-            Self::UnknownEnum { name, span } => {
-                format!("{}:{}: Unknown enum: {}", span.line, span.column, name)
-            }
-            Self::GenericError { message, span } => {
-                format!("{}:{}: {}", span.line, span.column, message)
-            }
+            Self::UnknownEnum { name, .. } => format!("Unknown enum: {}", name),
+            Self::GenericError { message, .. } => message.clone(),
         }
     }
-}
 
-impl CheckerError {
-    /// The message text without the leading "line:column: " location prefix.
-    /// Useful for consumers (e.g. the LSP) that carry the location separately.
-    pub fn body(&self) -> String {
+    /// Format as a human-readable error message prefixed with its source
+    /// location ("line:column: message").
+    pub fn message(&self) -> String {
         let span = self.span();
-        let prefix = format!("{}:{}: ", span.line, span.column);
-        let message = self.message();
-        message
-            .strip_prefix(&prefix)
-            .map(str::to_string)
-            .unwrap_or(message)
+        format!("{}:{}: {}", span.line, span.column, self.body())
     }
 }
 
