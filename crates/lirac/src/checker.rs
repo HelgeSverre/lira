@@ -284,7 +284,6 @@ pub struct TypeEnv {
     /// Maps generic function names to their type parameter names
     generic_functions: HashMap<String, Vec<String>>, // fn_name -> [T, U, ...]
     next_type_var: u32,
-    errors: Vec<String>,
     structured_errors: Vec<CheckerError>,
 }
 
@@ -326,7 +325,6 @@ impl TypeEnv {
             trait_impls: HashMap::new(),
             generic_functions: HashMap::new(),
             next_type_var: 0,
-            errors: Vec::new(),
             structured_errors: Vec::new(),
         };
 
@@ -823,11 +821,7 @@ impl TypeEnv {
     }
 
     pub fn has_errors(&self) -> bool {
-        !self.errors.is_empty() || !self.structured_errors.is_empty()
-    }
-
-    pub fn get_errors(&self) -> &[String] {
-        &self.errors
+        !self.structured_errors.is_empty()
     }
 
     pub fn get_structured_errors(&self) -> &[CheckerError] {
@@ -963,11 +957,12 @@ impl TypeChecker {
         }
 
         if self.env.has_errors() {
-            // Combine legacy string errors and new structured errors
-            let mut all_errors: Vec<String> = self.env.get_errors().to_vec();
-            for err in self.env.get_structured_errors() {
-                all_errors.push(err.message());
-            }
+            let all_errors: Vec<String> = self
+                .env
+                .get_structured_errors()
+                .iter()
+                .map(|err| err.message())
+                .collect();
             Err(all_errors.join("\n"))
         } else {
             // Transfer generic instantiations to sema
@@ -3319,20 +3314,14 @@ pub fn check(program: &Program) -> Result<CheckedProgram, String> {
 }
 
 /// Type check a program, returning the checked program (when successful) along
-/// with the structured and legacy errors collected during checking. Unlike
-/// [`check`], this exposes the structured [`CheckerError`]s with their spans
-/// instead of flattening them into a single string.
-pub fn check_collecting(
-    program: &Program,
-) -> (Option<CheckedProgram>, Vec<CheckerError>, Vec<String>) {
+/// with the structured errors collected during checking. Unlike [`check`], this
+/// exposes the structured [`CheckerError`]s with their spans instead of
+/// flattening them into a single string.
+pub fn check_collecting(program: &Program) -> (Option<CheckedProgram>, Vec<CheckerError>) {
     let mut checker = TypeChecker::new();
     match checker.check_program(program) {
-        Ok(checked) => (Some(checked), Vec::new(), Vec::new()),
-        Err(_) => (
-            None,
-            checker.env.get_structured_errors().to_vec(),
-            checker.env.get_errors().to_vec(),
-        ),
+        Ok(checked) => (Some(checked), Vec::new()),
+        Err(_) => (None, checker.env.get_structured_errors().to_vec()),
     }
 }
 
@@ -5659,11 +5648,13 @@ mod tests {
             "expected the condition error as a structured diagnostic, got: {:?}",
             structured
         );
-        // The legacy string channel should no longer carry it.
+        // The error must live solely in the structured channel now.
         assert!(
-            checker.env.get_errors().is_empty(),
-            "expected no legacy string errors, got: {:?}",
-            checker.env.get_errors()
+            structured
+                .iter()
+                .all(|e| e.body().starts_with("Condition must be bool")),
+            "unexpected extra structured errors: {:?}",
+            structured
         );
     }
 

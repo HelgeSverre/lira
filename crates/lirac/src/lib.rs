@@ -142,8 +142,8 @@ pub fn check_with_imports_diagnostics(source_file: &str, source: &str) -> Vec<Di
         Err(e) => return vec![string_to_diagnostic(&e)],
     };
 
-    let (_checked, structured, legacy) = checker::check_collecting(&merged_ast);
-    let mut diagnostics: Vec<Diagnostic> = structured
+    let (_checked, structured) = checker::check_collecting(&merged_ast);
+    let diagnostics: Vec<Diagnostic> = structured
         .iter()
         .map(|err| {
             let span = err.span();
@@ -154,7 +154,6 @@ pub fn check_with_imports_diagnostics(source_file: &str, source: &str) -> Vec<Di
             }
         })
         .collect();
-    diagnostics.extend(legacy.iter().map(|msg| string_to_diagnostic(msg)));
     diagnostics
 }
 
