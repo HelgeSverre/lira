@@ -1948,8 +1948,10 @@ impl TypeChecker {
                     // Return a struct type so FieldAccess can look up methods
                     Type::Struct(name.clone())
                 } else {
-                    self.env
-                        .error(&expr.span, format!("Undefined variable: {}", name));
+                    self.env.record_error(CheckerError::UndefinedVariable {
+                        name: name.clone(),
+                        span: expr.span.clone(),
+                    });
                     Type::Unknown
                 }
             }
@@ -5558,6 +5560,33 @@ mod tests {
         let mut checker = TypeChecker::new();
         checker.check_program(&program)?;
         Ok(checker)
+    }
+
+    /// Check source, returning the checker regardless of whether checking failed
+    /// (so structured errors can be inspected).
+    fn check_source_capturing_errors(source: &str) -> TypeChecker {
+        use crate::lexer::tokenize;
+        use crate::parser::parse;
+
+        let tokens = tokenize(source).expect("tokenize");
+        let program = parse(&tokens).expect("parse");
+        let mut checker = TypeChecker::new();
+        let _ = checker.check_program(&program);
+        checker
+    }
+
+    #[test]
+    fn undefined_variable_produces_structured_error() {
+        let checker = check_source_capturing_errors("let y = x");
+        let structured = checker.env.get_structured_errors();
+        assert!(
+            structured.iter().any(|e| matches!(
+                e,
+                CheckerError::UndefinedVariable { name, .. } if name == "x"
+            )),
+            "expected a structured UndefinedVariable error, got: {:?}",
+            structured
+        );
     }
 
     #[test]
