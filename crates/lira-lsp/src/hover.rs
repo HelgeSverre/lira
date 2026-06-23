@@ -1,12 +1,66 @@
 //! Hover support for Lira
 //!
-//! Provides type information and documentation on hover.
+//! Provides type information and documentation on hover, powered by the
+//! semantic tables produced by the checker. When the cursor resolves to an
+//! expression node, the hover shows its inferred type (and, where available,
+//! the resolved field/method/call signature). When no expression resolves
+//! (e.g. the cursor is on a keyword, builtin, or type name), it falls back to
+//! the static keyword/type/builtin documentation.
 
+use crate::sema_index::{self, Cursor};
 use crate::utils::{self, WordInfo};
+use lirac::ast::{Expression, ExpressionKind};
+use lirac::sema::{CallResolution, SemanticTables, SymbolKind};
 use tower_lsp::lsp_types::*;
 
-/// Get hover information at a position
-pub fn get_hover(content: &str, position: Position) -> Option<Hover> {
+/// Get hover information using a precomputed (cached) analysis when available.
+///
+/// Falls back to the static keyword/type/builtin documentation when no
+/// expression node resolves under the cursor.
+pub fn get_hover_with(
+    content: &str,
+    position: Position,
+    analysis: Option<&lirac::Analysis>,
+) -> Option<Hover> {
+    // Try sema-powered hover first: resolve the expression node under the cursor.
+    if let Some(analysis) = analysis {
+        let cursor = Cursor::from_lsp(position.line, position.character);
+        if let Some(expr) = sema_index::expr_at(&analysis.program, content, cursor) {
+            if let Some(markdown) = hover_for_expr(expr, &analysis.sema) {
+                let range = sema_index::expr_range(expr, content);
+                return Some(Hover {
+                    contents: HoverContents::Markup(MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value: markdown,
+                    }),
+                    range: Some(range),
+                });
+            }
+        }
+
+        // No use-site expression resolved: the cursor may be on a `let`/`var`
+        // binding declaration, whose type is the initializer's inferred type.
+        if let Some(binding) = sema_index::binding_at(&analysis.program, content, cursor) {
+            let ty = binding
+                .init
+                .and_then(|init| analysis.sema.expr_types.get(&init.id));
+            if let Some(ty) = ty {
+                let markdown = code_block(
+                    &format!("{}: {}", binding.name, ty.display_name()),
+                    Some("variable"),
+                );
+                return Some(Hover {
+                    contents: HoverContents::Markup(MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value: markdown,
+                    }),
+                    range: None,
+                });
+            }
+        }
+    }
+
+    // Fallback: static documentation for keywords / builtin types / builtins.
     let lines: Vec<&str> = content.lines().collect();
     let line_idx = position.line as usize;
 
@@ -30,6 +84,115 @@ pub fn get_hover(content: &str, position: Position) -> Option<Hover> {
         }),
         range: Some(range),
     })
+}
+
+/// Build hover markdown for a resolved expression from the semantic tables.
+fn hover_for_expr(expr: &Expression, sema: &SemanticTables) -> Option<String> {
+    match &expr.kind {
+        ExpressionKind::Identifier(name) => {
+            let ty = sema.expr_types.get(&expr.id)?;
+            let label = sema
+                .symbol_refs
+                .get(&expr.id)
+                .and_then(|sym_id| sema.symbols.get(sym_id))
+                .map(|sym| symbol_kind_label(&sym.kind));
+            let signature = format!("{}: {}", name, ty.display_name());
+            Some(code_block(&signature, label))
+        }
+        ExpressionKind::FieldAccess { field, .. }
+        | ExpressionKind::OptionalAccess { field, .. } => {
+            if let Some(res) = sema.field_resolution.get(&expr.id) {
+                let kind = if res.is_method { "method" } else { "field" };
+                let signature = format!(
+                    "{}.{}: {}",
+                    res.owner_type.display_name(),
+                    field,
+                    res.resolved_type.display_name()
+                );
+                Some(code_block(&signature, Some(kind)))
+            } else {
+                let ty = sema.expr_types.get(&expr.id)?;
+                Some(code_block(
+                    &format!("{}: {}", field, ty.display_name()),
+                    None,
+                ))
+            }
+        }
+        ExpressionKind::Call { .. } | ExpressionKind::MethodCall { .. } => {
+            let ret = sema.expr_types.get(&expr.id);
+            match sema.call_resolution.get(&expr.id) {
+                Some(CallResolution::Function { name }) => {
+                    Some(call_signature(name, ret, sema, None))
+                }
+                Some(CallResolution::Method {
+                    type_name,
+                    method_name,
+                })
+                | Some(CallResolution::StaticMethod {
+                    type_name,
+                    method_name,
+                }) => Some(call_signature(method_name, ret, sema, Some(type_name))),
+                None => ret.map(|t| code_block(&t.display_name(), None)),
+            }
+        }
+        _ => {
+            // Any other expression: show its inferred type.
+            let ty = sema.expr_types.get(&expr.id)?;
+            Some(code_block(&ty.display_name(), None))
+        }
+    }
+}
+
+/// Render a `fn name(params) -> ret` signature for a resolved call.
+fn call_signature(
+    name: &str,
+    ret: Option<&lirac::checker::Type>,
+    sema: &SemanticTables,
+    owner: Option<&str>,
+) -> String {
+    // Look up parameter types from the member table when the owner is known.
+    let params = owner.and_then(|owner| {
+        sema.type_members
+            .get(owner)
+            .and_then(|members| members.methods.iter().find(|m| m.name == name))
+            .map(|member| match &member.ty {
+                lirac::checker::Type::Function { params, .. } => params
+                    .iter()
+                    .map(|t| t.display_name())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                _ => String::new(),
+            })
+    });
+    let ret_str = ret
+        .map(|t| t.display_name())
+        .unwrap_or_else(|| "?".to_string());
+    let signature = match params {
+        Some(p) => format!("fn {}({}) -> {}", name, p, ret_str),
+        None => format!("fn {}(...) -> {}", name, ret_str),
+    };
+    let label = owner.map(|_| "method").unwrap_or("function");
+    code_block(&signature, Some(label))
+}
+
+/// Wrap a signature in a ```lira code block, optionally prefixed by a kind tag.
+fn code_block(signature: &str, kind: Option<&str>) -> String {
+    match kind {
+        Some(kind) => format!("```lira\n{}\n```\n\n*{}*", signature, kind),
+        None => format!("```lira\n{}\n```", signature),
+    }
+}
+
+fn symbol_kind_label(kind: &SymbolKind) -> &'static str {
+    match kind {
+        SymbolKind::Variable => "variable",
+        SymbolKind::Function => "function",
+        SymbolKind::Parameter => "parameter",
+        SymbolKind::Type => "type",
+        SymbolKind::Field => "field",
+        SymbolKind::Method => "method",
+        SymbolKind::Constant => "constant",
+    }
 }
 
 fn get_word_documentation(word_info: &WordInfo, line_num: u32) -> Option<(String, Range)> {
@@ -156,6 +319,13 @@ fn builtin_docs(func_name: &str) -> Option<String> {
 mod tests {
     use super::*;
 
+    /// Test convenience: analyze on demand, mirroring the server's cache-aware
+    /// call but without the document store.
+    fn get_hover(content: &str, position: Position) -> Option<Hover> {
+        let analysis = lirac::analyze(content).ok();
+        get_hover_with(content, position, analysis.as_ref())
+    }
+
     #[test]
     fn test_get_word_at_position() {
         let word = utils::get_word_at_position("let x = 42", 0).unwrap();
@@ -183,7 +353,66 @@ mod tests {
     fn test_hover_unicode() {
         // Test hover works with unicode
         let content = "let 变量 = 5";
-        let hover = get_hover(content, Position { line: 0, character: 0 });
+        let hover = get_hover(
+            content,
+            Position {
+                line: 0,
+                character: 0,
+            },
+        );
         assert!(hover.is_some());
+    }
+
+    fn hover_text(content: &str, line: u32, character: u32) -> String {
+        let hover = get_hover(content, Position { line, character }).expect("hover present");
+        match hover.contents {
+            HoverContents::Markup(m) => m.value,
+            other => panic!("expected markup hover, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_sema_hover_let_int() {
+        // `let x = 42`; hover on `x` shows int.
+        let content = "let x = 42";
+        let text = hover_text(content, 0, 4);
+        assert!(text.contains("int"), "expected int in hover, got: {}", text);
+        assert!(text.contains('x'));
+    }
+
+    #[test]
+    fn test_sema_hover_string() {
+        let content = "let s = \"hi\"";
+        let text = hover_text(content, 0, 4);
+        assert!(
+            text.contains("string"),
+            "expected string in hover, got: {}",
+            text
+        );
+    }
+
+    #[test]
+    fn test_sema_hover_field_access() {
+        // hover on `x` in `p.x` -> int via field_resolution; hover on `p` -> P.
+        let content = "struct P { x: int }\nlet p = P { x: 1 }\nlet z = p.x";
+        // `p` on line 3, column index 8 (0-indexed).
+        let on_p = hover_text(content, 2, 8);
+        assert!(on_p.contains('P'), "expected P, got: {}", on_p);
+        // `x` on line 3, column index 10.
+        let on_x = hover_text(content, 2, 10);
+        assert!(on_x.contains("int"), "expected int, got: {}", on_x);
+    }
+
+    #[test]
+    fn test_sema_hover_error_tolerant() {
+        // Error on line 2; hover on `a` (line 3) still resolves to int. This is
+        // the core foundation: `analyze` returns sema even on error.
+        let content = "let a = 1\nlet b = missing\nlet c = a";
+        let text = hover_text(content, 2, 8); // `a` in `let c = a`
+        assert!(
+            text.contains("int"),
+            "error-tolerant hover should still show int, got: {}",
+            text
+        );
     }
 }

@@ -831,6 +831,78 @@ impl TypeEnv {
         &self.structured_errors
     }
 
+    /// Build a name-keyed snapshot of every user/built-in type's members
+    /// (fields + methods) drawn from `type_defs` and `impl_methods`. This is a
+    /// read-only copy so consumers (e.g. the LSP) can enumerate members after the
+    /// checker has been dropped, without depending on `TypeEnv` internals.
+    pub fn collect_type_members(&self) -> HashMap<String, crate::sema::TypeMembers> {
+        use crate::sema::{MemberInfo, TypeMembers};
+
+        let mut out: HashMap<String, TypeMembers> = HashMap::new();
+
+        let push_field = |entry: &mut TypeMembers, name: &str, ty: &Type| {
+            entry.fields.push(MemberInfo {
+                name: name.to_string(),
+                ty: ty.clone(),
+            });
+        };
+        let push_method = |entry: &mut TypeMembers, name: &str, ty: &Type| {
+            entry.methods.push(MemberInfo {
+                name: name.to_string(),
+                ty: ty.clone(),
+            });
+        };
+
+        // Fields and inline methods from struct/class declarations.
+        for (name, def) in &self.type_defs {
+            let entry = out.entry(name.clone()).or_default();
+            match &def.kind {
+                TypeDefKind::Struct { fields, methods } => {
+                    for (fname, fty, _) in fields {
+                        push_field(entry, fname, fty);
+                    }
+                    for (mname, mty, _) in methods {
+                        push_method(entry, mname, mty);
+                    }
+                }
+                TypeDefKind::Class {
+                    fields, methods, ..
+                } => {
+                    for (fname, fty, _) in fields {
+                        push_field(entry, fname, fty);
+                    }
+                    for (mname, mty, _) in methods {
+                        push_method(entry, mname, mty);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // impl-block methods (including methods on built-in types like `string`).
+        for (type_name, methods) in &self.impl_methods {
+            let entry = out.entry(type_name.clone()).or_default();
+            for method in methods {
+                // Drop the implicit `self` receiver so signatures read naturally.
+                let params: Vec<Type> = method
+                    .params
+                    .iter()
+                    .filter(|(name, _)| name != "self")
+                    .map(|(_, t)| t.clone())
+                    .collect();
+                let required_params = params.len();
+                let fn_ty = Type::Function {
+                    params,
+                    return_type: Box::new(method.return_type.clone()),
+                    required_params,
+                };
+                push_method(entry, &method.name, &fn_ty);
+            }
+        }
+
+        out
+    }
+
     /// Record a structured error (preferred over string-based error())
     pub fn record_error(&mut self, error: CheckerError) {
         self.structured_errors.push(error);
@@ -1021,6 +1093,64 @@ impl TypeChecker {
                 sema: self.sema.clone(),
             })
         }
+    }
+
+    /// Run the full checking pipeline but ALWAYS return the checked program
+    /// (best-effort AST + semantic tables) alongside any structured errors,
+    /// rather than discarding the semantic tables when an error occurs.
+    ///
+    /// The semantic tables are populated during checking regardless of whether
+    /// errors were found, which is exactly what error-tolerant tooling (the LSP)
+    /// needs to offer hover/completion in a buffer that is mid-edit.
+    pub fn check_program_collecting(
+        &mut self,
+        program: &Program,
+    ) -> (CheckedProgram, Vec<CheckerError>) {
+        // First pass: register type names (for forward references)
+        for stmt in &program.statements {
+            self.register_type_name(stmt);
+        }
+
+        // Second pass: collect full type definitions
+        for stmt in &program.statements {
+            self.collect_type_def(stmt);
+        }
+
+        // Third pass: collect trait definitions and impl blocks
+        for stmt in &program.statements {
+            self.collect_impl_block(stmt);
+        }
+
+        // Fourth pass: register function signatures
+        for stmt in &program.statements {
+            self.register_function_signature(stmt);
+        }
+
+        // Fifth pass: check all statements
+        for stmt in &program.statements {
+            self.check_statement(stmt);
+        }
+
+        // Mirror generic instantiations (UNUSED INFRA, kept consistent).
+        for inst in &self.generic_instantiations {
+            self.sema
+                .generic_instantiations
+                .push(crate::sema::GenericInstantiation {
+                    generic_name: inst.function_name.clone(),
+                    concrete_type: Type::Unknown,
+                });
+        }
+
+        // Snapshot type members so tooling can enumerate them after the checker
+        // (and its TypeEnv) is dropped.
+        self.sema.type_members = self.env.collect_type_members();
+
+        let errors = self.env.get_structured_errors().to_vec();
+        let checked = CheckedProgram {
+            program: program.clone(),
+            sema: self.sema.clone(),
+        };
+        (checked, errors)
     }
 
     /// Register type names for forward references (first pass)
@@ -3417,10 +3547,11 @@ pub fn check(program: &Program) -> Result<CheckedProgram, String> {
 /// flattening them into a single string.
 pub fn check_collecting(program: &Program) -> (Option<CheckedProgram>, Vec<CheckerError>) {
     let mut checker = TypeChecker::new();
-    match checker.check_program(program) {
-        Ok(checked) => (Some(checked), Vec::new()),
-        Err(_) => (None, checker.env.get_structured_errors().to_vec()),
-    }
+    let (checked, errors) = checker.check_program_collecting(program);
+    // Always return the checked program: the semantic tables are populated
+    // (best-effort) even when errors were found, which error-tolerant tooling
+    // relies on. Errors are reported separately.
+    (Some(checked), errors)
 }
 
 #[cfg(test)]
@@ -3435,6 +3566,58 @@ mod tests {
         let ast = parse(&tokens)?;
         check(&ast)?;
         Ok(())
+    }
+
+    // ========================================================================
+    // Error-tolerant collecting checker
+    // ========================================================================
+
+    #[test]
+    fn test_check_program_collecting_populates_sema_on_success() {
+        let tokens = tokenize("let x = 42").unwrap();
+        let ast = parse(&tokens).unwrap();
+        let mut checker = TypeChecker::new();
+        let (checked, errors) = checker.check_program_collecting(&ast);
+        assert!(errors.is_empty());
+        assert!(!checked.sema.expr_types.is_empty());
+    }
+
+    #[test]
+    fn test_check_program_collecting_returns_sema_on_error() {
+        // The error is on line 2; line 1 and line 3 are valid. Tooling needs the
+        // semantic tables despite the error, so they must still be populated.
+        let src = "let a = 1\nlet b = missing\nlet c = a";
+        let tokens = tokenize(src).unwrap();
+        let ast = parse(&tokens).unwrap();
+        let mut checker = TypeChecker::new();
+        let (checked, errors) = checker.check_program_collecting(&ast);
+        assert!(!errors.is_empty(), "expected the undefined-variable error");
+        assert!(
+            !checked.sema.expr_types.is_empty(),
+            "sema must be populated even when checking reports an error"
+        );
+    }
+
+    #[test]
+    fn test_check_collecting_always_returns_checked_program() {
+        let src = "let b = missing";
+        let tokens = tokenize(src).unwrap();
+        let ast = parse(&tokens).unwrap();
+        let (checked, errors) = check_collecting(&ast);
+        assert!(checked.is_some(), "checked program must survive errors");
+        assert!(!errors.is_empty());
+    }
+
+    #[test]
+    fn test_collect_type_members_includes_struct_fields_and_impl_methods() {
+        let src = "struct P { x: int }\nimpl P { fn area(self) -> int { self.x } }";
+        let tokens = tokenize(src).unwrap();
+        let ast = parse(&tokens).unwrap();
+        let mut checker = TypeChecker::new();
+        let (checked, _errors) = checker.check_program_collecting(&ast);
+        let members = checked.sema.type_members.get("P").expect("P members");
+        assert!(members.fields.iter().any(|m| m.name == "x"));
+        assert!(members.methods.iter().any(|m| m.name == "area"));
     }
 
     // ========================================================================

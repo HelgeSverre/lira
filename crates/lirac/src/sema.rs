@@ -38,6 +38,14 @@ pub struct SemanticTables {
     /// shared body is emitted per generic function. Retained as scaffolding for a
     /// future monomorphizing backend; see `checker::GenericInstantiation`.
     pub generic_instantiations: Vec<GenericInstantiation>,
+
+    /// Per-type member snapshot (fields + methods) keyed by type name.
+    ///
+    /// Populated by the checker from its (otherwise dropped) `TypeEnv` so that
+    /// consumers like the LSP can enumerate a type's members for member
+    /// completion and signature-aware hover without reaching into checker
+    /// internals.
+    pub type_members: HashMap<String, TypeMembers>,
 }
 
 impl SemanticTables {
@@ -52,6 +60,7 @@ impl SemanticTables {
             call_resolution: HashMap::new(),
             field_resolution: HashMap::new(),
             generic_instantiations: Vec::new(),
+            type_members: HashMap::new(),
         }
     }
 }
@@ -101,6 +110,21 @@ pub enum CallResolution {
     },
 }
 
+/// A member of a type (field or method) exposed for completion/hover.
+#[derive(Debug, Clone)]
+pub struct MemberInfo {
+    pub name: String,
+    /// The member's type. For methods this is a `Type::Function`.
+    pub ty: Type,
+}
+
+/// A snapshot of a type's members, decoupled from the checker's `TypeEnv`.
+#[derive(Debug, Clone, Default)]
+pub struct TypeMembers {
+    pub fields: Vec<MemberInfo>,
+    pub methods: Vec<MemberInfo>,
+}
+
 /// How a field access was resolved
 #[derive(Debug, Clone)]
 pub struct FieldResolution {
@@ -135,6 +159,7 @@ mod tests {
         assert!(sema.call_resolution.is_empty());
         assert!(sema.field_resolution.is_empty());
         assert!(sema.generic_instantiations.is_empty());
+        assert!(sema.type_members.is_empty());
     }
 
     #[test]

@@ -27,6 +27,7 @@ mod inlay_hints;
 mod references;
 mod rename;
 mod selection_range;
+mod sema_index;
 mod semantic_tokens;
 mod signature_help;
 mod symbols;
@@ -36,6 +37,7 @@ mod workspace_symbols;
 
 use dashmap::DashMap;
 use ropey::Rope;
+use std::sync::Arc;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
@@ -49,6 +51,10 @@ pub struct Document {
     pub content: Rope,
     /// Document version
     pub version: i32,
+    /// Cached error-tolerant analysis for this version. `None` until first
+    /// computed (or after an edit invalidates it). Shared so diagnostics,
+    /// hover and completion reuse a single parse+check per version.
+    pub analysis: Option<Arc<lirac::Analysis>>,
 }
 
 /// The Lira Language Server
@@ -65,6 +71,22 @@ impl LiraLanguageServer {
             client,
             documents: DashMap::new(),
         }
+    }
+
+    /// Return the cached error-tolerant analysis for a document, computing and
+    /// memoizing it on first use (or after an edit cleared the cache).
+    ///
+    /// Returns `None` only when the document is unknown or the source fails to
+    /// even parse (no AST/sema to work with).
+    fn analyzed(&self, uri: &Url) -> Option<Arc<lirac::Analysis>> {
+        let mut doc = self.documents.get_mut(uri)?;
+        if let Some(analysis) = &doc.analysis {
+            return Some(analysis.clone());
+        }
+        let content = doc.content.to_string();
+        let analysis = Arc::new(lirac::analyze(&content).ok()?);
+        doc.analysis = Some(analysis.clone());
+        Some(analysis)
     }
 
     /// Validate a document and publish diagnostics
@@ -187,6 +209,7 @@ impl LanguageServer for LiraLanguageServer {
                 uri: uri.clone(),
                 content,
                 version,
+                analysis: None,
             },
         );
 
@@ -201,6 +224,8 @@ impl LanguageServer for LiraLanguageServer {
             if let Some(mut doc) = self.documents.get_mut(&uri) {
                 doc.content = Rope::from_str(&change.text);
                 doc.version = params.text_document.version;
+                // Invalidate the cached analysis; recomputed lazily on demand.
+                doc.analysis = None;
             }
         }
 
@@ -242,7 +267,12 @@ impl LanguageServer for LiraLanguageServer {
             None => return Ok(None),
         };
 
-        Ok(hover::get_hover(&content, position))
+        let analysis = self.analyzed(&uri);
+        Ok(hover::get_hover_with(
+            &content,
+            position,
+            analysis.as_deref(),
+        ))
     }
 
     async fn goto_definition(
@@ -410,7 +440,9 @@ impl LanguageServer for LiraLanguageServer {
             None => return Ok(None),
         };
 
-        Ok(call_hierarchy::prepare_call_hierarchy(&uri, &content, position))
+        Ok(call_hierarchy::prepare_call_hierarchy(
+            &uri, &content, position,
+        ))
     }
 
     async fn incoming_calls(
@@ -453,10 +485,7 @@ impl LanguageServer for LiraLanguageServer {
         }
     }
 
-    async fn code_action(
-        &self,
-        params: CodeActionParams,
-    ) -> Result<Option<CodeActionResponse>> {
+    async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
         let uri = params.text_document.uri;
         let range = params.range;
         let diagnostics = &params.context.diagnostics;
