@@ -1,0 +1,280 @@
+---
+import Layout from "../layouts/Layout.astro";
+import Code from "../components/Code.astro";
+import Starfield from "../components/Starfield.astro";
+
+const github = "https://github.com/HelgeSverre/lira";
+
+// Each feature card embeds a real, verified .li file. The check:examples
+// harness runs every one of these through the compiler before each build.
+const features = [
+  {
+    title: "Fibers and channels",
+    body: "Spawn lightweight fibers and coordinate them over typed channels. Receive with a bound select — no shared-memory guesswork.",
+    file: "website/src/snippets/concurrency.li",
+  },
+  {
+    title: "Pattern matching",
+    body: "Match on literals, bindings, guards, and tuple patterns — including nested tuples. The checker enforces exhaustiveness.",
+    file: "examples/pattern_tuple_literals.li",
+  },
+  {
+    title: "Generics and generic enums",
+    body: "Write generic functions, structs, and enums. Build your own Option- or Result-shaped types with full type checking.",
+    file: "examples/generic_enum.li",
+  },
+  {
+    title: "Errors as values",
+    body: "Return Result, propagate failures with ?, and handle them by matching. No exceptions, no surprises.",
+    file: "examples/result_propagation.li",
+  },
+];
+---
+
+<Layout>
+  <section class="hero">
+    <Starfield />
+    <div class="container hero__inner">
+      <div class="hero__copy">
+        <p class="hero__eyebrow">Lyra, tuned for concurrency</p>
+        <h1>
+          A statically-checked language with
+          <span class="accent">fiber concurrency</span>.
+        </h1>
+        <p class="hero__lede">
+          Lira gives you Go-style fibers, channels, and select; pattern matching
+          with exhaustiveness checks; and generics — all checked ahead of time
+          and run on a compact bytecode VM.
+        </p>
+        <div class="hero__cta">
+          <a class="btn btn-primary" href="/guide">Read the guide</a>
+          <a
+            class="btn btn-secondary"
+            href={github}
+            rel="noopener"
+            target="_blank">View on GitHub</a
+          >
+        </div>
+      </div>
+      <div class="hero__code">
+        <Code file="website/src/snippets/pipeline.li" filename="pipeline.li" />
+        <p class="hero__caption">
+          Two fibers compute in parallel; <code>main</code> collects both results
+          with a bound <code>select</code>. Runs today.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="features container">
+    <header class="features__head">
+      <h2>Built for programs that do several things at once</h2>
+      <p>
+        Every snippet below is a real <code>.li</code> file in this repository, verified
+        to compile and run before the site is built.
+      </p>
+    </header>
+
+    <div class="features__grid">
+      {
+        features.map((f) => (
+          <article class="card">
+            <h3>{f.title}</h3>
+            <p>{f.body}</p>
+            <Code file={f.file} />
+          </article>
+        ))
+      }
+    </div>
+  </section>
+
+  <section class="diag container">
+    <div class="diag__copy">
+      <h2>Honest, located diagnostics</h2>
+      <p>
+        The checker reports type and binding errors with a
+        <code>line:column</code> location, before any bytecode is generated.
+        These are the compiler's actual messages — not mockups.
+      </p>
+    </div>
+    <div class="diag__term" role="img" aria-label="Compiler error output examples">
+      <pre><span class="term__cmd">$ lira run mismatch.li</span>
+<span class="term__err">5:20: Argument type mismatch: expected 'int', got 'string'</span>
+
+<span class="term__cmd">$ lira run undefined.li</span>
+<span class="term__err">3:13: Undefined variable: y</span></pre>
+    </div>
+  </section>
+
+  <section class="closing container">
+    <h2>Tune in.</h2>
+    <p>
+      Start with the guide, or read the source. Lira is early and honest about
+      what works today.
+    </p>
+    <div class="closing__cta">
+      <a class="btn btn-primary" href="/guide">Get started</a>
+      <a class="btn btn-secondary" href={github} rel="noopener" target="_blank"
+        >Star on GitHub</a
+      >
+    </div>
+  </section>
+</Layout>
+
+<style>
+  /* Hero */
+  .hero {
+    position: relative;
+    overflow: hidden;
+    background: var(--gradient-hero);
+    border-bottom: 1px solid var(--border);
+    padding: var(--sp-16) 0 var(--sp-12);
+  }
+  .hero__inner {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: 1.05fr 1fr;
+    gap: var(--sp-8);
+    align-items: center;
+  }
+  .hero__eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--lira-gold);
+    margin-bottom: var(--sp-2);
+  }
+  .hero h1 {
+    font-size: clamp(2.25rem, 4.5vw, 3.25rem);
+  }
+  .accent {
+    background: var(--gradient-accent);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .hero__lede {
+    color: var(--text-muted);
+    font-size: 1.125rem;
+    max-width: 52ch;
+    margin-bottom: var(--sp-4);
+  }
+  .hero__cta {
+    display: flex;
+    gap: var(--sp-2);
+    flex-wrap: wrap;
+  }
+  .hero__caption {
+    margin-top: var(--sp-2);
+    font-size: var(--fs-small);
+    color: var(--text-muted);
+  }
+  .hero__caption code {
+    color: var(--starlight);
+  }
+
+  /* Features */
+  .features {
+    padding-top: var(--sp-12);
+  }
+  .features__head {
+    max-width: 60ch;
+    margin-bottom: var(--sp-6);
+  }
+  .features__head p {
+    color: var(--text-muted);
+  }
+  .features__head code,
+  .features p code {
+    color: var(--starlight);
+    font-size: 0.95em;
+  }
+  .features__grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--sp-3);
+  }
+  .card {
+    background: var(--dusk);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: var(--sp-3);
+    box-shadow: var(--elevation-1);
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+  }
+  .card h3 {
+    margin: 0;
+  }
+  .card p {
+    color: var(--text-muted);
+    margin: 0;
+  }
+
+  /* Diagnostics */
+  .diag {
+    margin-top: var(--sp-12);
+    display: grid;
+    grid-template-columns: 1fr 1.1fr;
+    gap: var(--sp-6);
+    align-items: center;
+  }
+  .diag__copy p {
+    color: var(--text-muted);
+  }
+  .diag__copy code {
+    color: var(--starlight);
+  }
+  .diag__term {
+    background: var(--night);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--sp-3);
+    box-shadow: var(--elevation-1);
+    overflow-x: auto;
+  }
+  .diag__term pre {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: var(--fs-code);
+    line-height: 1.7;
+    color: var(--snow);
+  }
+  .term__cmd {
+    color: var(--text-muted);
+  }
+  .term__err {
+    color: var(--ember);
+  }
+
+  /* Closing */
+  .closing {
+    margin-top: var(--sp-12);
+    text-align: center;
+  }
+  .closing p {
+    color: var(--text-muted);
+    max-width: 48ch;
+    margin: 0 auto var(--sp-4);
+  }
+  .closing__cta {
+    display: flex;
+    gap: var(--sp-2);
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  @media (max-width: 860px) {
+    .hero__inner,
+    .features__grid,
+    .diag {
+      grid-template-columns: 1fr;
+    }
+    .hero {
+      padding-top: var(--sp-8);
+    }
+  }
+</style>

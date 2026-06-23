@@ -1,0 +1,26 @@
+// Two fibers compute in parallel and send results down a channel.
+// main collects both with select, binding each value as it arrives.
+
+fn square(n: int, out: Channel<int>) {
+    send(out, n * n)
+}
+
+fn main() {
+    let results = chan(2)
+
+    spawn square(10, results)
+    spawn square(21, results)
+
+    var total = 0
+    var received = 0
+    while received < 2 {
+        select {
+            v = <-results => {
+                println("got ${v}")
+                total = total + v
+                received = received + 1
+            }
+        }
+    }
+    println("sum ${total}")
+}

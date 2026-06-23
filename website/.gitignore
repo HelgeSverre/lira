@@ -1,1 +1,13 @@
+# build output
+dist/
+# dependencies
+node_modules/
+# generated types
+.astro/
+# vercel (project link lives on disk; not committed, per Vercel convention)
 .vercel
+# environment
+.env
+.env.production
+# macOS
+.DS_Store

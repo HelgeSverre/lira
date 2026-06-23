@@ -1,0 +1,88 @@
+---
+// Code.astro — renders a real .li file as a framed code "specimen".
+//
+// Pass either:
+//   file=...   a path relative to the repo root, e.g. examples/<name>.li
+//   code=...   an inline string, with an optional filename caption
+//
+// The file is read at build time and highlighted with the Lira Night theme
+// using the project's actual TextMate grammar (see astro.config.mjs).
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { codeToHtml } from "shiki";
+import liraGrammar from "../../../editors/vscode-lira/syntaxes/lira.tmLanguage.json";
+import { liraNightTheme } from "../lib/lira-night.mjs";
+
+interface Props {
+  file?: string;
+  code?: string;
+  filename?: string;
+}
+
+const { file, code, filename } = Astro.props as Props;
+
+let source = code ?? "";
+let caption = filename;
+
+if (file) {
+  // `file` is repo-root-relative (an examples or snippets path). The build runs
+  // from website/, so the repo root is one level up from cwd.
+  const repoRoot = resolve(process.cwd(), "..");
+  source = readFileSync(resolve(repoRoot, file), "utf-8").trimEnd();
+  caption = caption ?? file.split("/").pop();
+}
+
+const highlighted = await codeToHtml(source, {
+  lang: { ...liraGrammar, name: "lira", scopeName: "source.lira" } as any,
+  theme: liraNightTheme as any,
+});
+---
+
+<figure class="specimen">
+  {caption && <figcaption class="specimen__caption">{caption}</figcaption>}
+  <div class="specimen__body" set:html={highlighted} />
+</figure>
+
+<style>
+  .specimen {
+    margin: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--night);
+    overflow: hidden;
+    box-shadow: var(--elevation-1);
+  }
+  .specimen__caption {
+    font-family: var(--font-mono);
+    font-size: var(--fs-small);
+    color: var(--text-muted);
+    padding: 10px var(--sp-2);
+    background: var(--dusk);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: var(--sp-1);
+  }
+  .specimen__caption::before {
+    content: "";
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--lira-gold);
+    flex: 0 0 auto;
+    box-shadow:
+      16px 0 0 -1px var(--dusk),
+      18px 0 0 -3px rgba(245, 245, 247, 0.25);
+  }
+  .specimen__body :global(pre.shiki) {
+    margin: 0;
+    padding: var(--sp-2);
+    overflow-x: auto;
+    background: var(--night) !important;
+    font-size: var(--fs-code);
+    line-height: 1.6;
+  }
+  .specimen__body :global(code) {
+    font-family: var(--font-mono);
+  }
+</style>
