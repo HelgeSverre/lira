@@ -6,6 +6,21 @@ use crate::ast::*;
 use crate::ids::NodeIdGen;
 use crate::lexer::{Token, TokenKind};
 
+/// Maximum recursion depth for expression parsing.
+///
+/// Recursive-descent parsing of pathological or malformed input (e.g. a few
+/// thousand opening parens, or a bare `match`/`if`/`for`/`while` keyword that
+/// recurses without consuming tokens) can otherwise overflow the native stack
+/// and abort the process. This limit converts such cases into a normal parse
+/// `Err` long before the stack is exhausted, while remaining far above the
+/// nesting depth of any real program.
+///
+/// The limit is chosen for safety on small (2 MiB) thread stacks — such as the
+/// worker threads the LSP server runs on. Empirically the heaviest recursion
+/// cycle overflows a 2 MiB stack at roughly 128 frames, so 64 keeps a ~2x
+/// margin while remaining far above the few-dozen levels any real source nests.
+const MAX_PARSE_DEPTH: usize = 64;
+
 /// The parser
 pub struct Parser {
     tokens: Vec<Token>,
@@ -16,6 +31,8 @@ pub struct Parser {
     panic_mode: bool,
     /// Generates unique IDs for AST nodes
     node_id: NodeIdGen,
+    /// Current expression-parsing recursion depth (guards against stack overflow)
+    depth: usize,
 }
 
 impl Parser {
@@ -26,6 +43,7 @@ impl Parser {
             errors: Vec::new(),
             panic_mode: false,
             node_id: NodeIdGen::new(),
+            depth: 0,
         }
     }
 
@@ -1260,6 +1278,29 @@ impl Parser {
     }
 
     fn parse_precedence(&mut self, precedence: Precedence) -> Result<Expression, String> {
+        // Guard against unbounded recursion on pathological/malformed input.
+        // `parse_precedence` is the single entry point every expression-parsing
+        // recursion cycle passes through, so bounding it here protects every
+        // path (grouped expressions, match subjects, etc.) from overflowing the
+        // native stack and aborting the process.
+        self.depth += 1;
+        if self.depth > MAX_PARSE_DEPTH {
+            self.depth -= 1;
+            return Err(format!(
+                "{}:{}: expression nesting too deep (exceeded {} levels)",
+                self.peek().line,
+                self.peek().column,
+                MAX_PARSE_DEPTH
+            ));
+        }
+
+        let result = self.parse_precedence_inner(precedence);
+
+        self.depth -= 1;
+        result
+    }
+
+    fn parse_precedence_inner(&mut self, precedence: Precedence) -> Result<Expression, String> {
         let mut left = self.prefix()?;
 
         while precedence <= self.current_precedence() {
@@ -3157,5 +3198,36 @@ mod tests {
         } else {
             panic!("Expected FnDecl");
         }
+    }
+
+    // --- Recursion-depth guard against pathological/malformed input ---
+    // These inputs previously overflowed the native stack (SIGABRT), which
+    // crashed the LSP server that calls into the parser on every keystroke.
+    // The depth guard must turn deep recursion into a normal parse `Err`
+    // *before* the native stack is exhausted, otherwise these tests abort.
+
+    #[test]
+    fn test_bare_match_keyword_errors() {
+        // `match` with no scrutinee/body must error, not crash.
+        assert!(parse(&tokenize("match").unwrap()).is_err());
+    }
+
+    #[test]
+    fn test_bare_block_keywords_error() {
+        // Bare control-flow keywords with no body must error, not crash.
+        for kw in ["if", "for", "while"] {
+            assert!(
+                parse(&tokenize(kw).unwrap()).is_err(),
+                "expected Err for bare `{kw}`"
+            );
+        }
+    }
+
+    #[test]
+    fn test_deeply_nested_expression_errors() {
+        // A few thousand opening parens would blow the native stack without a
+        // depth guard. Must return Err instead of overflowing.
+        let deep = "(".repeat(5000);
+        assert!(parse(&tokenize(&deep).unwrap()).is_err());
     }
 }
