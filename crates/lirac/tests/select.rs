@@ -111,6 +111,89 @@ println("done")
     );
 }
 
+/// Multi-arm blocking select where the RECV arm wins. The non-selected SEND arm
+/// must NOT leave its value parked on the send channel: a later, unrelated
+/// receiver on that channel must block (deadlock) rather than pull the phantom
+/// value. We assert the program does NOT print the phantom-delivered line.
+///
+/// Reproduces failure mode (a): PHANTOM SEND.
+#[test]
+fn select_blocking_losing_send_arm_does_not_deliver_phantom() {
+    let source = r#"
+let r = chan()
+let s = chan()
+fn waker(c: Channel<int>) {
+    send(c, 1)
+}
+spawn waker(r)
+select {
+    v = <-r => println("recv won")
+    100 -> s => println("send won")
+}
+select {
+    w = <-s => println("phantom s=" + w)
+    _ => println("s empty")
+}
+println("done")
+"#;
+    let output = run_source(
+        "select_blocking_losing_send_arm_does_not_deliver_phantom",
+        source,
+    );
+    assert_eq!(
+        output,
+        vec![
+            "recv won".to_string(),
+            "s empty".to_string(),
+            "done".to_string()
+        ],
+        "the losing send arm must be de-registered; the abandoned 100 must not be delivered",
+    );
+}
+
+/// Multi-arm blocking select where one arm wins; the abandoned recv-channel
+/// registration must NOT leave a phantom receiver that a later send wakes,
+/// re-running the finished fiber's `Select` against a corrupted stack.
+///
+/// Reproduces failure mode (b): FINISHED-FIBER RESCHEDULE / STACK CORRUPTION.
+#[test]
+fn select_blocking_losing_recv_arm_does_not_reschedule() {
+    let source = r#"
+let a = chan()
+let b = chan()
+fn selector(ca: Channel<int>, cb: Channel<int>) {
+    select {
+        x = <-ca => println("got a")
+        y = <-cb => println("got b")
+    }
+}
+fn waker(c: Channel<int>) {
+    send(c, 7)
+}
+fn poker(c: Channel<int>) {
+    send(c, 8)
+}
+spawn selector(a, b)
+fiber_yield()
+spawn waker(a)
+fiber_yield()
+fiber_yield()
+spawn poker(b)
+fiber_yield()
+fiber_yield()
+println("done")
+"#;
+    let output = run_source(
+        "select_blocking_losing_recv_arm_does_not_reschedule",
+        source,
+    );
+    assert_eq!(
+        output,
+        vec!["got a".to_string(), "done".to_string()],
+        "the losing recv arm must be de-registered so the finished fiber is never rescheduled",
+    );
+}
+
 /// Recv arm binding a variable: `v = <-ch` must be in scope in the arm body.
 #[test]
 fn select_recv_binds_variable() {

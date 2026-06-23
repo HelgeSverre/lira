@@ -1700,6 +1700,7 @@ impl VM {
                     Arm::Default => false,
                 };
                 if matches {
+                    self.deregister_current_select_waiter();
                     if let Some((value, _ok)) = res.recv {
                         self.stack.push(value);
                     }
@@ -1729,6 +1730,7 @@ impl VM {
                     .nth(local_idx)
                     .map(|(i, _)| i)
                     .expect("recv index out of range");
+                self.deregister_current_select_waiter();
                 self.stack.push(value);
                 self.ip = body_targets[arm_idx];
                 return Ok(None);
@@ -1739,6 +1741,7 @@ impl VM {
         for (i, arm) in arms.iter().enumerate() {
             if let Arm::Send { channel, value } = arm {
                 if self.scheduler.try_select_send(*channel, value.clone()) {
+                    self.deregister_current_select_waiter();
                     self.ip = body_targets[i];
                     return Ok(None);
                 }
@@ -1751,6 +1754,7 @@ impl VM {
             .enumerate()
             .find(|(_, a)| matches!(a, Arm::Default))
         {
+            self.deregister_current_select_waiter();
             self.ip = body_targets[i];
             return Ok(None);
         }
@@ -1787,6 +1791,18 @@ impl VM {
         self.save_fiber_state();
         self.scheduler.park_select(&recv_ids, &send_specs);
         Ok(None)
+    }
+
+    /// De-register the current fiber from every channel it registered on while
+    /// parked in a `select`. Called when a woken select-waiter commits to one
+    /// arm: the registrations on the *losing* arms must be purged so an
+    /// abandoned send value cannot be delivered to a later receiver and an
+    /// abandoned recv registration cannot wake (and corrupt) the already
+    /// committed/finished fiber. A no-op for a select that never parked.
+    fn deregister_current_select_waiter(&mut self) {
+        if let Some(current_id) = self.scheduler.current {
+            self.scheduler.deregister_select_waiter(current_id);
+        }
     }
 
     /// Save current execution state to the current fiber

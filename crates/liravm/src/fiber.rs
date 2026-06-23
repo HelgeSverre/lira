@@ -91,6 +91,12 @@ pub struct Fiber {
     pub result: Option<Value>,
     /// Resolution recorded by a waker for a parked `select` (consumed on resume).
     pub select_resolution: Option<SelectResolution>,
+    /// Channel ids this fiber registered on while parked in a `select`
+    /// (every recv channel and every send channel). When a waker commits one
+    /// arm, these are used to de-register the fiber from the *other* channels'
+    /// `receivers`/`senders` queues so no phantom send/recv or stale reschedule
+    /// can occur. Empty when the fiber is not parked on a select.
+    pub select_channels: Vec<ChannelId>,
 }
 
 /// Call frame within a fiber
@@ -113,6 +119,7 @@ impl Fiber {
             fiber_locals: HashMap::new(),
             result: None,
             select_resolution: None,
+            select_channels: Vec::new(),
         }
     }
 
@@ -841,6 +848,9 @@ impl Scheduler {
             None => return,
         };
 
+        // Record every channel the fiber registers on so the commit paths can
+        // de-register it from the losing arms.
+        let mut registered: Vec<ChannelId> = Vec::with_capacity(recv_ids.len() + send_specs.len());
         if let Some(fiber) = self.fibers.get_mut(&current_id) {
             let old_state = Self::format_state(&fiber.state);
             fiber.state = FiberState::BlockedSelect;
@@ -854,15 +864,45 @@ impl Scheduler {
         for &channel_id in recv_ids {
             if let Some(channel) = self.channels.get_mut(&channel_id) {
                 channel.receivers.push_back(current_id);
+                registered.push(channel_id);
             }
         }
         for (channel_id, value) in send_specs {
             if let Some(channel) = self.channels.get_mut(channel_id) {
                 channel.senders.push_back((current_id, value.clone()));
+                registered.push(*channel_id);
             }
         }
 
+        if let Some(fiber) = self.fibers.get_mut(&current_id) {
+            fiber.select_channels = registered;
+        }
+
         self.current = None;
+    }
+
+    /// Remove every parked-`select` registration left by `fiber_id`.
+    ///
+    /// When a parked select-waiter commits to one arm, it is still registered
+    /// on the *other* channels it offered (as a receiver and/or a parked
+    /// sender). Those stale registrations would otherwise cause a phantom send
+    /// (its abandoned send value delivered to a later receiver) or a stale
+    /// reschedule (a later send waking the already-committed/finished fiber and
+    /// re-running its `Select` against a corrupted stack). This purges the
+    /// fiber from all channels it registered on so only its chosen arm commits.
+    pub fn deregister_select_waiter(&mut self, fiber_id: FiberId) {
+        let channels = match self.fibers.get_mut(&fiber_id) {
+            Some(fiber) if !fiber.select_channels.is_empty() => {
+                std::mem::take(&mut fiber.select_channels)
+            }
+            _ => return,
+        };
+        for channel_id in channels {
+            if let Some(channel) = self.channels.get_mut(&channel_id) {
+                channel.receivers.retain(|&id| id != fiber_id);
+                channel.senders.retain(|(id, _)| *id != fiber_id);
+            }
+        }
     }
 }
 
