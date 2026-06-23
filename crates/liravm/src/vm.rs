@@ -10,7 +10,7 @@ use crate::debug::{
 };
 use crate::fiber::{FiberEvent, Scheduler};
 use crate::runtime::Runtime;
-use crate::value::{ChannelId, ClosureData, FiberId, IString, Value};
+use crate::value::{ChannelId, ClosureData, FiberId, Value};
 use lira_core::opcode::Opcode;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -132,9 +132,6 @@ pub struct VM {
     breakpoints: HashSet<u32>,
     /// Track the last line we checked to avoid hitting same breakpoint repeatedly
     last_breakpoint_line: Option<u32>,
-    /// String intern pool for memory efficiency
-    #[allow(dead_code)]
-    string_pool: HashMap<String, IString>,
     /// Current execution state for debugging
     execution_state: ExecutionState,
     /// Stepping context for step operations
@@ -169,30 +166,11 @@ impl VM {
             stop_check: None,
             breakpoints: HashSet::new(),
             last_breakpoint_line: None,
-            string_pool: HashMap::new(),
             execution_state: ExecutionState::Ready,
             step_context: StepContext::new(),
             pause_flag: PauseFlag::new(),
             fiber_event_rx: Some(rx),
         }
-    }
-
-    /// Intern a string - returns a shared reference to the canonical string
-    #[allow(dead_code)]
-    fn intern_string(&mut self, s: String) -> IString {
-        if let Some(existing) = self.string_pool.get(&s) {
-            existing.clone()
-        } else {
-            let rc = Rc::new(s.clone());
-            self.string_pool.insert(s, rc.clone());
-            rc
-        }
-    }
-
-    /// Create an interned string Value
-    #[allow(dead_code)]
-    fn make_string(&mut self, s: String) -> Value {
-        Value::String(self.intern_string(s))
     }
 
     /// Enable output capture mode (for testing)
@@ -357,8 +335,16 @@ impl VM {
         // Check pause request first
         if self.pause_flag.check_and_clear() {
             let (line, column) = self.get_current_location().unwrap_or((0, 0));
-            self.execution_state = ExecutionState::Suspended { line, column, ip: self.ip };
-            return StepOutcome::Paused { line, column, ip: self.ip };
+            self.execution_state = ExecutionState::Suspended {
+                line,
+                column,
+                ip: self.ip,
+            };
+            return StepOutcome::Paused {
+                line,
+                column,
+                ip: self.ip,
+            };
         }
 
         // Check cooperative stop
@@ -379,8 +365,16 @@ impl VM {
             if let Some((line, column)) = self.get_current_location() {
                 if self.breakpoints.contains(&line) && self.last_breakpoint_line != Some(line) {
                     self.last_breakpoint_line = Some(line);
-                    self.execution_state = ExecutionState::Paused { line, column, ip: self.ip };
-                    return StepOutcome::Breakpoint { line, column, ip: self.ip };
+                    self.execution_state = ExecutionState::Paused {
+                        line,
+                        column,
+                        ip: self.ip,
+                    };
+                    return StepOutcome::Breakpoint {
+                        line,
+                        column,
+                        ip: self.ip,
+                    };
                 } else if !self.breakpoints.contains(&line) {
                     self.last_breakpoint_line = None;
                 }
@@ -414,7 +408,8 @@ impl VM {
     /// Step to the next source line
     pub fn step_line(&mut self) -> StepOutcome {
         let start_line = self.get_current_location().map(|(l, _)| l);
-        self.step_context.start(StepMode::Line, start_line, self.call_stack.len());
+        self.step_context
+            .start(StepMode::Line, start_line, self.call_stack.len());
         self.run_until_step_complete()
     }
 
@@ -426,7 +421,8 @@ impl VM {
     /// Step over function calls (execute until same or lower call depth and line changed)
     pub fn step_over(&mut self) -> StepOutcome {
         let start_line = self.get_current_location().map(|(l, _)| l);
-        self.step_context.start(StepMode::Over, start_line, self.call_stack.len());
+        self.step_context
+            .start(StepMode::Over, start_line, self.call_stack.len());
         self.run_until_step_complete()
     }
 
@@ -437,7 +433,8 @@ impl VM {
             return self.continue_execution();
         }
         let start_line = self.get_current_location().map(|(l, _)| l);
-        self.step_context.start(StepMode::Out, start_line, self.call_stack.len());
+        self.step_context
+            .start(StepMode::Out, start_line, self.call_stack.len());
         self.run_until_step_complete()
     }
 
@@ -467,7 +464,11 @@ impl VM {
                     if self.step_context.is_complete(current_line, current_depth) {
                         self.step_context.clear();
                         if let Some((line, column)) = self.get_current_location() {
-                            return StepOutcome::StepCompleted { line, column, ip: self.ip };
+                            return StepOutcome::StepCompleted {
+                                line,
+                                column,
+                                ip: self.ip,
+                            };
                         }
                     }
                 }
@@ -512,18 +513,25 @@ impl VM {
     pub fn get_debug_snapshot(&self) -> DebugSnapshot {
         use crate::debug::RichValue;
 
-        let stack: Vec<ValueInfo> = self.stack.iter().map(|v| {
-            ValueInfo::with_rich_value(
-                format!("{:?}", v),
-                self.value_type_name(v),
-                RichValue::from_value(v),
-            )
-        }).collect();
+        let stack: Vec<ValueInfo> = self
+            .stack
+            .iter()
+            .map(|v| {
+                ValueInfo::with_rich_value(
+                    format!("{:?}", v),
+                    self.value_type_name(v),
+                    RichValue::from_value(v),
+                )
+            })
+            .collect();
 
         // Get local names from debug info at current IP
         let local_names = self.program.debug_info.get_local_names_at(self.ip as u32);
-        let locals: Vec<LocalInfo> = self.locals.iter().enumerate().map(|(i, v)| {
-            LocalInfo {
+        let locals: Vec<LocalInfo> = self
+            .locals
+            .iter()
+            .enumerate()
+            .map(|(i, v)| LocalInfo {
                 slot: i,
                 name: local_names.get(&(i as u16)).map(|s| s.to_string()),
                 value: ValueInfo::with_rich_value(
@@ -531,16 +539,20 @@ impl VM {
                     self.value_type_name(v),
                     RichValue::from_value(v),
                 ),
-            }
-        }).collect();
+            })
+            .collect();
 
-        let call_stack: Vec<CallFrameInfo> = self.call_stack.iter().map(|frame| {
-            CallFrameInfo {
-                function_name: None, // TODO: Get from debug info if available
-                return_addr: frame.return_addr,
-                source_location: self.program.debug_info.lookup(frame.return_addr as u32),
-            }
-        }).collect();
+        let call_stack: Vec<CallFrameInfo> = self
+            .call_stack
+            .iter()
+            .map(|frame| {
+                CallFrameInfo {
+                    function_name: None, // TODO: Get from debug info if available
+                    return_addr: frame.return_addr,
+                    source_location: self.program.debug_info.lookup(frame.return_addr as u32),
+                }
+            })
+            .collect();
 
         DebugSnapshot {
             state: self.execution_state.clone(),
@@ -642,789 +654,781 @@ impl VM {
         match opcode {
             Opcode::Nop => {}
 
-                // Stack operations
-                Opcode::LoadConst => {
-                    let index = self.read_u16()? as usize;
-                    let constant = self
-                        .program
-                        .constants
-                        .get(index)
-                        .cloned()
-                        .ok_or_else(|| format!("Invalid constant index: {}", index))?;
-                    self.stack.push(constant);
+            // Stack operations
+            Opcode::LoadConst => {
+                let index = self.read_u16()? as usize;
+                let constant = self
+                    .program
+                    .constants
+                    .get(index)
+                    .cloned()
+                    .ok_or_else(|| format!("Invalid constant index: {}", index))?;
+                self.stack.push(constant);
+            }
+
+            Opcode::Pop => {
+                // Use safe pop to respect stack base
+                let _ = self.pop();
+            }
+
+            Opcode::Dup => {
+                let value = self.stack.last().cloned().ok_or("Stack underflow")?;
+                self.stack.push(value);
+            }
+
+            // Local variable operations
+            Opcode::LoadLocal => {
+                let slot = self.read_u16()? as usize;
+                let index = self.locals_base() + slot;
+
+                // Extend locals if necessary
+                while self.locals.len() <= index {
+                    self.locals.push(Value::Null);
                 }
 
-                Opcode::Pop => {
-                    // Use safe pop to respect stack base
-                    let _ = self.pop();
+                let value = self.locals.get(index).cloned().unwrap_or(Value::Null);
+                self.stack.push(value);
+            }
+
+            Opcode::StoreLocal => {
+                let slot = self.read_u16()? as usize;
+                let index = self.locals_base() + slot;
+                let value = self.pop()?;
+
+                // Extend locals if necessary
+                while self.locals.len() <= index {
+                    self.locals.push(Value::Null);
                 }
 
-                Opcode::Dup => {
-                    let value = self.stack.last().cloned().ok_or("Stack underflow")?;
-                    self.stack.push(value);
-                }
+                self.locals[index] = value;
+            }
 
-                // Local variable operations
-                Opcode::LoadLocal => {
-                    let slot = self.read_u16()? as usize;
-                    let index = self.locals_base() + slot;
-
-                    // Extend locals if necessary
-                    while self.locals.len() <= index {
-                        self.locals.push(Value::Null);
+            // Arithmetic operations
+            Opcode::Add => {
+                let b = self.pop()?;
+                let a = self.pop()?;
+                let result = match (&a, &b) {
+                    (Value::Int(a), Value::Int(b)) => Value::Int(a + b),
+                    (Value::Float(a), Value::Float(b)) => Value::Float(a + b),
+                    (Value::Int(a), Value::Float(b)) => Value::Float(*a as f64 + b),
+                    (Value::Float(a), Value::Int(b)) => Value::Float(a + *b as f64),
+                    (Value::String(a), Value::String(b)) => {
+                        Value::String(Rc::new(format!("{}{}", a, b)))
                     }
+                    (Value::String(a), b) => Value::String(Rc::new(format!("{}{}", a, b))),
+                    (a, Value::String(b)) => Value::String(Rc::new(format!("{}{}", a, b))),
+                    _ => return Err(format!("Cannot add {:?} and {:?}", a, b)),
+                };
+                self.stack.push(result);
+            }
 
-                    let value = self.locals.get(index).cloned().unwrap_or(Value::Null);
-                    self.stack.push(value);
-                }
+            Opcode::Sub => {
+                let b = self.pop()?;
+                let a = self.pop()?;
+                let result = match (&a, &b) {
+                    (Value::Int(a), Value::Int(b)) => Value::Int(a - b),
+                    (Value::Float(a), Value::Float(b)) => Value::Float(a - b),
+                    (Value::Int(a), Value::Float(b)) => Value::Float(*a as f64 - b),
+                    (Value::Float(a), Value::Int(b)) => Value::Float(a - *b as f64),
+                    _ => return Err(format!("Cannot subtract {:?} from {:?}", b, a)),
+                };
+                self.stack.push(result);
+            }
 
-                Opcode::StoreLocal => {
-                    let slot = self.read_u16()? as usize;
-                    let index = self.locals_base() + slot;
-                    let value = self.pop()?;
+            Opcode::Mul => {
+                let b = self.pop()?;
+                let a = self.pop()?;
+                let result = match (&a, &b) {
+                    (Value::Int(a), Value::Int(b)) => Value::Int(a * b),
+                    (Value::Float(a), Value::Float(b)) => Value::Float(a * b),
+                    (Value::Int(a), Value::Float(b)) => Value::Float(*a as f64 * b),
+                    (Value::Float(a), Value::Int(b)) => Value::Float(a * *b as f64),
+                    _ => return Err(format!("Cannot multiply {:?} and {:?}", a, b)),
+                };
+                self.stack.push(result);
+            }
 
-                    // Extend locals if necessary
-                    while self.locals.len() <= index {
-                        self.locals.push(Value::Null);
+            Opcode::Div => {
+                let b = self.pop()?;
+                let a = self.pop()?;
+                let result = match (&a, &b) {
+                    (Value::Int(a), Value::Int(b)) => {
+                        if *b == 0 {
+                            return Err("Division by zero".to_string());
+                        }
+                        Value::Int(a / b)
                     }
+                    (Value::Float(a), Value::Float(b)) => Value::Float(a / b),
+                    (Value::Int(a), Value::Float(b)) => Value::Float(*a as f64 / b),
+                    (Value::Float(a), Value::Int(b)) => Value::Float(a / *b as f64),
+                    _ => return Err(format!("Cannot divide {:?} by {:?}", a, b)),
+                };
+                self.stack.push(result);
+            }
 
-                    self.locals[index] = value;
-                }
-
-                // Arithmetic operations
-                Opcode::Add => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    let result = match (&a, &b) {
-                        (Value::Int(a), Value::Int(b)) => Value::Int(a + b),
-                        (Value::Float(a), Value::Float(b)) => Value::Float(a + b),
-                        (Value::Int(a), Value::Float(b)) => Value::Float(*a as f64 + b),
-                        (Value::Float(a), Value::Int(b)) => Value::Float(a + *b as f64),
-                        (Value::String(a), Value::String(b)) => {
-                            Value::String(Rc::new(format!("{}{}", a, b)))
+            Opcode::Mod => {
+                let b = self.pop()?;
+                let a = self.pop()?;
+                let result = match (&a, &b) {
+                    (Value::Int(a), Value::Int(b)) => {
+                        if *b == 0 {
+                            return Err("Modulo by zero".to_string());
                         }
-                        (Value::String(a), b) => Value::String(Rc::new(format!("{}{}", a, b))),
-                        (a, Value::String(b)) => Value::String(Rc::new(format!("{}{}", a, b))),
-                        _ => return Err(format!("Cannot add {:?} and {:?}", a, b)),
-                    };
-                    self.stack.push(result);
-                }
-
-                Opcode::Sub => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    let result = match (&a, &b) {
-                        (Value::Int(a), Value::Int(b)) => Value::Int(a - b),
-                        (Value::Float(a), Value::Float(b)) => Value::Float(a - b),
-                        (Value::Int(a), Value::Float(b)) => Value::Float(*a as f64 - b),
-                        (Value::Float(a), Value::Int(b)) => Value::Float(a - *b as f64),
-                        _ => return Err(format!("Cannot subtract {:?} from {:?}", b, a)),
-                    };
-                    self.stack.push(result);
-                }
-
-                Opcode::Mul => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    let result = match (&a, &b) {
-                        (Value::Int(a), Value::Int(b)) => Value::Int(a * b),
-                        (Value::Float(a), Value::Float(b)) => Value::Float(a * b),
-                        (Value::Int(a), Value::Float(b)) => Value::Float(*a as f64 * b),
-                        (Value::Float(a), Value::Int(b)) => Value::Float(a * *b as f64),
-                        _ => return Err(format!("Cannot multiply {:?} and {:?}", a, b)),
-                    };
-                    self.stack.push(result);
-                }
-
-                Opcode::Div => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    let result = match (&a, &b) {
-                        (Value::Int(a), Value::Int(b)) => {
-                            if *b == 0 {
-                                return Err("Division by zero".to_string());
-                            }
-                            Value::Int(a / b)
-                        }
-                        (Value::Float(a), Value::Float(b)) => Value::Float(a / b),
-                        (Value::Int(a), Value::Float(b)) => Value::Float(*a as f64 / b),
-                        (Value::Float(a), Value::Int(b)) => Value::Float(a / *b as f64),
-                        _ => return Err(format!("Cannot divide {:?} by {:?}", a, b)),
-                    };
-                    self.stack.push(result);
-                }
-
-                Opcode::Mod => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    let result = match (&a, &b) {
-                        (Value::Int(a), Value::Int(b)) => {
-                            if *b == 0 {
-                                return Err("Modulo by zero".to_string());
-                            }
-                            Value::Int(a % b)
-                        }
-                        (Value::Float(a), Value::Float(b)) => Value::Float(a % b),
-                        _ => return Err(format!("Cannot modulo {:?} by {:?}", a, b)),
-                    };
-                    self.stack.push(result);
-                }
-
-                Opcode::Neg => {
-                    let a = self.pop()?;
-                    let result = match a {
-                        Value::Int(n) => Value::Int(-n),
-                        Value::Float(f) => Value::Float(-f),
-                        _ => return Err(format!("Cannot negate {:?}", a)),
-                    };
-                    self.stack.push(result);
-                }
-
-                Opcode::Pow => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    let result = match (&a, &b) {
-                        (Value::Int(base), Value::Int(exp)) => {
-                            if *exp < 0 {
-                                return Err(
-                                    "Negative exponent not supported for integers".to_string()
-                                );
-                            }
-                            Value::Int(base.pow(*exp as u32))
-                        }
-                        (Value::Float(base), Value::Float(exp)) => Value::Float(base.powf(*exp)),
-                        (Value::Int(base), Value::Float(exp)) => {
-                            Value::Float((*base as f64).powf(*exp))
-                        }
-                        (Value::Float(base), Value::Int(exp)) => {
-                            Value::Float(base.powi(*exp as i32))
-                        }
-                        _ => return Err(format!("Cannot compute power of {:?} ^ {:?}", a, b)),
-                    };
-                    self.stack.push(result);
-                }
-
-                // Comparison operations
-                Opcode::Eq => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    let result = self.values_equal(&a, &b);
-                    self.stack.push(Value::Bool(result));
-                }
-
-                Opcode::Ne => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    let result = !self.values_equal(&a, &b);
-                    self.stack.push(Value::Bool(result));
-                }
-
-                Opcode::Lt => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    let result = self.compare_values(&a, &b)? < 0;
-                    self.stack.push(Value::Bool(result));
-                }
-
-                Opcode::Le => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    let result = self.compare_values(&a, &b)? <= 0;
-                    self.stack.push(Value::Bool(result));
-                }
-
-                Opcode::Gt => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    let result = self.compare_values(&a, &b)? > 0;
-                    self.stack.push(Value::Bool(result));
-                }
-
-                Opcode::Ge => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    let result = self.compare_values(&a, &b)? >= 0;
-                    self.stack.push(Value::Bool(result));
-                }
-
-                // Logical operations
-                Opcode::And => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    let result = a.is_truthy() && b.is_truthy();
-                    self.stack.push(Value::Bool(result));
-                }
-
-                Opcode::Or => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    let result = a.is_truthy() || b.is_truthy();
-                    self.stack.push(Value::Bool(result));
-                }
-
-                Opcode::Not => {
-                    let a = self.pop()?;
-                    let result = !a.is_truthy();
-                    self.stack.push(Value::Bool(result));
-                }
-
-                // Bitwise operations
-                Opcode::BitAnd => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    match (a, b) {
-                        (Value::Int(x), Value::Int(y)) => self.stack.push(Value::Int(x & y)),
-                        _ => return Err("Bitwise AND requires integer operands".to_string()),
+                        Value::Int(a % b)
                     }
-                }
+                    (Value::Float(a), Value::Float(b)) => Value::Float(a % b),
+                    _ => return Err(format!("Cannot modulo {:?} by {:?}", a, b)),
+                };
+                self.stack.push(result);
+            }
 
-                Opcode::BitOr => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    match (a, b) {
-                        (Value::Int(x), Value::Int(y)) => self.stack.push(Value::Int(x | y)),
-                        _ => return Err("Bitwise OR requires integer operands".to_string()),
-                    }
-                }
+            Opcode::Neg => {
+                let a = self.pop()?;
+                let result = match a {
+                    Value::Int(n) => Value::Int(-n),
+                    Value::Float(f) => Value::Float(-f),
+                    _ => return Err(format!("Cannot negate {:?}", a)),
+                };
+                self.stack.push(result);
+            }
 
-                Opcode::BitXor => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    match (a, b) {
-                        (Value::Int(x), Value::Int(y)) => self.stack.push(Value::Int(x ^ y)),
-                        _ => return Err("Bitwise XOR requires integer operands".to_string()),
-                    }
-                }
-
-                Opcode::BitNot => {
-                    let a = self.pop()?;
-                    match a {
-                        Value::Int(x) => self.stack.push(Value::Int(!x)),
-                        _ => return Err("Bitwise NOT requires integer operand".to_string()),
-                    }
-                }
-
-                Opcode::Shl => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    match (a, b) {
-                        (Value::Int(x), Value::Int(y)) => {
-                            self.stack.push(Value::Int(x << (y as u32)))
+            Opcode::Pow => {
+                let b = self.pop()?;
+                let a = self.pop()?;
+                let result = match (&a, &b) {
+                    (Value::Int(base), Value::Int(exp)) => {
+                        if *exp < 0 {
+                            return Err("Negative exponent not supported for integers".to_string());
                         }
-                        _ => return Err("Shift left requires integer operands".to_string()),
+                        Value::Int(base.pow(*exp as u32))
                     }
-                }
-
-                Opcode::Shr => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    match (a, b) {
-                        (Value::Int(x), Value::Int(y)) => {
-                            // Arithmetic right shift (preserves sign)
-                            self.stack.push(Value::Int(x >> (y as u32)))
-                        }
-                        _ => return Err("Shift right requires integer operands".to_string()),
+                    (Value::Float(base), Value::Float(exp)) => Value::Float(base.powf(*exp)),
+                    (Value::Int(base), Value::Float(exp)) => {
+                        Value::Float((*base as f64).powf(*exp))
                     }
-                }
+                    (Value::Float(base), Value::Int(exp)) => Value::Float(base.powi(*exp as i32)),
+                    _ => return Err(format!("Cannot compute power of {:?} ^ {:?}", a, b)),
+                };
+                self.stack.push(result);
+            }
 
-                Opcode::UShr => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    match (a, b) {
-                        (Value::Int(x), Value::Int(y)) => {
-                            // Logical right shift (zero-fill)
-                            let result = ((x as u64) >> (y as u32)) as i64;
-                            self.stack.push(Value::Int(result))
-                        }
-                        _ => {
-                            return Err(
-                                "Unsigned shift right requires integer operands".to_string()
-                            );
-                        }
+            // Comparison operations
+            Opcode::Eq => {
+                let b = self.pop()?;
+                let a = self.pop()?;
+                let result = self.values_equal(&a, &b);
+                self.stack.push(Value::Bool(result));
+            }
+
+            Opcode::Ne => {
+                let b = self.pop()?;
+                let a = self.pop()?;
+                let result = !self.values_equal(&a, &b);
+                self.stack.push(Value::Bool(result));
+            }
+
+            Opcode::Lt => {
+                let b = self.pop()?;
+                let a = self.pop()?;
+                let result = self.compare_values(&a, &b)? < 0;
+                self.stack.push(Value::Bool(result));
+            }
+
+            Opcode::Le => {
+                let b = self.pop()?;
+                let a = self.pop()?;
+                let result = self.compare_values(&a, &b)? <= 0;
+                self.stack.push(Value::Bool(result));
+            }
+
+            Opcode::Gt => {
+                let b = self.pop()?;
+                let a = self.pop()?;
+                let result = self.compare_values(&a, &b)? > 0;
+                self.stack.push(Value::Bool(result));
+            }
+
+            Opcode::Ge => {
+                let b = self.pop()?;
+                let a = self.pop()?;
+                let result = self.compare_values(&a, &b)? >= 0;
+                self.stack.push(Value::Bool(result));
+            }
+
+            // Logical operations
+            Opcode::And => {
+                let b = self.pop()?;
+                let a = self.pop()?;
+                let result = a.is_truthy() && b.is_truthy();
+                self.stack.push(Value::Bool(result));
+            }
+
+            Opcode::Or => {
+                let b = self.pop()?;
+                let a = self.pop()?;
+                let result = a.is_truthy() || b.is_truthy();
+                self.stack.push(Value::Bool(result));
+            }
+
+            Opcode::Not => {
+                let a = self.pop()?;
+                let result = !a.is_truthy();
+                self.stack.push(Value::Bool(result));
+            }
+
+            // Bitwise operations
+            Opcode::BitAnd => {
+                let b = self.pop()?;
+                let a = self.pop()?;
+                match (a, b) {
+                    (Value::Int(x), Value::Int(y)) => self.stack.push(Value::Int(x & y)),
+                    _ => return Err("Bitwise AND requires integer operands".to_string()),
+                }
+            }
+
+            Opcode::BitOr => {
+                let b = self.pop()?;
+                let a = self.pop()?;
+                match (a, b) {
+                    (Value::Int(x), Value::Int(y)) => self.stack.push(Value::Int(x | y)),
+                    _ => return Err("Bitwise OR requires integer operands".to_string()),
+                }
+            }
+
+            Opcode::BitXor => {
+                let b = self.pop()?;
+                let a = self.pop()?;
+                match (a, b) {
+                    (Value::Int(x), Value::Int(y)) => self.stack.push(Value::Int(x ^ y)),
+                    _ => return Err("Bitwise XOR requires integer operands".to_string()),
+                }
+            }
+
+            Opcode::BitNot => {
+                let a = self.pop()?;
+                match a {
+                    Value::Int(x) => self.stack.push(Value::Int(!x)),
+                    _ => return Err("Bitwise NOT requires integer operand".to_string()),
+                }
+            }
+
+            Opcode::Shl => {
+                let b = self.pop()?;
+                let a = self.pop()?;
+                match (a, b) {
+                    (Value::Int(x), Value::Int(y)) => self.stack.push(Value::Int(x << (y as u32))),
+                    _ => return Err("Shift left requires integer operands".to_string()),
+                }
+            }
+
+            Opcode::Shr => {
+                let b = self.pop()?;
+                let a = self.pop()?;
+                match (a, b) {
+                    (Value::Int(x), Value::Int(y)) => {
+                        // Arithmetic right shift (preserves sign)
+                        self.stack.push(Value::Int(x >> (y as u32)))
+                    }
+                    _ => return Err("Shift right requires integer operands".to_string()),
+                }
+            }
+
+            Opcode::UShr => {
+                let b = self.pop()?;
+                let a = self.pop()?;
+                match (a, b) {
+                    (Value::Int(x), Value::Int(y)) => {
+                        // Logical right shift (zero-fill)
+                        let result = ((x as u64) >> (y as u32)) as i64;
+                        self.stack.push(Value::Int(result))
+                    }
+                    _ => {
+                        return Err("Unsigned shift right requires integer operands".to_string());
                     }
                 }
+            }
 
-                // Control flow
-                Opcode::Jump => {
-                    let offset = self.read_i16()?;
+            // Control flow
+            Opcode::Jump => {
+                let offset = self.read_i16()?;
+                self.ip = ((self.ip as i32) + (offset as i32)) as usize;
+            }
+
+            Opcode::JumpIfTrue => {
+                let offset = self.read_i16()?;
+                let condition = self.pop()?;
+                if condition.is_truthy() {
                     self.ip = ((self.ip as i32) + (offset as i32)) as usize;
                 }
+            }
 
-                Opcode::JumpIfTrue => {
-                    let offset = self.read_i16()?;
-                    let condition = self.pop()?;
-                    if condition.is_truthy() {
-                        self.ip = ((self.ip as i32) + (offset as i32)) as usize;
-                    }
+            Opcode::JumpIfFalse => {
+                let offset = self.read_i16()?;
+                let condition = self.pop()?;
+                if !condition.is_truthy() {
+                    self.ip = ((self.ip as i32) + (offset as i32)) as usize;
                 }
+            }
 
-                Opcode::JumpIfFalse => {
-                    let offset = self.read_i16()?;
-                    let condition = self.pop()?;
-                    if !condition.is_truthy() {
-                        self.ip = ((self.ip as i32) + (offset as i32)) as usize;
-                    }
-                }
+            // Function operations
+            Opcode::Call => {
+                let arg_count = self.read_u8()? as usize;
+                let callee = self.pop()?;
 
-                // Function operations
-                Opcode::Call => {
-                    let arg_count = self.read_u8()? as usize;
-                    let callee = self.pop()?;
+                match callee {
+                    Value::Function(code_offset) => {
+                        // Pop arguments and store as locals
+                        let args: Vec<Value> = (0..arg_count)
+                            .map(|_| self.pop())
+                            .collect::<Result<Vec<_>, _>>()?
+                            .into_iter()
+                            .rev()
+                            .collect();
 
-                    match callee {
-                        Value::Function(code_offset) => {
-                            // Pop arguments and store as locals
-                            let args: Vec<Value> = (0..arg_count)
-                                .map(|_| self.pop())
-                                .collect::<Result<Vec<_>, _>>()?
-                                .into_iter()
-                                .rev()
-                                .collect();
+                        // Save stack base AFTER popping args - this isolates the caller's stack
+                        let frame = CallFrame {
+                            return_addr: self.ip,
+                            locals_base: self.locals.len(),
+                            local_count: arg_count,
+                            stack_base: self.stack.len(),
+                            captures: None,
+                        };
+                        self.call_stack.push(frame);
 
-                            // Save stack base AFTER popping args - this isolates the caller's stack
-                            let frame = CallFrame {
-                                return_addr: self.ip,
-                                locals_base: self.locals.len(),
-                                local_count: arg_count,
-                                stack_base: self.stack.len(),
-                                captures: None,
-                            };
-                            self.call_stack.push(frame);
-
-                            for arg in args {
-                                self.locals.push(arg);
-                            }
-
-                            // Jump to function
-                            self.ip = code_offset;
+                        for arg in args {
+                            self.locals.push(arg);
                         }
-                        Value::Closure(closure_data) => {
-                            // Pop arguments and store as locals
-                            let args: Vec<Value> = (0..arg_count)
-                                .map(|_| self.pop())
-                                .collect::<Result<Vec<_>, _>>()?
-                                .into_iter()
-                                .rev()
-                                .collect();
 
-                            // Save stack base AFTER popping args - this isolates the caller's stack
-                            let frame = CallFrame {
-                                return_addr: self.ip,
-                                locals_base: self.locals.len(),
-                                local_count: arg_count,
-                                stack_base: self.stack.len(),
-                                captures: Some(closure_data.clone()),
-                            };
-                            self.call_stack.push(frame);
+                        // Jump to function
+                        self.ip = code_offset;
+                    }
+                    Value::Closure(closure_data) => {
+                        // Pop arguments and store as locals
+                        let args: Vec<Value> = (0..arg_count)
+                            .map(|_| self.pop())
+                            .collect::<Result<Vec<_>, _>>()?
+                            .into_iter()
+                            .rev()
+                            .collect();
 
-                            for arg in args {
-                                self.locals.push(arg);
-                            }
+                        // Save stack base AFTER popping args - this isolates the caller's stack
+                        let frame = CallFrame {
+                            return_addr: self.ip,
+                            locals_base: self.locals.len(),
+                            local_count: arg_count,
+                            stack_base: self.stack.len(),
+                            captures: Some(closure_data.clone()),
+                        };
+                        self.call_stack.push(frame);
 
-                            // Jump to closure code
-                            self.ip = closure_data.code_offset;
+                        for arg in args {
+                            self.locals.push(arg);
                         }
-                        _ => return Err(format!("Cannot call {:?}", callee)),
+
+                        // Jump to closure code
+                        self.ip = closure_data.code_offset;
                     }
+                    _ => return Err(format!("Cannot call {:?}", callee)),
                 }
+            }
 
-                Opcode::Return => {
-                    let return_value = self.pop().unwrap_or(Value::Null);
+            Opcode::Return => {
+                let return_value = self.pop().unwrap_or(Value::Null);
 
-                    if let Some(frame) = self.call_stack.pop() {
-                        // Clean up locals
-                        self.locals.truncate(frame.locals_base);
-                        // Truncate stack to frame's stack base (discard any leftovers)
-                        self.stack.truncate(frame.stack_base);
-                        // Restore instruction pointer
-                        self.ip = frame.return_addr;
-                        // Push return value
-                        self.stack.push(return_value);
-                    } else {
-                        // Top-level return
-                        return Ok(Some(0));
-                    }
-                }
-
-                // Object operations
-                Opcode::GetField => {
-                    let field_idx = self.read_u16()? as usize;
-                    let field_name = match self.program.constants.get(field_idx) {
-                        Some(Value::String(s)) => s.clone(),
-                        _ => return Err("Invalid field name constant".to_string()),
-                    };
-                    let object = self.pop()?;
-
-                    match object {
-                        Value::Object(obj) => {
-                            let value = obj
-                                .borrow()
-                                .get(&*field_name)
-                                .cloned()
-                                .unwrap_or(Value::Null);
-                            self.stack.push(value);
-                        }
-                        _ => return Err(format!("Cannot get field from {:?}", object)),
-                    }
-                }
-
-                Opcode::SetField => {
-                    let field_idx = self.read_u16()? as usize;
-                    let field_name = match self.program.constants.get(field_idx) {
-                        Some(Value::String(s)) => (**s).clone(),
-                        _ => return Err("Invalid field name constant".to_string()),
-                    };
-                    let value = self.pop()?;
-                    let object = self.pop()?;
-
-                    match object {
-                        Value::Object(obj) => {
-                            obj.borrow_mut().insert(field_name, value);
-                        }
-                        _ => return Err(format!("Cannot set field on {:?}", object)),
-                    }
-                }
-
-                Opcode::NewObject => {
-                    let obj = Rc::new(RefCell::new(HashMap::new()));
-                    self.stack.push(Value::Object(obj));
-                }
-
-                // Array operations
-                Opcode::NewArray => {
-                    let size = self.pop()?;
-                    let size = match size {
-                        Value::Int(n) => n as usize,
-                        _ => return Err("Array size must be an integer".to_string()),
-                    };
-                    let arr = Rc::new(RefCell::new(vec![Value::Null; size]));
-                    self.stack.push(Value::Array(arr));
-                }
-
-                Opcode::ArrayGet => {
-                    let index = self.pop()?;
-                    let array = self.pop()?;
-
-                    match (array, index) {
-                        (Value::Array(arr), Value::Int(idx)) => {
-                            let idx = idx as usize;
-                            let value = arr.borrow().get(idx).cloned().unwrap_or(Value::Null);
-                            self.stack.push(value);
-                        }
-                        (Value::String(s), Value::Int(idx)) => {
-                            let idx = idx as usize;
-                            let value = s
-                                .chars()
-                                .nth(idx)
-                                .map(|c| Value::String(Rc::new(c.to_string())))
-                                .unwrap_or(Value::Null);
-                            self.stack.push(value);
-                        }
-                        // Support object indexing with string keys (for JSON objects)
-                        (Value::Object(obj), Value::String(key)) => {
-                            let value = obj.borrow().get(&*key).cloned().unwrap_or(Value::Null);
-                            self.stack.push(value);
-                        }
-                        _ => return Err("Invalid array/index types".to_string()),
-                    }
-                }
-
-                Opcode::ArraySet => {
-                    let value = self.pop()?;
-                    let index = self.pop()?;
-                    let array = self.pop()?;
-
-                    match (array, index) {
-                        (Value::Array(arr), Value::Int(idx)) => {
-                            let idx = idx as usize;
-                            let mut arr = arr.borrow_mut();
-                            if idx < arr.len() {
-                                arr[idx] = value;
-                            }
-                        }
-                        _ => return Err("Invalid array/index types".to_string()),
-                    }
-                }
-
-                Opcode::ArrayLen => {
-                    let array = self.pop()?;
-                    let len = match array {
-                        Value::Array(arr) => arr.borrow().len() as i64,
-                        Value::String(s) => s.len() as i64,
-                        _ => return Err("Cannot get length of non-array/string".to_string()),
-                    };
-                    self.stack.push(Value::Int(len));
-                }
-
-                Opcode::ArrayPush => {
-                    let value = self.pop()?;
-                    let array = self.pop()?;
-                    match array {
-                        Value::Array(arr) => {
-                            arr.borrow_mut().push(value);
-                        }
-                        _ => return Err("Cannot push to non-array".to_string()),
-                    }
-                }
-
-                Opcode::ArrayPop => {
-                    let array = self.pop()?;
-                    match array {
-                        Value::Array(arr) => {
-                            let value = arr.borrow_mut().pop().unwrap_or(Value::Null);
-                            self.stack.push(value);
-                        }
-                        _ => return Err("Cannot pop from non-array".to_string()),
-                    }
-                }
-
-                // Type operations
-                Opcode::TypeIs => {
-                    let type_id = self.read_u8()?;
-                    let value = self.pop()?;
-                    let matches = match type_id {
-                        0 => matches!(value, Value::Null),
-                        1 => matches!(value, Value::Bool(_)),
-                        2 => matches!(value, Value::Int(_)),
-                        3 => matches!(value, Value::Float(_)),
-                        4 => matches!(value, Value::String(_)),
-                        5 => matches!(value, Value::Array(_)),
-                        6 => matches!(value, Value::Object(_)),
-                        7 => matches!(value, Value::Function(_) | Value::Closure(_)),
-                        _ => false,
-                    };
-                    self.stack.push(Value::Bool(matches));
-                }
-
-                Opcode::Cast => {
-                    let type_id = self.read_u8()?;
-                    let value = self.pop()?;
-                    let result = match type_id {
-                        // Cast to int
-                        2 => match value {
-                            Value::Int(n) => Value::Int(n),
-                            Value::Float(f) => Value::Int(f as i64),
-                            Value::Bool(b) => Value::Int(if b { 1 } else { 0 }),
-                            Value::String(s) => Value::Int(s.parse().unwrap_or(0)),
-                            _ => Value::Int(0),
-                        },
-                        // Cast to float
-                        3 => match value {
-                            Value::Int(n) => Value::Float(n as f64),
-                            Value::Float(f) => Value::Float(f),
-                            Value::Bool(b) => Value::Float(if b { 1.0 } else { 0.0 }),
-                            Value::String(s) => Value::Float(s.parse().unwrap_or(0.0)),
-                            _ => Value::Float(0.0),
-                        },
-                        // Cast to string
-                        4 => Value::String(Rc::new(value.to_string())),
-                        // Cast to bool
-                        1 => Value::Bool(value.is_truthy()),
-                        _ => value,
-                    };
-                    self.stack.push(result);
-                }
-
-                // System operations
-                Opcode::Print => {
-                    let value = self.pop()?;
-                    let output_str = value.to_string();
-
-                    // Call output callback if set
-                    if let Some(ref mut callback) = self.output_callback {
-                        callback(&output_str);
-                    }
-
-                    if self.capture_output {
-                        self.output.push(output_str);
-                    } else {
-                        println!("{}", output_str);
-                    }
-                }
-
-                Opcode::Syscall => {
-                    let syscall_num = self.read_u8()?;
-                    self.handle_syscall(syscall_num)?;
-                }
-
-                // Fiber operations
-                Opcode::Spawn => {
-                    let code_offset = self.read_u16()? as usize;
-                    let arg_count = self.read_u8()? as usize;
-
-                    // Collect arguments from stack
-                    let mut args = Vec::with_capacity(arg_count);
-                    for _ in 0..arg_count {
-                        args.push(self.pop()?);
-                    }
-                    args.reverse();
-
-                    // Create new fiber
-                    let fiber_id = self.scheduler.spawn_with_args(code_offset, args);
-                    self.stack.push(Value::Fiber(fiber_id));
-                }
-
-                Opcode::Yield => {
-                    // In non-fiber mode, yield is a no-op
-                    if self.fiber_mode {
-                        // Save current state to fiber
-                        self.save_fiber_state();
-                        self.scheduler.yield_current();
-
-                        // Schedule next fiber
-                        if let Some(_next_id) = self.scheduler.schedule() {
-                            self.load_fiber_state();
-                        } else {
-                            return Ok(Some(0)); // No more fibers
-                        }
-                    }
-                }
-
-                Opcode::FiberId => {
-                    let id = self.scheduler.current.unwrap_or(0);
-                    self.stack.push(Value::Int(id as i64));
-                }
-
-                // Channel operations
-                Opcode::ChanNew => {
-                    let capacity = self.pop()?;
-                    let capacity = match capacity {
-                        Value::Int(n) => n as usize,
-                        _ => 0,
-                    };
-                    let channel_id = self.scheduler.create_channel(capacity);
-                    self.stack.push(Value::Channel(channel_id));
-                }
-
-                Opcode::ChanSend => {
-                    let value = self.pop()?;
-                    let channel = self.pop()?;
-
-                    match channel {
-                        Value::Channel(channel_id) => {
-                            if self.fiber_mode {
-                                match self.scheduler.channel_send(channel_id, value) {
-                                    Ok(true) => {} // Sent immediately
-                                    Ok(false) => {
-                                        // Blocked - need to switch fibers
-                                        if self.scheduler.schedule().is_some() {
-                                            self.load_fiber_state();
-                                        }
-                                    }
-                                    Err(e) => return Err(e),
-                                }
-                            } else {
-                                return Err("Channel send requires fiber mode".to_string());
-                            }
-                        }
-                        _ => return Err("Cannot send on non-channel".to_string()),
-                    }
-                }
-
-                Opcode::ChanRecv => {
-                    let channel = self.pop()?;
-
-                    match channel {
-                        Value::Channel(channel_id) => {
-                            if self.fiber_mode {
-                                match self.scheduler.channel_receive(channel_id) {
-                                    Ok(Some((value, ok))) => {
-                                        self.stack.push(value);
-                                        self.stack.push(Value::Bool(ok));
-                                    }
-                                    Ok(None) => {
-                                        // Blocked - switch fibers
-                                        if self.scheduler.schedule().is_some() {
-                                            self.load_fiber_state();
-                                        }
-                                    }
-                                    Err(e) => return Err(e),
-                                }
-                            } else {
-                                return Err("Channel receive requires fiber mode".to_string());
-                            }
-                        }
-                        _ => return Err("Cannot receive from non-channel".to_string()),
-                    }
-                }
-
-                Opcode::ChanClose => {
-                    let channel = self.pop()?;
-                    match channel {
-                        Value::Channel(channel_id) => {
-                            self.scheduler.close_channel(channel_id)?;
-                        }
-                        _ => return Err("Cannot close non-channel".to_string()),
-                    }
-                }
-
-                Opcode::ChanTryRecv => {
-                    let channel = self.pop()?;
-                    match channel {
-                        Value::Channel(channel_id) => {
-                            // Try non-blocking receive
-                            // Returns the value if available, or null otherwise
-                            if let Some(ch) = self.scheduler.channels.get_mut(&channel_id) {
-                                if let Some(value) = ch.buffer.pop_front() {
-                                    self.stack.push(value);
-                                } else {
-                                    self.stack.push(Value::Null);
-                                }
-                            } else {
-                                return Err("Invalid channel".to_string());
-                            }
-                        }
-                        _ => return Err("Cannot receive from non-channel".to_string()),
-                    }
-                }
-
-                Opcode::Select => {
-                    // Select is handled through codegen with ChanTryRecv
-                    // This opcode exists for future optimization but isn't used currently
-                }
-
-                // Closure operations
-                Opcode::MakeClosure => {
-                    let code_offset = self.read_u16()? as usize;
-                    let capture_count = self.read_u8()? as usize;
-
-                    // Pop captured values from stack (in reverse order)
-                    let mut captures = Vec::with_capacity(capture_count);
-                    for _ in 0..capture_count {
-                        captures.push(self.pop()?);
-                    }
-                    captures.reverse();
-
-                    let closure = ClosureData {
-                        code_offset,
-                        captures,
-                    };
-                    self.stack.push(Value::Closure(Rc::new(closure)));
-                }
-
-                Opcode::LoadCapture => {
-                    let capture_idx = self.read_u8()? as usize;
-
-                    // Get captures from current call frame
-                    if let Some(frame) = self.call_stack.last() {
-                        if let Some(ref closure) = frame.captures {
-                            if capture_idx < closure.captures.len() {
-                                self.stack.push(closure.captures[capture_idx].clone());
-                            } else {
-                                return Err(format!("Capture index {} out of bounds", capture_idx));
-                            }
-                        } else {
-                            return Err("LoadCapture outside of closure".to_string());
-                        }
-                    } else {
-                        return Err("LoadCapture with no call frame".to_string());
-                    }
-                }
-
-                Opcode::Halt => {
+                if let Some(frame) = self.call_stack.pop() {
+                    // Clean up locals
+                    self.locals.truncate(frame.locals_base);
+                    // Truncate stack to frame's stack base (discard any leftovers)
+                    self.stack.truncate(frame.stack_base);
+                    // Restore instruction pointer
+                    self.ip = frame.return_addr;
+                    // Push return value
+                    self.stack.push(return_value);
+                } else {
+                    // Top-level return
                     return Ok(Some(0));
                 }
             }
+
+            // Object operations
+            Opcode::GetField => {
+                let field_idx = self.read_u16()? as usize;
+                let field_name = match self.program.constants.get(field_idx) {
+                    Some(Value::String(s)) => s.clone(),
+                    _ => return Err("Invalid field name constant".to_string()),
+                };
+                let object = self.pop()?;
+
+                match object {
+                    Value::Object(obj) => {
+                        let value = obj
+                            .borrow()
+                            .get(&*field_name)
+                            .cloned()
+                            .unwrap_or(Value::Null);
+                        self.stack.push(value);
+                    }
+                    _ => return Err(format!("Cannot get field from {:?}", object)),
+                }
+            }
+
+            Opcode::SetField => {
+                let field_idx = self.read_u16()? as usize;
+                let field_name = match self.program.constants.get(field_idx) {
+                    Some(Value::String(s)) => (**s).clone(),
+                    _ => return Err("Invalid field name constant".to_string()),
+                };
+                let value = self.pop()?;
+                let object = self.pop()?;
+
+                match object {
+                    Value::Object(obj) => {
+                        obj.borrow_mut().insert(field_name, value);
+                    }
+                    _ => return Err(format!("Cannot set field on {:?}", object)),
+                }
+            }
+
+            Opcode::NewObject => {
+                let obj = Rc::new(RefCell::new(HashMap::new()));
+                self.stack.push(Value::Object(obj));
+            }
+
+            // Array operations
+            Opcode::NewArray => {
+                let size = self.pop()?;
+                let size = match size {
+                    Value::Int(n) => n as usize,
+                    _ => return Err("Array size must be an integer".to_string()),
+                };
+                let arr = Rc::new(RefCell::new(vec![Value::Null; size]));
+                self.stack.push(Value::Array(arr));
+            }
+
+            Opcode::ArrayGet => {
+                let index = self.pop()?;
+                let array = self.pop()?;
+
+                match (array, index) {
+                    (Value::Array(arr), Value::Int(idx)) => {
+                        let idx = idx as usize;
+                        let value = arr.borrow().get(idx).cloned().unwrap_or(Value::Null);
+                        self.stack.push(value);
+                    }
+                    (Value::String(s), Value::Int(idx)) => {
+                        let idx = idx as usize;
+                        let value = s
+                            .chars()
+                            .nth(idx)
+                            .map(|c| Value::String(Rc::new(c.to_string())))
+                            .unwrap_or(Value::Null);
+                        self.stack.push(value);
+                    }
+                    // Support object indexing with string keys (for JSON objects)
+                    (Value::Object(obj), Value::String(key)) => {
+                        let value = obj.borrow().get(&*key).cloned().unwrap_or(Value::Null);
+                        self.stack.push(value);
+                    }
+                    _ => return Err("Invalid array/index types".to_string()),
+                }
+            }
+
+            Opcode::ArraySet => {
+                let value = self.pop()?;
+                let index = self.pop()?;
+                let array = self.pop()?;
+
+                match (array, index) {
+                    (Value::Array(arr), Value::Int(idx)) => {
+                        let idx = idx as usize;
+                        let mut arr = arr.borrow_mut();
+                        if idx < arr.len() {
+                            arr[idx] = value;
+                        }
+                    }
+                    _ => return Err("Invalid array/index types".to_string()),
+                }
+            }
+
+            Opcode::ArrayLen => {
+                let array = self.pop()?;
+                let len = match array {
+                    Value::Array(arr) => arr.borrow().len() as i64,
+                    Value::String(s) => s.len() as i64,
+                    _ => return Err("Cannot get length of non-array/string".to_string()),
+                };
+                self.stack.push(Value::Int(len));
+            }
+
+            Opcode::ArrayPush => {
+                let value = self.pop()?;
+                let array = self.pop()?;
+                match array {
+                    Value::Array(arr) => {
+                        arr.borrow_mut().push(value);
+                    }
+                    _ => return Err("Cannot push to non-array".to_string()),
+                }
+            }
+
+            Opcode::ArrayPop => {
+                let array = self.pop()?;
+                match array {
+                    Value::Array(arr) => {
+                        let value = arr.borrow_mut().pop().unwrap_or(Value::Null);
+                        self.stack.push(value);
+                    }
+                    _ => return Err("Cannot pop from non-array".to_string()),
+                }
+            }
+
+            // Type operations
+            Opcode::TypeIs => {
+                let type_id = self.read_u8()?;
+                let value = self.pop()?;
+                let matches = match type_id {
+                    0 => matches!(value, Value::Null),
+                    1 => matches!(value, Value::Bool(_)),
+                    2 => matches!(value, Value::Int(_)),
+                    3 => matches!(value, Value::Float(_)),
+                    4 => matches!(value, Value::String(_)),
+                    5 => matches!(value, Value::Array(_)),
+                    6 => matches!(value, Value::Object(_)),
+                    7 => matches!(value, Value::Function(_) | Value::Closure(_)),
+                    _ => false,
+                };
+                self.stack.push(Value::Bool(matches));
+            }
+
+            Opcode::Cast => {
+                let type_id = self.read_u8()?;
+                let value = self.pop()?;
+                let result = match type_id {
+                    // Cast to int
+                    2 => match value {
+                        Value::Int(n) => Value::Int(n),
+                        Value::Float(f) => Value::Int(f as i64),
+                        Value::Bool(b) => Value::Int(if b { 1 } else { 0 }),
+                        Value::String(s) => Value::Int(s.parse().unwrap_or(0)),
+                        _ => Value::Int(0),
+                    },
+                    // Cast to float
+                    3 => match value {
+                        Value::Int(n) => Value::Float(n as f64),
+                        Value::Float(f) => Value::Float(f),
+                        Value::Bool(b) => Value::Float(if b { 1.0 } else { 0.0 }),
+                        Value::String(s) => Value::Float(s.parse().unwrap_or(0.0)),
+                        _ => Value::Float(0.0),
+                    },
+                    // Cast to string
+                    4 => Value::String(Rc::new(value.to_string())),
+                    // Cast to bool
+                    1 => Value::Bool(value.is_truthy()),
+                    _ => value,
+                };
+                self.stack.push(result);
+            }
+
+            // System operations
+            Opcode::Print => {
+                let value = self.pop()?;
+                let output_str = value.to_string();
+
+                // Call output callback if set
+                if let Some(ref mut callback) = self.output_callback {
+                    callback(&output_str);
+                }
+
+                if self.capture_output {
+                    self.output.push(output_str);
+                } else {
+                    println!("{}", output_str);
+                }
+            }
+
+            Opcode::Syscall => {
+                let syscall_num = self.read_u8()?;
+                self.handle_syscall(syscall_num)?;
+            }
+
+            // Fiber operations
+            Opcode::Spawn => {
+                let code_offset = self.read_u16()? as usize;
+                let arg_count = self.read_u8()? as usize;
+
+                // Collect arguments from stack
+                let mut args = Vec::with_capacity(arg_count);
+                for _ in 0..arg_count {
+                    args.push(self.pop()?);
+                }
+                args.reverse();
+
+                // Create new fiber
+                let fiber_id = self.scheduler.spawn_with_args(code_offset, args);
+                self.stack.push(Value::Fiber(fiber_id));
+            }
+
+            Opcode::Yield => {
+                // In non-fiber mode, yield is a no-op
+                if self.fiber_mode {
+                    // Save current state to fiber
+                    self.save_fiber_state();
+                    self.scheduler.yield_current();
+
+                    // Schedule next fiber
+                    if let Some(_next_id) = self.scheduler.schedule() {
+                        self.load_fiber_state();
+                    } else {
+                        return Ok(Some(0)); // No more fibers
+                    }
+                }
+            }
+
+            Opcode::FiberId => {
+                let id = self.scheduler.current.unwrap_or(0);
+                self.stack.push(Value::Int(id as i64));
+            }
+
+            // Channel operations
+            Opcode::ChanNew => {
+                let capacity = self.pop()?;
+                let capacity = match capacity {
+                    Value::Int(n) => n as usize,
+                    _ => 0,
+                };
+                let channel_id = self.scheduler.create_channel(capacity);
+                self.stack.push(Value::Channel(channel_id));
+            }
+
+            Opcode::ChanSend => {
+                let value = self.pop()?;
+                let channel = self.pop()?;
+
+                match channel {
+                    Value::Channel(channel_id) => {
+                        if self.fiber_mode {
+                            match self.scheduler.channel_send(channel_id, value) {
+                                Ok(true) => {} // Sent immediately
+                                Ok(false) => {
+                                    // Blocked - need to switch fibers
+                                    if self.scheduler.schedule().is_some() {
+                                        self.load_fiber_state();
+                                    }
+                                }
+                                Err(e) => return Err(e),
+                            }
+                        } else {
+                            return Err("Channel send requires fiber mode".to_string());
+                        }
+                    }
+                    _ => return Err("Cannot send on non-channel".to_string()),
+                }
+            }
+
+            Opcode::ChanRecv => {
+                let channel = self.pop()?;
+
+                match channel {
+                    Value::Channel(channel_id) => {
+                        if self.fiber_mode {
+                            match self.scheduler.channel_receive(channel_id) {
+                                Ok(Some((value, ok))) => {
+                                    self.stack.push(value);
+                                    self.stack.push(Value::Bool(ok));
+                                }
+                                Ok(None) => {
+                                    // Blocked - switch fibers
+                                    if self.scheduler.schedule().is_some() {
+                                        self.load_fiber_state();
+                                    }
+                                }
+                                Err(e) => return Err(e),
+                            }
+                        } else {
+                            return Err("Channel receive requires fiber mode".to_string());
+                        }
+                    }
+                    _ => return Err("Cannot receive from non-channel".to_string()),
+                }
+            }
+
+            Opcode::ChanClose => {
+                let channel = self.pop()?;
+                match channel {
+                    Value::Channel(channel_id) => {
+                        self.scheduler.close_channel(channel_id)?;
+                    }
+                    _ => return Err("Cannot close non-channel".to_string()),
+                }
+            }
+
+            Opcode::ChanTryRecv => {
+                let channel = self.pop()?;
+                match channel {
+                    Value::Channel(channel_id) => {
+                        // Try non-blocking receive
+                        // Returns the value if available, or null otherwise
+                        if let Some(ch) = self.scheduler.channels.get_mut(&channel_id) {
+                            if let Some(value) = ch.buffer.pop_front() {
+                                self.stack.push(value);
+                            } else {
+                                self.stack.push(Value::Null);
+                            }
+                        } else {
+                            return Err("Invalid channel".to_string());
+                        }
+                    }
+                    _ => return Err("Cannot receive from non-channel".to_string()),
+                }
+            }
+
+            Opcode::Select => {
+                // Select is handled through codegen with ChanTryRecv
+                // This opcode exists for future optimization but isn't used currently
+            }
+
+            // Closure operations
+            Opcode::MakeClosure => {
+                let code_offset = self.read_u16()? as usize;
+                let capture_count = self.read_u8()? as usize;
+
+                // Pop captured values from stack (in reverse order)
+                let mut captures = Vec::with_capacity(capture_count);
+                for _ in 0..capture_count {
+                    captures.push(self.pop()?);
+                }
+                captures.reverse();
+
+                let closure = ClosureData {
+                    code_offset,
+                    captures,
+                };
+                self.stack.push(Value::Closure(Rc::new(closure)));
+            }
+
+            Opcode::LoadCapture => {
+                let capture_idx = self.read_u8()? as usize;
+
+                // Get captures from current call frame
+                if let Some(frame) = self.call_stack.last() {
+                    if let Some(ref closure) = frame.captures {
+                        if capture_idx < closure.captures.len() {
+                            self.stack.push(closure.captures[capture_idx].clone());
+                        } else {
+                            return Err(format!("Capture index {} out of bounds", capture_idx));
+                        }
+                    } else {
+                        return Err("LoadCapture outside of closure".to_string());
+                    }
+                } else {
+                    return Err("LoadCapture with no call frame".to_string());
+                }
+            }
+
+            Opcode::Halt => {
+                return Ok(Some(0));
+            }
+        }
         Ok(None)
     }
 
@@ -3600,31 +3604,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_string_interning() {
-        // Create a VM and verify string interning works
-        let program = make_program(vec![], vec![Opcode::Halt as u8]);
-        let mut vm = VM::new(program);
-
-        // Intern the same string multiple times
-        let s1 = vm.intern_string("hello".to_string());
-        let s2 = vm.intern_string("hello".to_string());
-        let s3 = vm.intern_string("world".to_string());
-
-        // Same content should return same Rc pointer
-        assert!(
-            Rc::ptr_eq(&s1, &s2),
-            "Interned strings should share same Rc"
-        );
-        assert!(
-            !Rc::ptr_eq(&s1, &s3),
-            "Different strings should not share Rc"
-        );
-
-        // Pool should have exactly 2 unique strings
-        assert_eq!(vm.string_pool.len(), 2);
-    }
-
     // ==========================================================================
     // Stepping Tests
     // ==========================================================================
@@ -3655,10 +3634,14 @@ mod tests {
         let program = make_program(
             vec![Value::Int(10), Value::Int(20)],
             vec![
-                Opcode::LoadConst as u8, 0, 0, // offset 0-2: Load 10
-                Opcode::LoadConst as u8, 1, 0, // offset 3-5: Load 20
-                Opcode::Add as u8,              // offset 6: Add
-                Opcode::Halt as u8,             // offset 7: Halt
+                Opcode::LoadConst as u8,
+                0,
+                0, // offset 0-2: Load 10
+                Opcode::LoadConst as u8,
+                1,
+                0,                  // offset 3-5: Load 20
+                Opcode::Add as u8,  // offset 6: Add
+                Opcode::Halt as u8, // offset 7: Halt
             ],
         );
         let mut vm = VM::new(program);
@@ -3711,16 +3694,20 @@ mod tests {
         let program = make_program_with_debug(
             vec![Value::Int(10), Value::Int(20)],
             vec![
-                Opcode::LoadConst as u8, 0, 0, // offset 0-2: Line 1
-                Opcode::LoadConst as u8, 1, 0, // offset 3-5: Line 2
-                Opcode::Add as u8,              // offset 6: Line 3
-                Opcode::Halt as u8,             // offset 7: Line 4
+                Opcode::LoadConst as u8,
+                0,
+                0, // offset 0-2: Line 1
+                Opcode::LoadConst as u8,
+                1,
+                0,                  // offset 3-5: Line 2
+                Opcode::Add as u8,  // offset 6: Line 3
+                Opcode::Halt as u8, // offset 7: Line 4
             ],
             vec![
-                (0, 3, 1, 1),  // LoadConst on line 1 (offsets 0-2)
-                (3, 6, 2, 1),  // LoadConst on line 2 (offsets 3-5)
-                (6, 7, 3, 1),  // Add on line 3 (offset 6)
-                (7, 8, 4, 1),  // Halt on line 4 (offset 7)
+                (0, 3, 1, 1), // LoadConst on line 1 (offsets 0-2)
+                (3, 6, 2, 1), // LoadConst on line 2 (offsets 3-5)
+                (6, 7, 3, 1), // Add on line 3 (offset 6)
+                (7, 8, 4, 1), // Halt on line 4 (offset 7)
             ],
         );
         let mut vm = VM::new(program);
@@ -3751,7 +3738,9 @@ mod tests {
         let program = make_program(
             vec![Value::Int(42)],
             vec![
-                Opcode::LoadConst as u8, 0, 0,
+                Opcode::LoadConst as u8,
+                0,
+                0,
                 Opcode::Pop as u8,
                 Opcode::Halt as u8,
             ],
@@ -3769,17 +3758,16 @@ mod tests {
         let program = make_program_with_debug(
             vec![Value::Int(10), Value::Int(20)],
             vec![
-                Opcode::LoadConst as u8, 0, 0, // Line 1
-                Opcode::LoadConst as u8, 1, 0, // Line 2
-                Opcode::Add as u8,              // Line 3
-                Opcode::Halt as u8,             // Line 4
+                Opcode::LoadConst as u8,
+                0,
+                0, // Line 1
+                Opcode::LoadConst as u8,
+                1,
+                0,                  // Line 2
+                Opcode::Add as u8,  // Line 3
+                Opcode::Halt as u8, // Line 4
             ],
-            vec![
-                (0, 3, 1, 1),
-                (3, 6, 2, 1),
-                (6, 7, 3, 1),
-                (7, 8, 4, 1),
-            ],
+            vec![(0, 3, 1, 1), (3, 6, 2, 1), (6, 7, 3, 1), (7, 8, 4, 1)],
         );
         let mut vm = VM::new(program);
         vm.prepare();
@@ -3807,9 +3795,13 @@ mod tests {
             vec![Value::Int(1)],
             vec![
                 // Simple loop that runs forever without pause
-                Opcode::LoadConst as u8, 0, 0, // Load 1
-                Opcode::Pop as u8,              // Pop it
-                Opcode::Jump as u8, 0, 0,       // Jump back to start
+                Opcode::LoadConst as u8,
+                0,
+                0,                 // Load 1
+                Opcode::Pop as u8, // Pop it
+                Opcode::Jump as u8,
+                0,
+                0, // Jump back to start
             ],
         );
         let mut vm = VM::new(program);
@@ -3828,10 +3820,7 @@ mod tests {
     fn test_execution_state_transitions() {
         let program = make_program(
             vec![Value::Int(42)],
-            vec![
-                Opcode::LoadConst as u8, 0, 0,
-                Opcode::Halt as u8,
-            ],
+            vec![Opcode::LoadConst as u8, 0, 0, Opcode::Halt as u8],
         );
         let mut vm = VM::new(program);
 
@@ -3852,15 +3841,15 @@ mod tests {
         let program = make_program_with_debug(
             vec![Value::Int(42), Value::Int(100)],
             vec![
-                Opcode::LoadConst as u8, 0, 0, // Line 1
-                Opcode::LoadConst as u8, 1, 0, // Line 2
-                Opcode::Halt as u8,             // Line 3
+                Opcode::LoadConst as u8,
+                0,
+                0, // Line 1
+                Opcode::LoadConst as u8,
+                1,
+                0,                  // Line 2
+                Opcode::Halt as u8, // Line 3
             ],
-            vec![
-                (0, 3, 1, 1),
-                (3, 6, 2, 1),
-                (6, 7, 3, 1),
-            ],
+            vec![(0, 3, 1, 1), (3, 6, 2, 1), (6, 7, 3, 1)],
         );
         let mut vm = VM::new(program);
         vm.prepare();

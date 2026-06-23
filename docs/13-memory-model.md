@@ -27,6 +27,12 @@
 
 ### 1.1 Memory Management Strategy
 
+> **Implementation status:** The current VM provides ARC via the host runtime's
+> reference counting (Rust `Rc`). The **cycle detector described below is
+> specified but not yet implemented** — there is no separate cycle-collecting GC
+> module in the runtime today. Programs that form reference cycles will leak
+> until a collector is added.
+
 Lira uses **Automatic Reference Counting (ARC)** with **cycle detection** for memory management:
 
 ```

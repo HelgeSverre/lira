@@ -4,7 +4,6 @@
 //!
 //! Components:
 //! - VM: The bytecode interpreter
-//! - Memory: ARC-based heap management
 //! - Fiber: Green thread scheduler
 //! - Runtime: Built-in functions and syscall bindings
 //! - Value: Runtime value types
@@ -13,7 +12,6 @@ pub mod bytecode;
 pub mod debug;
 pub mod debug_session;
 pub mod fiber;
-pub mod memory;
 pub mod runtime;
 pub mod value;
 pub mod vm;
@@ -81,10 +79,7 @@ pub fn run_with_debug(bytecode: &[u8]) -> Result<i32, String> {
 
 /// Run bytecode with output streaming callback
 /// Returns (exit_code, final_snapshot)
-pub fn run_with_streaming<F>(
-    bytecode: &[u8],
-    on_output: F,
-) -> Result<(i32, VmSnapshot), String>
+pub fn run_with_streaming<F>(bytecode: &[u8], on_output: F) -> Result<(i32, VmSnapshot), String>
 where
     F: FnMut(&str) + Send + 'static,
 {
