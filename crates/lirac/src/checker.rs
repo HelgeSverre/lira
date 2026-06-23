@@ -65,10 +65,13 @@ pub enum Type {
     Any,
 
     // Generic type parameter (e.g., T in fn identity<T>)
-    // TODO: Implement monomorphization for proper generics codegen.
-    // Currently using type erasure - TypeParam becomes Any at runtime.
-    // Monomorphization would generate specialized versions for each concrete type.
-    // See docs/lira/ROADMAP.md Phase 7 for details.
+    //
+    // Runtime model: TYPE ERASURE. This is the intended, supported strategy —
+    // not a placeholder for monomorphization. A `TypeParam` is checked at the
+    // type level (including its trait bounds, e.g. `T: Numeric`) and then erased
+    // to a uniform runtime representation (`Any`) during codegen. There is a
+    // single bytecode version of each generic function, shared by all concrete
+    // type arguments. See docs/lira/ROADMAP.md for the generics design.
     TypeParam(String),
 }
 
@@ -840,7 +843,14 @@ impl Default for TypeEnv {
     }
 }
 
-/// Represents a specific instantiation of a generic function
+/// Represents a specific instantiation of a generic function.
+///
+/// UNUSED INFRA: Lira's generics use type erasure at runtime (see
+/// `Type::TypeParam`), so codegen emits a single shared body per generic
+/// function and never reads instantiation records. This type and the
+/// `TypeChecker::generic_instantiations` set are retained only as scaffolding
+/// for a *possible* future monomorphizing backend; nothing in the live
+/// compilation pipeline consumes them. They are exercised solely by unit tests.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct GenericInstantiation {
     /// The name of the generic function
@@ -858,7 +868,12 @@ impl GenericInstantiation {
         }
     }
 
-    /// Generate a mangled name for this instantiation
+    /// Generate a mangled name for this instantiation.
+    ///
+    /// UNUSED INFRA: would be the symbol name for a monomorphized specialization.
+    /// Under the current type-erasure model no specializations are emitted, so
+    /// this is only called from tests. Kept for a future monomorphizing backend.
+    #[allow(dead_code)]
     pub fn mangled_name(&self) -> String {
         if self.type_args.is_empty() {
             self.function_name.clone()
@@ -886,7 +901,12 @@ pub struct TypeChecker {
     current_type_name: Option<String>, // For resolving Self type in struct/class methods
     /// Current generic type parameters with their bounds (e.g., T -> [Eq, Hash])
     current_type_params: HashMap<String, Vec<String>>,
-    /// All instantiations of generic functions discovered during type checking
+    /// All instantiations of generic functions discovered during type checking.
+    ///
+    /// UNUSED INFRA: populated as a side effect of checking generic calls but
+    /// never read by codegen (generics are type-erased, not monomorphized).
+    /// Retained as scaffolding for a future monomorphizing backend and asserted
+    /// on by unit tests. See [`GenericInstantiation`].
     pub generic_instantiations: HashSet<GenericInstantiation>,
     /// Semantic tables being built during checking
     pub sema: SemanticTables,
@@ -922,12 +942,29 @@ impl TypeChecker {
     }
 
     /// Check if a type parameter has a specific bound (trait)
-    #[allow(dead_code)]
     fn type_param_has_bound(&self, type_param: &str, bound: &str) -> bool {
         self.current_type_params
             .get(type_param)
             .map(|bounds| bounds.iter().any(|b| b == bound))
             .unwrap_or(false)
+    }
+
+    /// Check whether a type is a type parameter carrying at least one of the
+    /// given trait bounds. Used to permit operations on bounded generics
+    /// (e.g. `T: Numeric` may use arithmetic) while still rejecting unbounded
+    /// type parameters.
+    fn type_param_satisfies_any_bound(&self, ty: &Type, bounds: &[&str]) -> bool {
+        match ty {
+            Type::TypeParam(name) => bounds.iter().any(|b| self.type_param_has_bound(name, b)),
+            _ => false,
+        }
+    }
+
+    /// True if a type is an unbounded type parameter (or a type parameter that
+    /// lacks every one of the supplied bounds) and therefore cannot support the
+    /// requested operation.
+    fn is_unsatisfied_type_param(&self, ty: &Type, bounds: &[&str]) -> bool {
+        ty.is_type_param() && !self.type_param_satisfies_any_bound(ty, bounds)
     }
 
     pub fn check_program(&mut self, program: &Program) -> Result<CheckedProgram, String> {
@@ -965,13 +1002,18 @@ impl TypeChecker {
                 .collect();
             Err(all_errors.join("\n"))
         } else {
-            // Transfer generic instantiations to sema
+            // UNUSED INFRA: mirror the discovered instantiations into the
+            // semantic tables. Codegen never reads `sema.generic_instantiations`
+            // because generics are type-erased rather than monomorphized; this
+            // copy exists only so the scaffolding stays consistent for a possible
+            // future monomorphizing backend. (`concrete_type` is intentionally
+            // left as `Unknown` — no consumer needs it.)
             for inst in &self.generic_instantiations {
                 self.sema
                     .generic_instantiations
                     .push(crate::sema::GenericInstantiation {
                         generic_name: inst.function_name.clone(),
-                        concrete_type: Type::Unknown, // TODO: Store actual type
+                        concrete_type: Type::Unknown,
                     });
             }
             Ok(CheckedProgram {
@@ -1967,8 +2009,24 @@ impl TypeChecker {
                         // String concatenation is always allowed (toString works on any type)
                         if *op == BinaryOp::Add && left_type == Type::String {
                             Type::String
-                        // Reject unconstrained type parameters for arithmetic
-                        } else if left_type.is_type_param() || right_type.is_type_param() {
+                        // Bound-aware: a `Numeric`-bounded type parameter may use
+                        // arithmetic. The result keeps the generic type so that
+                        // `fn add<T: Numeric>(a: T, b: T) -> T { return a + b }`
+                        // checks against its declared return type.
+                        } else if self.type_param_satisfies_any_bound(&left_type, &["Numeric"])
+                            && (right_type == left_type
+                                || self.type_param_satisfies_any_bound(&right_type, &["Numeric"])
+                                || right_type.is_numeric())
+                        {
+                            left_type
+                        } else if self.type_param_satisfies_any_bound(&right_type, &["Numeric"])
+                            && left_type.is_numeric()
+                        {
+                            right_type
+                        // Reject unconstrained (or non-Numeric) type parameters for arithmetic
+                        } else if self.is_unsatisfied_type_param(&left_type, &["Numeric"])
+                            || self.is_unsatisfied_type_param(&right_type, &["Numeric"])
+                        {
                             self.env.error(
                                 &expr.span,
                                 format!(
@@ -1996,8 +2054,21 @@ impl TypeChecker {
                     }
                     BinaryOp::Eq | BinaryOp::Ne => Type::Bool,
                     BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => {
-                        // Reject unconstrained type parameters for comparison
-                        if left_type.is_type_param() || right_type.is_type_param() {
+                        // Bound-aware: a `Comparable` (or `Ord`) bounded type
+                        // parameter may use ordering comparisons.
+                        let ordering_bounds = ["Comparable", "Ord"];
+                        let left_ordered =
+                            self.type_param_satisfies_any_bound(&left_type, &ordering_bounds);
+                        let right_ordered =
+                            self.type_param_satisfies_any_bound(&right_type, &ordering_bounds);
+
+                        if left_ordered || right_ordered {
+                            // Permitted: at least one operand is an ordering-bounded
+                            // type parameter. The other must be compatible (the same
+                            // type parameter or numeric).
+                        } else if self.is_unsatisfied_type_param(&left_type, &ordering_bounds)
+                            || self.is_unsatisfied_type_param(&right_type, &ordering_bounds)
+                        {
                             self.env.error(
                                 &expr.span,
                                 format!(
@@ -2031,8 +2102,20 @@ impl TypeChecker {
                     | BinaryOp::Shl
                     | BinaryOp::Shr
                     | BinaryOp::UShr => {
-                        // Reject unconstrained type parameters for bitwise ops
-                        if left_type.is_type_param() || right_type.is_type_param() {
+                        // Bound-aware: a `Numeric`-bounded type parameter may use
+                        // bitwise operators.
+                        let bitwise_bounds = ["Numeric"];
+                        let left_ok =
+                            self.type_param_satisfies_any_bound(&left_type, &bitwise_bounds);
+                        let right_ok =
+                            self.type_param_satisfies_any_bound(&right_type, &bitwise_bounds);
+
+                        if left_ok || right_ok {
+                            // Permitted: at least one operand is a Numeric-bounded
+                            // type parameter.
+                        } else if self.is_unsatisfied_type_param(&left_type, &bitwise_bounds)
+                            || self.is_unsatisfied_type_param(&right_type, &bitwise_bounds)
+                        {
                             self.env.error(
                                 &expr.span,
                                 "Cannot use bitwise operators on unconstrained generic types"
@@ -5719,6 +5802,119 @@ mod tests {
 
         let inst2 = GenericInstantiation::new("map".to_string(), &[Type::String, Type::Int]);
         assert_eq!(inst2.mangled_name(), "map$string$int");
+    }
+
+    // ========================================================================
+    // Bound-aware operations on type parameters
+    // ========================================================================
+
+    #[test]
+    fn numeric_bound_allows_arithmetic_on_type_param() {
+        let result = check_source(
+            r#"
+            fn add<T: Numeric>(a: T, b: T) -> T {
+                return a + b
+            }
+            "#,
+        );
+        assert!(
+            result.is_ok(),
+            "arithmetic on a Numeric-bounded type param should type-check, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn unbounded_type_param_rejects_arithmetic() {
+        let result = check_source(
+            r#"
+            fn add<T>(a: T, b: T) -> T {
+                return a + b
+            }
+            "#,
+        );
+        assert!(
+            result.is_err(),
+            "arithmetic on an unbounded type param should still be rejected"
+        );
+    }
+
+    #[test]
+    fn comparable_bound_allows_ordering_on_type_param() {
+        let result = check_source(
+            r#"
+            fn less<T: Comparable>(a: T, b: T) -> bool {
+                return a < b
+            }
+            "#,
+        );
+        assert!(
+            result.is_ok(),
+            "ordering on a Comparable-bounded type param should type-check, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn ord_bound_allows_ordering_on_type_param() {
+        let result = check_source(
+            r#"
+            fn less<T: Ord>(a: T, b: T) -> bool {
+                return a < b
+            }
+            "#,
+        );
+        assert!(
+            result.is_ok(),
+            "ordering on an Ord-bounded type param should type-check, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn unbounded_type_param_rejects_ordering() {
+        let result = check_source(
+            r#"
+            fn less<T>(a: T, b: T) -> bool {
+                return a < b
+            }
+            "#,
+        );
+        assert!(
+            result.is_err(),
+            "ordering on an unbounded type param should still be rejected"
+        );
+    }
+
+    #[test]
+    fn numeric_bound_allows_bitwise_on_type_param() {
+        let result = check_source(
+            r#"
+            fn bor<T: Numeric>(a: T, b: T) -> T {
+                return a | b
+            }
+            "#,
+        );
+        assert!(
+            result.is_ok(),
+            "bitwise on a Numeric-bounded type param should type-check, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn unbounded_type_param_rejects_bitwise() {
+        let result = check_source(
+            r#"
+            fn bor<T>(a: T, b: T) -> T {
+                return a | b
+            }
+            "#,
+        );
+        assert!(
+            result.is_err(),
+            "bitwise on an unbounded type param should still be rejected"
+        );
     }
 
     #[test]

@@ -32,7 +32,11 @@ pub struct SemanticTables {
     /// Field resolution (which field was accessed?)
     pub field_resolution: HashMap<NodeId, FieldResolution>,
 
-    /// Generic instantiations
+    /// Generic instantiations.
+    ///
+    /// UNUSED INFRA: never read by codegen. Generics are type-erased, so a single
+    /// shared body is emitted per generic function. Retained as scaffolding for a
+    /// future monomorphizing backend; see `checker::GenericInstantiation`.
     pub generic_instantiations: Vec<GenericInstantiation>,
 }
 
@@ -106,7 +110,10 @@ pub struct FieldResolution {
     pub resolved_type: Type,
 }
 
-/// A generic instantiation that was created during type checking
+/// A generic instantiation that was created during type checking.
+///
+/// UNUSED INFRA: see [`SemanticTables::generic_instantiations`]. Recorded but not
+/// consumed under the type-erasure runtime model.
 #[derive(Debug, Clone)]
 pub struct GenericInstantiation {
     pub generic_name: String,
