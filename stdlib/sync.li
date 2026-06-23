@@ -143,9 +143,11 @@ impl WaitGroup {
     fn wait(self, n: int) {
         var got = 0
         while got < n {
+            // Blocking select (no default arm) so a WaitGroup that never
+            // reaches `n` is caught by the scheduler's deadlock detector
+            // instead of busy-spinning the fiber at 100% CPU.
             select {
                 <-self.tokens => { got = got + 1 }
-                _ => fiber_yield()
             }
         }
     }

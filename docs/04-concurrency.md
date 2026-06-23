@@ -78,6 +78,16 @@ Fibers yield control at:
 
 ## 2. Fibers (Green Threads)
 
+> **Implementation status (as of this branch).** What actually works today:
+> `spawn <function-call>` (e.g. `spawn worker(ch)`) schedules a fiber, and
+> coordination is done with **channels** (`chan`, `send`, `recv`) and `select`
+> (see §3–§4). The richer fiber-handle API described in §2.1–§2.5 below —
+> `spawn { block }`, `handle.join()` / `join_timeout()`, `fiber.result()`,
+> `fiber.is_completed()`, `fiber.cancel()` / `is_cancelled()`, named fibers, and
+> fiber-local storage — is **NOT implemented**; treat those subsections as a
+> design sketch. To wait for spawned work, use a channel or `std.sync.WaitGroup`
+> (§5). `fiber_yield()` (§2.6) and deadlock detection do work.
+
 ### 2.1 Spawn Expression
 
 The `spawn` keyword creates a new fiber:
