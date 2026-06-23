@@ -1,0 +1,30 @@
+// Exhaustiveness checking accepts matches that cover all variants, and matches
+// that use a wildcard catch-all.
+// @expect: red
+// @expect: covered
+
+enum Color {
+    Red,
+    Green,
+    Blue
+}
+
+// All variants covered explicitly.
+fn describe(c: Color) -> string {
+    return match c {
+        Color::Red => "red"
+        Color::Green => "green"
+        Color::Blue => "blue"
+    }
+}
+
+// Wildcard catch-all makes a partial match exhaustive.
+fn covered(c: Color) -> string {
+    return match c {
+        Color::Red => "covered"
+        _ => "other"
+    }
+}
+
+println(describe(Color::Red))
+println(covered(Color::Red))

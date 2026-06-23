@@ -1,0 +1,18 @@
+// A match over an enum that omits a variant with no wildcard must be rejected
+// at compile time (exhaustiveness checking).
+// @expect-error
+
+enum Color {
+    Red,
+    Green,
+    Blue
+}
+
+fn describe(c: Color) -> string {
+    return match c {
+        Color::Red => "red"
+        Color::Green => "green"
+    }
+}
+
+println(describe(Color::Blue))

@@ -2700,6 +2700,8 @@ impl TypeChecker {
                     }
                 }
 
+                self.check_match_exhaustiveness(&subject_type, arms, &expr.span);
+
                 first_arm_type.unwrap_or(Type::Unknown)
             }
 
@@ -3019,6 +3021,85 @@ impl TypeChecker {
     }
 
     /// Bind pattern variables to the environment with their types
+    /// Enforce exhaustiveness for `match` expressions whose scrutinee is a
+    /// known, closed enum. A wildcard `_` or a bare variable / `@`-binding arm
+    /// (with no sub-structure) is a catch-all and makes the match exhaustive.
+    /// Non-enum scrutinees (ints, strings, tuples, structs, ...) are not checked
+    /// here, so this never false-positives on them.
+    fn check_match_exhaustiveness(&mut self, subject_type: &Type, arms: &[MatchArm], span: &Span) {
+        // Only enforce for enum scrutinees with a known, closed variant set.
+        let enum_name = match subject_type {
+            Type::Enum(name) => name.clone(),
+            _ => return,
+        };
+        let all_variants: Vec<String> = match self.env.lookup_type(&enum_name) {
+            Some(td) => match &td.kind {
+                TypeDefKind::Enum { variants } => variants.iter().map(|(n, _)| n.clone()).collect(),
+                _ => return,
+            },
+            None => return,
+        };
+
+        let mut covered: HashSet<String> = HashSet::new();
+        for arm in arms {
+            // A guarded arm never guarantees coverage of its variant.
+            if arm.guard.is_some() {
+                continue;
+            }
+            if Self::pattern_is_catch_all(&arm.pattern) {
+                // Catch-all arm: the match is exhaustive regardless of variants.
+                return;
+            }
+            Self::collect_covered_variants(&arm.pattern, &enum_name, &mut covered);
+        }
+
+        let missing: Vec<String> = all_variants
+            .into_iter()
+            .filter(|v| !covered.contains(v))
+            .collect();
+
+        if !missing.is_empty() {
+            self.env.record_error(CheckerError::NonExhaustiveMatch {
+                enum_name,
+                missing,
+                span: span.clone(),
+            });
+        }
+    }
+
+    /// Whether a pattern unconditionally matches any value (wildcard `_`, a bare
+    /// variable binding, or an `@`-binding wrapping a catch-all).
+    fn pattern_is_catch_all(pattern: &Pattern) -> bool {
+        match &pattern.kind {
+            PatternKind::Wildcard | PatternKind::Variable(_) => true,
+            PatternKind::Binding { pattern, .. } => Self::pattern_is_catch_all(pattern),
+            PatternKind::Or(patterns) => patterns.iter().any(Self::pattern_is_catch_all),
+            _ => false,
+        }
+    }
+
+    /// Record which enum variants of `enum_name` a pattern covers. Constructor
+    /// patterns may be qualified (`Color::Red`) or bare (`Red`).
+    fn collect_covered_variants(pattern: &Pattern, enum_name: &str, covered: &mut HashSet<String>) {
+        match &pattern.kind {
+            PatternKind::Constructor { name, .. } => {
+                let variant = name
+                    .strip_prefix(&format!("{}::", enum_name))
+                    .unwrap_or(name);
+                covered.insert(variant.to_string());
+            }
+            PatternKind::Binding { pattern, .. } => {
+                Self::collect_covered_variants(pattern, enum_name, covered);
+            }
+            PatternKind::Or(patterns) => {
+                for p in patterns {
+                    Self::collect_covered_variants(p, enum_name, covered);
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn bind_pattern_variables(&mut self, pattern: &Pattern, subject_type: &Type) {
         match &pattern.kind {
             PatternKind::Variable(name) => {
@@ -4071,6 +4152,89 @@ mod tests {
                 1 => "one"
                 2 => "two"
                 _ => "other"
+            }
+            "#
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn test_match_exhaustive_all_variants_ok() {
+        assert!(check_source(
+            r#"
+            enum Color { Red, Green, Blue }
+            fn f(c: Color) -> string {
+                return match c {
+                    Color::Red => "r"
+                    Color::Green => "g"
+                    Color::Blue => "b"
+                }
+            }
+            "#
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn test_match_exhaustive_wildcard_ok() {
+        assert!(check_source(
+            r#"
+            enum Color { Red, Green, Blue }
+            fn f(c: Color) -> string {
+                return match c {
+                    Color::Red => "r"
+                    _ => "other"
+                }
+            }
+            "#
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn test_match_exhaustive_variable_catchall_ok() {
+        assert!(check_source(
+            r#"
+            enum Color { Red, Green, Blue }
+            fn f(c: Color) -> string {
+                return match c {
+                    Color::Red => "r"
+                    other => "other"
+                }
+            }
+            "#
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn test_match_non_exhaustive_enum_error() {
+        let result = check_source(
+            r#"
+            enum Color { Red, Green, Blue }
+            fn f(c: Color) -> string {
+                return match c {
+                    Color::Red => "r"
+                    Color::Green => "g"
+                }
+            }
+            "#,
+        );
+        assert!(result.is_err());
+        let msg = result.unwrap_err();
+        assert!(msg.contains("not exhaustive"), "got: {msg}");
+        assert!(msg.contains("Blue"), "got: {msg}");
+    }
+
+    #[test]
+    fn test_match_non_enum_not_flagged() {
+        // Integer match without wildcard is fine (not an enum scrutinee).
+        assert!(check_source(
+            r#"
+            let x = 5
+            let r = match x {
+                1 => "one"
+                2 => "two"
             }
             "#
         )

@@ -168,6 +168,13 @@ pub enum CheckerError {
         name: String,
         span: Span,
     },
+    /// A `match` over an enum scrutinee does not cover all variants and has no
+    /// wildcard / catch-all arm.
+    NonExhaustiveMatch {
+        enum_name: String,
+        missing: Vec<String>,
+        span: Span,
+    },
     GenericError {
         message: String,
         span: Span,
@@ -203,6 +210,7 @@ impl CheckerError {
             | Self::CannotIndex { span, .. }
             | Self::CannotAccessField { span, .. }
             | Self::UnknownEnum { span, .. }
+            | Self::NonExhaustiveMatch { span, .. }
             | Self::GenericError { span, .. } => span,
         }
     }
@@ -332,6 +340,15 @@ impl CheckerError {
                 format!("Cannot access field on type: '{}'", ty.display_name())
             }
             Self::UnknownEnum { name, .. } => format!("Unknown enum: {}", name),
+            Self::NonExhaustiveMatch {
+                enum_name, missing, ..
+            } => {
+                format!(
+                    "Match on enum '{}' is not exhaustive: missing variant(s) {}. Add the missing arm(s) or a wildcard '_' arm.",
+                    enum_name,
+                    missing.join(", ")
+                )
+            }
             Self::GenericError { message, .. } => message.clone(),
         }
     }
