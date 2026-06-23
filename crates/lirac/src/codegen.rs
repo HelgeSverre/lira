@@ -180,6 +180,10 @@ pub struct CodeGenerator {
     module_consts: HashMap<String, u16>,
     /// Impl methods for all types: type_name -> {method_name -> mangled_function_name}
     impl_methods: HashMap<String, HashMap<String, String>>,
+    /// Declared return types of impl methods: type_name -> {method_name -> return type display}.
+    /// Used so chained method calls (e.g. `self.sort().reverse()`) can recover the
+    /// receiver type of the outer call and dispatch via the typed-impl path.
+    impl_method_returns: HashMap<String, HashMap<String, String>>,
     /// Semantic tables produced by the type checker (authoritative expression types).
     sema: SemanticTables,
 }
@@ -235,6 +239,7 @@ impl CodeGenerator {
             function_defaults: HashMap::new(),
             module_consts: HashMap::new(),
             impl_methods: HashMap::new(),
+            impl_method_returns: HashMap::new(),
             sema: SemanticTables::new(),
         }
     }
@@ -284,7 +289,13 @@ impl CodeGenerator {
                 } => {
                     // Collect impl methods with mangled names
                     for method in methods {
-                        if let StatementKind::FnDecl { name, params, .. } = &method.kind {
+                        if let StatementKind::FnDecl {
+                            name,
+                            params,
+                            return_type,
+                            ..
+                        } = &method.kind
+                        {
                             let mangled_name = format!("{}_{}", type_name, name);
                             self.functions.push(FunctionInfo {
                                 name: mangled_name.clone(),
@@ -297,6 +308,15 @@ impl CodeGenerator {
                                 .entry(type_name.clone())
                                 .or_default()
                                 .insert(name.clone(), mangled_name);
+                            // Track the declared return type so chained method
+                            // calls can recover the intermediate receiver type.
+                            if let Some(ret) = return_type {
+                                let ret_name = self.type_expr_to_string(ret);
+                                self.impl_method_returns
+                                    .entry(type_name.clone())
+                                    .or_default()
+                                    .insert(name.clone(), ret_name);
+                            }
                         }
                     }
                 }
@@ -3104,6 +3124,21 @@ impl CodeGenerator {
                 }
                 _ => None,
             },
+            // A method call `recv.method(..)` parses as a Call with a FieldAccess
+            // callee. Recover its result type from the method's declared return
+            // type so chained calls dispatch via the typed-impl path rather than
+            // falling back to the Object/GetField path (which fails on arrays).
+            ExpressionKind::Call { callee, .. } => {
+                if let ExpressionKind::FieldAccess { object, field } = &callee.kind {
+                    let recv_type = self.expr_type_name(object)?;
+                    self.impl_method_returns
+                        .get(&recv_type)
+                        .and_then(|m| m.get(field))
+                        .cloned()
+                } else {
+                    None
+                }
+            }
             _ => None,
         }
     }

@@ -301,6 +301,9 @@ example_test!(test_env_module, "test_env.li");
 example_test!(test_uuid_module, "test_uuid.li");
 example_test!(test_http_module, "test_http.li");
 example_test!(test_regex_module, "test_regex.li");
+example_test!(test_core_module, "test_core.li");
+example_test!(test_io_module, "test_io.li");
+example_test!(test_collections_deep_module, "test_collections_deep.li");
 
 // std.sync concurrency primitives (Mutex, WaitGroup, Semaphore)
 example_test!(test_sync_mutex_waitgroup, "sync_mutex_waitgroup.li");

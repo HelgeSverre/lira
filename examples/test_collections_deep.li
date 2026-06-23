@@ -1,0 +1,129 @@
+// Collections Module Deep Tests
+// Exhaustive deterministic coverage for std.collections beyond the basic
+// test_collections.li: int/float/string arrays, flatten, sort_desc,
+// range_step, slice, concat, average, take/skip edge cases.
+// @expect-contains: int map_double passed
+// @expect-contains: int map_square passed
+// @expect-contains: int product passed
+// @expect-contains: int filter passed
+// @expect-contains: int index/count passed
+// @expect-contains: int slice passed
+// @expect-contains: int concat passed
+// @expect-contains: int take/skip edges passed
+// @expect-contains: int sort_desc passed
+// @expect-contains: int boolean ops passed
+// @expect-contains: flatten passed
+// @expect-contains: float sum passed
+// @expect-contains: float sort passed
+// @expect-contains: float min/max passed
+// @expect-contains: float reverse passed
+// @expect-contains: string array passed
+// @expect-contains: range_step passed
+// @expect-contains: All collections deep tests passed
+
+import std.collections
+
+println("=== Collections Deep Tests ===")
+
+// ---- int transforms ----
+let dbl = [1, 2, 3].map_double()
+if dbl[0] == 2 && dbl[1] == 4 && dbl[2] == 6 {
+    println("int map_double passed")
+}
+let sq = [2, 3, 4].map_square()
+if sq[0] == 4 && sq[1] == 9 && sq[2] == 16 {
+    println("int map_square passed")
+}
+
+// ---- product ----
+if [1, 2, 3, 4].product() == 24 {
+    println("int product passed")
+}
+
+// ---- filters ----
+let pos = [-2, -1, 0, 1, 2].filter_positive()
+let odd = [1, 2, 3, 4, 5].filter_odd()
+if len(pos) == 2 && pos[0] == 1 && pos[1] == 2 && len(odd) == 3 && odd[0] == 1 && odd[2] == 5 {
+    println("int filter passed")
+}
+
+// ---- index_of / count ----
+let data = [10, 20, 20, 30]
+if data.index_of(20) == 1 && data.index_of(99) == -1 && data.count(20) == 2 {
+    println("int index/count passed")
+}
+
+// ---- slice ----
+let sl = [0, 1, 2, 3, 4, 5].slice(1, 4)
+if len(sl) == 3 && sl[0] == 1 && sl[2] == 3 {
+    println("int slice passed")
+}
+
+// ---- concat ----
+let cc = [1, 2].concat([3, 4])
+if len(cc) == 4 && cc[0] == 1 && cc[3] == 4 {
+    println("int concat passed")
+}
+
+// ---- take/skip edges (n > len, n == 0) ----
+let t_over = [1, 2].take(10)
+let s_over = [1, 2].skip(10)
+let t_zero = [1, 2, 3].take(0)
+if len(t_over) == 2 && len(s_over) == 0 && len(t_zero) == 0 {
+    println("int take/skip edges passed")
+}
+
+// ---- sort_desc ----
+let sd = [3, 1, 2].sort_desc()
+if sd[0] == 3 && sd[1] == 2 && sd[2] == 1 {
+    println("int sort_desc passed")
+}
+
+// ---- boolean ops ----
+let all_nz = [1, 2, 3].all_truthy()
+let has_nz = [0, 0, 5].any_truthy()
+let none = [0, 0, 0].none_truthy()
+if all_nz && has_nz && none {
+    println("int boolean ops passed")
+}
+
+// ---- flatten ----
+let flat = [[1, 2], [3], [4, 5, 6]].flatten()
+if len(flat) == 6 && flat[0] == 1 && flat[5] == 6 {
+    println("flatten passed")
+}
+
+// ---- float arrays ----
+let fsum = [1.5, 2.5, 1.0].sum()
+if fsum > 4.99 && fsum < 5.01 {
+    println("float sum passed")
+}
+let fsorted = [3.0, 1.0, 2.0].sort()
+if fsorted[0] == 1.0 && fsorted[1] == 2.0 && fsorted[2] == 3.0 {
+    println("float sort passed")
+}
+let fmin = [2.0, -1.0, 5.0].min()
+let fmax = [2.0, -1.0, 5.0].max()
+if fmin == -1.0 && fmax == 5.0 {
+    println("float min/max passed")
+}
+let frev = [1.0, 2.0, 3.0].reverse()
+if frev[0] == 3.0 && frev[2] == 1.0 {
+    println("float reverse passed")
+}
+
+// ---- string arrays ----
+let words = ["a", "b", "c", "b"]
+let wrev = words.reverse()
+if words.contains("b") && !words.contains("z") && words.index_of("c") == 2 && wrev[0] == "b" && wrev[3] == "a" {
+    println("string array passed")
+}
+
+// ---- range_step ----
+let evens = range_step(0, 10, 2)
+let down = range_step(5, 0, -1)
+if len(evens) == 5 && evens[0] == 0 && evens[4] == 8 && len(down) == 5 && down[0] == 5 && down[4] == 1 {
+    println("range_step passed")
+}
+
+println("All collections deep tests passed")

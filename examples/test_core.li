@@ -1,0 +1,42 @@
+// Core Module Tests
+// Deterministic tests for std.core: int.abs, int.clamp, min, max.
+// @expect-contains: abs neg: 5
+// @expect-contains: abs pos: 5
+// @expect-contains: abs zero: 0
+// @expect-contains: clamp below: 0
+// @expect-contains: clamp above: 10
+// @expect-contains: clamp inside: 5
+// @expect-contains: clamp at-min: 0
+// @expect-contains: clamp at-max: 10
+// @expect-contains: min: 3
+// @expect-contains: max: 9
+// @expect-contains: min equal: 7
+// @expect-contains: nested abs+clamp: 7
+// @expect-contains: All core tests passed
+
+import std.core
+
+println("=== Core Module Tests ===")
+
+// int.abs
+println("abs neg: " + (-5).abs())
+println("abs pos: " + (5).abs())
+println("abs zero: " + (0).abs())
+
+// int.clamp
+println("clamp below: " + (-3).clamp(0, 10))
+println("clamp above: " + (42).clamp(0, 10))
+println("clamp inside: " + (5).clamp(0, 10))
+println("clamp at-min: " + (0).clamp(0, 10))
+println("clamp at-max: " + (10).clamp(0, 10))
+
+// min / max
+println("min: " + min(3, 9))
+println("max: " + max(3, 9))
+println("min equal: " + min(7, 7))
+
+// composed: abs of a negative, then clamp into range
+let v = (-100).abs().clamp(0, 7)
+println("nested abs+clamp: " + v)
+
+println("All core tests passed")

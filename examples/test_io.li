@@ -1,0 +1,48 @@
+// I/O Module Tests
+// Deterministic tests for std.io. Time-based helpers (now_ms) are tested
+// for monotonic/structural properties only, never absolute values.
+//
+// NOTE: the VM has a single Print opcode, so under run_with_capture both
+// print()/print_str() and println()/print_line() yield ONE output entry per
+// call (no in-line concatenation is observable in capture mode). Tests below
+// therefore assert one logical line per call.
+// @expect-contains: line one
+// @expect-contains: part-1
+// @expect-contains: part-2
+// @expect-contains: [DEBUG] count: 42
+// @expect-contains: [ASSERT FAILED] this should fire
+// @expect-contains: prefix: A B C
+// @expect-contains: now_ms non-negative: true
+// @expect-contains: now_ms monotonic: true
+// @expect-contains: All io tests passed
+
+import std.io
+
+println("=== I/O Module Tests ===")
+
+// print_line writes a line
+print_line("line one")
+
+// print_str: in capture mode each call is its own captured entry
+print_str("part-1")
+print_str("part-2")
+
+// debug prints a labelled value
+debug("count", 42)
+
+// assert: passing condition prints nothing, failing condition prints a message
+assert(1 == 1, "this must NOT fire")
+assert(1 == 2, "this should fire")
+
+// print_fmt concatenates the template followed by each value (current behavior)
+print_fmt("prefix: ", ["A", " B", " C"])
+
+// now_ms: structural assertions only (no absolute timestamp)
+let t1 = now_ms()
+println("now_ms non-negative: " + (t1 >= 0))
+
+// monotonic non-decreasing across two reads (clock never goes backwards here)
+let t2 = now_ms()
+println("now_ms monotonic: " + (t2 >= t1))
+
+println("All io tests passed")
