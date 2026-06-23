@@ -112,6 +112,72 @@ pub fn check_with_imports(source_file: &str, source: &str) -> Result<(), String>
     Ok(())
 }
 
+/// A diagnostic produced while checking a document: a 1-indexed source position
+/// and a message with no embedded location prefix. Positions of 0 mean the
+/// origin phase (lexer/parser/module loader) did not report a usable location.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Diagnostic {
+    pub line: usize,
+    pub column: usize,
+    pub message: String,
+}
+
+/// Check Lira source (with import resolution) and return structured diagnostics
+/// instead of a flattened error string. Each checker error keeps its span, so
+/// consumers do not have to re-parse "line:column: message" text.
+pub fn check_with_imports_diagnostics(source_file: &str, source: &str) -> Vec<Diagnostic> {
+    // Lexing, parsing and import resolution still surface a single string error;
+    // recover a leading "line:column: " prefix where present.
+    let tokens = match lexer::tokenize(source) {
+        Ok(tokens) => tokens,
+        Err(e) => return vec![string_to_diagnostic(&e)],
+    };
+    let ast = match parser::parse(&tokens) {
+        Ok(ast) => ast,
+        Err(e) => return vec![string_to_diagnostic(&e)],
+    };
+    let mut loader = module_loader::ModuleLoader::new(source_file);
+    let merged_ast = match loader.process_imports(&ast) {
+        Ok(ast) => ast,
+        Err(e) => return vec![string_to_diagnostic(&e)],
+    };
+
+    let (_checked, structured, legacy) = checker::check_collecting(&merged_ast);
+    let mut diagnostics: Vec<Diagnostic> = structured
+        .iter()
+        .map(|err| {
+            let span = err.span();
+            Diagnostic {
+                line: span.line,
+                column: span.column,
+                message: err.body(),
+            }
+        })
+        .collect();
+    diagnostics.extend(legacy.iter().map(|msg| string_to_diagnostic(msg)));
+    diagnostics
+}
+
+/// Turn a legacy string error into a [`Diagnostic`], recovering a leading
+/// "line:column: " position prefix when present.
+fn string_to_diagnostic(error: &str) -> Diagnostic {
+    let mut parts = error.splitn(3, ':');
+    if let (Some(line), Some(col), Some(rest)) = (parts.next(), parts.next(), parts.next()) {
+        if let (Ok(line), Ok(column)) = (line.trim().parse(), col.trim().parse()) {
+            return Diagnostic {
+                line,
+                column,
+                message: rest.trim().to_string(),
+            };
+        }
+    }
+    Diagnostic {
+        line: 0,
+        column: 0,
+        message: error.to_string(),
+    }
+}
+
 /// Parse a Lira source file and return the AST
 pub fn parse_file(input: &str) -> Result<ast::Program, String> {
     let source =

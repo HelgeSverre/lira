@@ -207,6 +207,20 @@ impl CheckerError {
     }
 }
 
+impl CheckerError {
+    /// The message text without the leading "line:column: " location prefix.
+    /// Useful for consumers (e.g. the LSP) that carry the location separately.
+    pub fn body(&self) -> String {
+        let span = self.span();
+        let prefix = format!("{}:{}: ", span.line, span.column);
+        let message = self.message();
+        message
+            .strip_prefix(&prefix)
+            .map(str::to_string)
+            .unwrap_or(message)
+    }
+}
+
 impl fmt::Display for CheckerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.message())

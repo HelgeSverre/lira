@@ -3313,6 +3313,24 @@ pub fn check(program: &Program) -> Result<CheckedProgram, String> {
     checker.check_program(program)
 }
 
+/// Type check a program, returning the checked program (when successful) along
+/// with the structured and legacy errors collected during checking. Unlike
+/// [`check`], this exposes the structured [`CheckerError`]s with their spans
+/// instead of flattening them into a single string.
+pub fn check_collecting(
+    program: &Program,
+) -> (Option<CheckedProgram>, Vec<CheckerError>, Vec<String>) {
+    let mut checker = TypeChecker::new();
+    match checker.check_program(program) {
+        Ok(checked) => (Some(checked), Vec::new(), Vec::new()),
+        Err(_) => (
+            None,
+            checker.env.get_structured_errors().to_vec(),
+            checker.env.get_errors().to_vec(),
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
