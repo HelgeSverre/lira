@@ -267,6 +267,7 @@ example_test!(test_module_comprehensive, "module_comprehensive.li");
 example_test!(test_classes_basic, "classes_basic.li");
 example_test!(test_enums_basic, "enums_basic.li");
 example_test!(test_enum_data, "enum_data.li");
+example_test!(test_generic_enum, "generic_enum.li");
 example_test!(test_try_operator, "try_operator.li");
 example_test!(test_result_propagation, "result_propagation.li");
 example_test!(test_impl_block, "impl_block.li");

@@ -769,6 +769,14 @@ impl Parser {
 
     fn enum_declaration(&mut self, span: Span) -> Result<Statement, String> {
         let name = self.expect_identifier("Expected enum name")?;
+
+        // Parse optional generic type parameters <T> or <T, U>
+        let type_params = if self.match_token(&TokenKind::Lt) {
+            self.parse_type_params()?
+        } else {
+            Vec::new()
+        };
+
         self.consume(&TokenKind::LBrace, "Expected '{' after enum name")?;
 
         let mut variants = Vec::new();
@@ -804,7 +812,14 @@ impl Parser {
 
         self.consume(&TokenKind::RBrace, "Expected '}' after enum body")?;
 
-        Ok(self.stmt(StatementKind::EnumDecl { name, variants }, span))
+        Ok(self.stmt(
+            StatementKind::EnumDecl {
+                name,
+                type_params,
+                variants,
+            },
+            span,
+        ))
     }
 
     fn interface_declaration(&mut self, span: Span) -> Result<Statement, String> {

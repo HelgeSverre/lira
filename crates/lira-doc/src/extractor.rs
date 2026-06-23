@@ -233,7 +233,7 @@ fn build_module_doc(
                     comments,
                 ));
             }
-            StatementKind::EnumDecl { name, variants } => {
+            StatementKind::EnumDecl { name, variants, .. } => {
                 let doc = find_doc_comment(comments, stmt.span.line);
                 enums.push(build_enum_doc(name, variants, stmt.span.line, doc));
             }

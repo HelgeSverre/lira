@@ -96,6 +96,7 @@ pub enum StatementKind {
     /// Enum declaration
     EnumDecl {
         name: String,
+        type_params: Vec<TypeParam>,
         variants: Vec<EnumVariant>,
     },
     /// Interface declaration

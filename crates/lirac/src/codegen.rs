@@ -2339,12 +2339,21 @@ impl CodeGenerator {
                             // Single argument - store directly
                             self.generate_expression(&args[0].value);
                         } else {
-                            // Multiple arguments - store as array
-                            for arg in args {
-                                self.generate_expression(&arg.value);
-                            }
+                            // Multiple arguments - store as an array.
+                            // NewArray pops the size off the stack, so push the
+                            // element count first, then ArraySet each element.
+                            let count_idx = self.add_constant(Constant::Int(args.len() as i64));
+                            self.emit_opcode(Opcode::LoadConst);
+                            self.emit_u16(count_idx);
                             self.emit_opcode(Opcode::NewArray);
-                            self.emit_u16(args.len() as u16);
+                            for (i, arg) in args.iter().enumerate() {
+                                self.emit_opcode(Opcode::Dup);
+                                let idx = self.add_constant(Constant::Int(i as i64));
+                                self.emit_opcode(Opcode::LoadConst);
+                                self.emit_u16(idx);
+                                self.generate_expression(&arg.value);
+                                self.emit_opcode(Opcode::ArraySet);
+                            }
                         }
                         let data_field = self.add_constant(Constant::String("__data".to_string()));
                         self.emit_opcode(Opcode::SetField);

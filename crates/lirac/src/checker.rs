@@ -1398,7 +1398,21 @@ impl TypeChecker {
                 self.current_type_name = old_type_name;
                 self.current_type_params = old_type_params;
             }
-            StatementKind::EnumDecl { name, variants } => {
+            StatementKind::EnumDecl {
+                name,
+                type_params,
+                variants,
+            } => {
+                // Set current type params so variant payloads referencing a
+                // type param (e.g. Some(T)) resolve to an erased Type::TypeParam.
+                let old_type_params = std::mem::replace(
+                    &mut self.current_type_params,
+                    type_params
+                        .iter()
+                        .map(|tp| (tp.name.clone(), tp.bounds.clone()))
+                        .collect(),
+                );
+
                 let variant_types: Vec<_> = variants
                     .iter()
                     .map(|v| {
@@ -1414,6 +1428,8 @@ impl TypeChecker {
                         variants: variant_types,
                     },
                 });
+
+                self.current_type_params = old_type_params;
             }
             StatementKind::InterfaceDecl { name, methods } => {
                 let method_types: Vec<_> = methods
@@ -3388,8 +3404,15 @@ impl TypeChecker {
                         }
                     }
                     _ => {
-                        // User-defined generic type
-                        Type::Class(name.clone())
+                        // User-defined generic type. Type arguments are erased at
+                        // runtime, so map to the correct base type by kind.
+                        match self.env.lookup_type(name).map(|td| &td.kind) {
+                            Some(TypeDefKind::Enum { .. }) => Type::Enum(name.clone()),
+                            Some(TypeDefKind::Struct { .. }) => Type::Struct(name.clone()),
+                            Some(TypeDefKind::Interface { .. }) => Type::Interface(name.clone()),
+                            Some(TypeDefKind::Alias(ty)) => ty.clone(),
+                            _ => Type::Class(name.clone()),
+                        }
                     }
                 }
             }

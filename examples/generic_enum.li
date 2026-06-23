@@ -1,0 +1,55 @@
+// Test generic enum declarations (type erasure model)
+// @expect: 42
+// @expect: none
+// @expect: both 1 hello
+// @expect: neither
+// @expect: 5
+
+enum Opt<T> {
+    Some(T),
+    None
+}
+
+enum Pair<A, B> {
+    Both(A, B),
+    Neither
+}
+
+fn main() {
+    // Single-param generic enum
+    let some_val = Opt::Some(42)
+    let none_val = Opt::None
+
+    match some_val {
+        Opt::Some(x) => println(x)
+        Opt::None => println("none")
+    }
+
+    match none_val {
+        Opt::Some(x) => println(x)
+        Opt::None => println("none")
+    }
+
+    // Two-param generic enum
+    let both = Pair::Both(1, "hello")
+    let neither = Pair::Neither
+
+    match both {
+        Pair::Both(a, b) => println("both " + a + " " + b)
+        Pair::Neither => println("neither")
+    }
+
+    match neither {
+        Pair::Both(a, b) => println("both " + a + " " + b)
+        Pair::Neither => println("neither")
+    }
+
+    // Generic enum with concrete annotation
+    let o: Opt<int> = Opt::Some(5)
+    match o {
+        Opt::Some(n) => println(n)
+        Opt::None => println("none")
+    }
+}
+
+main()
