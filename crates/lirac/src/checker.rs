@@ -4,7 +4,7 @@
 //! See docs/lira/02-type-system.md for the full specification.
 
 use crate::ast::*;
-use crate::errors::CheckerError;
+use crate::errors::{CheckerError, IntContext, TypeContext};
 use crate::ids::SymbolId;
 use crate::sema::SemanticTables;
 use std::collections::{HashMap, HashSet};
@@ -1601,14 +1601,12 @@ impl TypeChecker {
                 let final_type = match (declared_type, inferred_type) {
                     (Some(decl), Some(init)) => {
                         if !init.is_compatible_with(&decl) {
-                            self.env.error(
-                                &stmt.span,
-                                format!(
-                                    "Type mismatch: expected '{}', got '{}'",
-                                    decl.display_name(),
-                                    init.display_name()
-                                ),
-                            );
+                            self.env.record_error(CheckerError::TypeMismatchContext {
+                                context: TypeContext::VarInit,
+                                expected: decl.clone(),
+                                got: init,
+                                span: stmt.span.clone(),
+                            });
                         }
                         decl
                     }
@@ -1637,14 +1635,12 @@ impl TypeChecker {
                 if let Some(type_ann) = type_ann {
                     let declared = self.resolve_type_expr(type_ann);
                     if !init_type.is_compatible_with(&declared) {
-                        self.env.error(
-                            &stmt.span,
-                            format!(
-                                "Type mismatch: expected '{}', got '{}'",
-                                declared.display_name(),
-                                init_type.display_name()
-                            ),
-                        );
+                        self.env.record_error(CheckerError::TypeMismatchContext {
+                            context: TypeContext::VarInit,
+                            expected: declared,
+                            got: init_type.clone(),
+                            span: stmt.span.clone(),
+                        });
                     }
                 }
 
@@ -1686,13 +1682,14 @@ impl TypeChecker {
                     if let Some(default_expr) = &param.default {
                         let default_type = self.check_expression(default_expr);
                         if !default_type.is_compatible_with(param_type) {
-                            self.env.error(
-                                &param.span,
-                                format!(
-                                    "Default value type mismatch: parameter '{}' expects '{}', got '{}'",
-                                    param.name, param_type.display_name(), default_type.display_name()
-                                ),
-                            );
+                            self.env.record_error(CheckerError::TypeMismatchContext {
+                                context: TypeContext::DefaultValue {
+                                    param: param.name.clone(),
+                                },
+                                expected: param_type.clone(),
+                                got: default_type,
+                                span: param.span.clone(),
+                            });
                         }
                     }
                 }
@@ -1737,16 +1734,14 @@ impl TypeChecker {
                     .map(|e| self.check_expression(e))
                     .unwrap_or(Type::Void);
 
-                if let Some(expected) = &self.current_function_return_type {
-                    if !return_type.is_compatible_with(expected) {
-                        self.env.error(
-                            &stmt.span,
-                            format!(
-                                "Return type mismatch: expected '{}', got '{}'",
-                                expected.display_name(),
-                                return_type.display_name()
-                            ),
-                        );
+                if let Some(expected) = self.current_function_return_type.clone() {
+                    if !return_type.is_compatible_with(&expected) {
+                        self.env.record_error(CheckerError::TypeMismatchContext {
+                            context: TypeContext::Return,
+                            expected,
+                            got: return_type,
+                            span: stmt.span.clone(),
+                        });
                     }
                 }
             }
@@ -1758,10 +1753,10 @@ impl TypeChecker {
             } => {
                 let cond_type = self.check_expression(condition);
                 if cond_type != Type::Bool && cond_type != Type::Unknown {
-                    self.env.error(
-                        &stmt.span,
-                        format!("Condition must be bool, got '{}'", cond_type.display_name()),
-                    );
+                    self.env.record_error(CheckerError::ConditionMustBeBool {
+                        got: Some(cond_type),
+                        span: stmt.span.clone(),
+                    });
                 }
 
                 self.env.push_scope();
@@ -1778,10 +1773,10 @@ impl TypeChecker {
             StatementKind::While { condition, body } => {
                 let cond_type = self.check_expression(condition);
                 if cond_type != Type::Bool && cond_type != Type::Unknown {
-                    self.env.error(
-                        &stmt.span,
-                        format!("Condition must be bool, got '{}'", cond_type.display_name()),
-                    );
+                    self.env.record_error(CheckerError::ConditionMustBeBool {
+                        got: Some(cond_type),
+                        span: stmt.span.clone(),
+                    });
                 }
 
                 let prev_in_loop = self.in_loop;
@@ -2023,10 +2018,10 @@ impl TypeChecker {
                     }
                     BinaryOp::And | BinaryOp::Or => {
                         if left_type != Type::Bool || right_type != Type::Bool {
-                            self.env.error(
-                                &expr.span,
-                                "Logical operators require bool operands".to_string(),
-                            );
+                            self.env.record_error(CheckerError::RequiresBoolOperand {
+                                plural: true,
+                                span: expr.span.clone(),
+                            });
                         }
                         Type::Bool
                     }
@@ -2044,10 +2039,10 @@ impl TypeChecker {
                                     .to_string(),
                             );
                         } else if !left_type.is_integer() || !right_type.is_integer() {
-                            self.env.error(
-                                &expr.span,
-                                "Bitwise operators require integer operands".to_string(),
-                            );
+                            self.env.record_error(CheckerError::RequiresIntegerOperand {
+                                plural: true,
+                                span: expr.span.clone(),
+                            });
                         }
                         Type::Int
                     }
@@ -2073,17 +2068,19 @@ impl TypeChecker {
                     }
                     UnaryOp::Not => {
                         if operand_type != Type::Bool {
-                            self.env
-                                .error(&expr.span, "Logical not requires bool operand".to_string());
+                            self.env.record_error(CheckerError::RequiresBoolOperand {
+                                plural: false,
+                                span: expr.span.clone(),
+                            });
                         }
                         Type::Bool
                     }
                     UnaryOp::BitNot => {
                         if !operand_type.is_integer() {
-                            self.env.error(
-                                &expr.span,
-                                "Bitwise not requires integer operand".to_string(),
-                            );
+                            self.env.record_error(CheckerError::RequiresIntegerOperand {
+                                plural: false,
+                                span: expr.span.clone(),
+                            });
                         }
                         Type::Int
                     }
@@ -2222,14 +2219,12 @@ impl TypeChecker {
                         for (arg, param_type) in args.iter().zip(params_to_check.iter()) {
                             let arg_type = self.check_expression(&arg.value);
                             if !arg_type.is_compatible_with(param_type) {
-                                self.env.error(
-                                    &arg.span,
-                                    format!(
-                                        "Argument type mismatch: expected '{}', got '{}'",
-                                        param_type.display_name(),
-                                        arg_type.display_name()
-                                    ),
-                                );
+                                self.env.record_error(CheckerError::TypeMismatchContext {
+                                    context: TypeContext::Argument,
+                                    expected: param_type.clone(),
+                                    got: arg_type.clone(),
+                                    span: arg.span.clone(),
+                                });
                             }
                             // Collect concrete types for type parameter inference
                             if param_type.is_type_param() {
@@ -2250,13 +2245,10 @@ impl TypeChecker {
                     }
                     Type::Unknown => Type::Unknown,
                     _ => {
-                        self.env.error(
-                            &expr.span,
-                            format!(
-                                "Cannot call non-function type: '{}'",
-                                callee_type.display_name()
-                            ),
-                        );
+                        self.env.record_error(CheckerError::NotAFunction {
+                            ty: callee_type,
+                            span: expr.span.clone(),
+                        });
                         Type::Unknown
                     }
                 }
@@ -2304,16 +2296,20 @@ impl TypeChecker {
                 match obj_type {
                     Type::Array(elem_type) => {
                         if !index_type.is_integer() {
-                            self.env
-                                .error(&expr.span, "Array index must be integer".to_string());
+                            self.env.record_error(CheckerError::MustBeInteger {
+                                context: IntContext::ArrayIndex,
+                                span: expr.span.clone(),
+                            });
                         }
                         *elem_type
                     }
                     Type::Map(_, value_type) => *value_type,
                     Type::String => {
                         if !index_type.is_integer() {
-                            self.env
-                                .error(&expr.span, "String index must be integer".to_string());
+                            self.env.record_error(CheckerError::MustBeInteger {
+                                context: IntContext::StringIndex,
+                                span: expr.span.clone(),
+                            });
                         }
                         Type::Char
                     }
@@ -2321,10 +2317,10 @@ impl TypeChecker {
                     // Allow indexing Any type (for json_parse results and other dynamic values)
                     Type::Any => Type::Any,
                     _ => {
-                        self.env.error(
-                            &expr.span,
-                            format!("Cannot index type: '{}'", obj_type.display_name()),
-                        );
+                        self.env.record_error(CheckerError::CannotIndex {
+                            ty: obj_type,
+                            span: expr.span.clone(),
+                        });
                         Type::Unknown
                     }
                 }
@@ -2338,14 +2334,12 @@ impl TypeChecker {
                     for elem in elements.iter().skip(1) {
                         let elem_type = self.check_expression(elem);
                         if !elem_type.is_compatible_with(&first_type) {
-                            self.env.error(
-                                &elem.span,
-                                format!(
-                                    "Array element type mismatch: expected '{}', got '{}'",
-                                    first_type.display_name(),
-                                    elem_type.display_name()
-                                ),
-                            );
+                            self.env.record_error(CheckerError::TypeMismatchContext {
+                                context: TypeContext::ArrayElement,
+                                expected: first_type.clone(),
+                                got: elem_type,
+                                span: elem.span.clone(),
+                            });
                         }
                     }
                     Type::Array(Box::new(first_type))
@@ -2369,11 +2363,16 @@ impl TypeChecker {
                         let kt = self.check_expression(k);
                         let vt = self.check_expression(v);
                         if !kt.is_compatible_with(&key_type) {
-                            self.env.error(&k.span, "Map key type mismatch".to_string());
+                            self.env.record_error(CheckerError::MapEntryTypeMismatch {
+                                value: false,
+                                span: k.span.clone(),
+                            });
                         }
                         if !vt.is_compatible_with(&value_type) {
-                            self.env
-                                .error(&v.span, "Map value type mismatch".to_string());
+                            self.env.record_error(CheckerError::MapEntryTypeMismatch {
+                                value: true,
+                                span: v.span.clone(),
+                            });
                         }
                     }
 
@@ -2415,8 +2414,10 @@ impl TypeChecker {
             } => {
                 let cond_type = self.check_expression(condition);
                 if cond_type != Type::Bool {
-                    self.env
-                        .error(&expr.span, "If condition must be bool".to_string());
+                    self.env.record_error(CheckerError::ConditionMustBeBool {
+                        got: None,
+                        span: expr.span.clone(),
+                    });
                 }
 
                 let then_type = self.check_expression(then_expr);
@@ -2473,14 +2474,12 @@ impl TypeChecker {
 
                     if let Some(ref first) = first_arm_type {
                         if !arm_type.is_compatible_with(first) {
-                            self.env.error(
-                                &arm.span,
-                                format!(
-                                    "Match arm type mismatch: expected '{}', got '{}'",
-                                    first.display_name(),
-                                    arm_type.display_name()
-                                ),
-                            );
+                            self.env.record_error(CheckerError::TypeMismatchContext {
+                                context: TypeContext::MatchArm,
+                                expected: first.clone(),
+                                got: arm_type.clone(),
+                                span: arm.span.clone(),
+                            });
                         }
                     } else {
                         first_arm_type = Some(arm_type);
@@ -2494,15 +2493,19 @@ impl TypeChecker {
                 if let Some(s) = start {
                     let st = self.check_expression(s);
                     if !st.is_integer() {
-                        self.env
-                            .error(&expr.span, "Range start must be integer".to_string());
+                        self.env.record_error(CheckerError::MustBeInteger {
+                            context: IntContext::RangeStart,
+                            span: expr.span.clone(),
+                        });
                     }
                 }
                 if let Some(e) = end {
                     let et = self.check_expression(e);
                     if !et.is_integer() {
-                        self.env
-                            .error(&expr.span, "Range end must be integer".to_string());
+                        self.env.record_error(CheckerError::MustBeInteger {
+                            context: IntContext::RangeEnd,
+                            span: expr.span.clone(),
+                        });
                     }
                 }
                 // Range is an object with start, end, inclusive fields
@@ -2528,14 +2531,12 @@ impl TypeChecker {
                 let value_type = self.check_expression(value);
 
                 if !value_type.is_compatible_with(&target_type) {
-                    self.env.error(
-                        &expr.span,
-                        format!(
-                            "Assignment type mismatch: expected '{}', got '{}'",
-                            target_type.display_name(),
-                            value_type.display_name()
-                        ),
-                    );
+                    self.env.record_error(CheckerError::TypeMismatchContext {
+                        context: TypeContext::Assignment,
+                        expected: target_type.clone(),
+                        got: value_type,
+                        span: expr.span.clone(),
+                    });
                 }
 
                 // Check if target is mutable
@@ -2570,7 +2571,9 @@ impl TypeChecker {
 
                 if !result_type.is_compatible_with(&target_type) {
                     self.env
-                        .error(&expr.span, "Compound assignment type mismatch".to_string());
+                        .record_error(CheckerError::CompoundAssignmentTypeMismatch {
+                            span: expr.span.clone(),
+                        });
                 }
 
                 Type::Void
@@ -2678,13 +2681,11 @@ impl TypeChecker {
                                 }
                             }
                         } else {
-                            self.env.error(
-                                &expr.span,
-                                format!(
-                                    "Unknown variant '{}' for enum '{}'",
-                                    variant_name, enum_name
-                                ),
-                            );
+                            self.env.record_error(CheckerError::UnknownEnumVariant {
+                                variant: variant_name.clone(),
+                                enum_name: enum_name.clone(),
+                                span: expr.span.clone(),
+                            });
                             Type::Unknown
                         }
                     } else {
@@ -2695,8 +2696,10 @@ impl TypeChecker {
                         Type::Unknown
                     }
                 } else {
-                    self.env
-                        .error(&expr.span, format!("Unknown enum: {}", enum_name));
+                    self.env.record_error(CheckerError::UnknownEnum {
+                        name: enum_name.clone(),
+                        span: expr.span.clone(),
+                    });
                     Type::Unknown
                 }
             }
@@ -3284,10 +3287,10 @@ impl TypeChecker {
                 }
             }
             _ => {
-                self.env.error(
-                    span,
-                    format!("Cannot access field on type: '{}'", obj_type.display_name()),
-                );
+                self.env.record_error(CheckerError::CannotAccessField {
+                    ty: obj_type.clone(),
+                    span: span.clone(),
+                });
                 Type::Unknown
             }
         }
@@ -6246,5 +6249,101 @@ mod tests {
                 assert!(!resolution.is_method, "Should not be a method");
             }
         }
+    }
+
+    // ========================================================================
+    // Structured CheckerError variant tests
+    // ========================================================================
+
+    /// Type check `source` and return the structured errors it produced.
+    fn collect_errors(source: &str) -> Vec<CheckerError> {
+        let tokens = tokenize(source).expect("tokenize");
+        let ast = parse(&tokens).expect("parse");
+        let (_, errors) = check_collecting(&ast);
+        errors
+    }
+
+    #[test]
+    fn test_var_init_mismatch_is_typed_context() {
+        let errors = collect_errors("let x: int = \"hello\"");
+        assert!(
+            errors.iter().any(|e| matches!(
+                e,
+                CheckerError::TypeMismatchContext {
+                    context: TypeContext::VarInit,
+                    ..
+                }
+            )),
+            "expected a VarInit TypeMismatchContext, got: {:?}",
+            errors
+        );
+        // Message text must remain byte-for-byte unchanged.
+        assert!(errors.iter().any(|e| e
+            .message()
+            .contains("Type mismatch: expected 'int', got 'string'")));
+    }
+
+    #[test]
+    fn test_call_non_function_is_not_a_function() {
+        let errors = collect_errors("let x = 5\nx()");
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, CheckerError::NotAFunction { .. })),
+            "expected NotAFunction, got: {:?}",
+            errors
+        );
+        assert!(errors
+            .iter()
+            .any(|e| e.message().contains("Cannot call non-function type:")));
+    }
+
+    #[test]
+    fn test_if_stmt_condition_must_be_bool() {
+        let errors = collect_errors("if 5 { }");
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, CheckerError::ConditionMustBeBool { got: Some(_), .. })),
+            "expected ConditionMustBeBool with got, got: {:?}",
+            errors
+        );
+        assert!(errors
+            .iter()
+            .any(|e| e.message().contains("Condition must be bool, got 'int'")));
+    }
+
+    #[test]
+    fn test_array_index_must_be_integer_structured() {
+        let errors = collect_errors("let a = [1, 2, 3]\nlet b = a[\"x\"]");
+        assert!(
+            errors.iter().any(|e| matches!(
+                e,
+                CheckerError::MustBeInteger {
+                    context: IntContext::ArrayIndex,
+                    ..
+                }
+            )),
+            "expected MustBeInteger ArrayIndex, got: {:?}",
+            errors
+        );
+        assert!(errors
+            .iter()
+            .any(|e| e.message().contains("Array index must be integer")));
+    }
+
+    #[test]
+    fn test_logical_not_requires_bool_operand() {
+        let errors = collect_errors("let x = !5");
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, CheckerError::RequiresBoolOperand { plural: false, .. })),
+            "expected singular RequiresBoolOperand, got: {:?}",
+            errors
+        );
+        assert!(errors
+            .iter()
+            .any(|e| e.message().contains("Logical not requires bool operand")));
     }
 }

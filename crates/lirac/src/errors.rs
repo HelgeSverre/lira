@@ -2,6 +2,36 @@ use crate::ast::Span;
 use crate::checker::Type;
 use std::fmt;
 
+/// Where a type-mismatch was detected. Distinguishes the many
+/// context-specific "expected X got Y" / "must be bool/integer" checks
+/// so consumers (LSP quick-fixes) can branch on the situation.
+#[derive(Debug, Clone)]
+pub enum TypeContext {
+    /// `let`/`const` initializer does not match the declared type.
+    VarInit,
+    /// `return` value does not match the function's return type.
+    Return,
+    /// Assignment value does not match the target's type.
+    Assignment,
+    /// Call argument does not match the parameter's type.
+    Argument,
+    /// Array element does not match the inferred element type.
+    ArrayElement,
+    /// Match arm value does not match the first arm's type.
+    MatchArm,
+    /// Default parameter value does not match the parameter's type.
+    DefaultValue { param: String },
+}
+
+/// Which integer-required position triggered a "must be integer" error.
+#[derive(Debug, Clone)]
+pub enum IntContext {
+    ArrayIndex,
+    StringIndex,
+    RangeStart,
+    RangeEnd,
+}
+
 /// Structured error from the type checker
 #[derive(Debug, Clone)]
 pub enum CheckerError {
@@ -65,6 +95,69 @@ pub enum CheckerError {
         method: String,
         span: Span,
     },
+    /// Context-specific "expected/got" type mismatch carrying both Types.
+    TypeMismatchContext {
+        context: TypeContext,
+        expected: Type,
+        got: Type,
+        span: Span,
+    },
+    /// A condition expression must be bool. `got` is present only where the
+    /// original message included it (if/while statements); `None` for the
+    /// `if`-expression form.
+    ConditionMustBeBool {
+        got: Option<Type>,
+        span: Span,
+    },
+    /// An operand/index must be an integer (no Type in original text).
+    MustBeInteger {
+        context: IntContext,
+        span: Span,
+    },
+    /// An operand must be bool (logical not / logical operators).
+    RequiresBoolOperand {
+        /// `true` => "Logical operators require bool operands",
+        /// `false` => "Logical not requires bool operand".
+        plural: bool,
+        span: Span,
+    },
+    /// An operand must be an integer (bitwise not / bitwise operators).
+    RequiresIntegerOperand {
+        /// `true` => "Bitwise operators require integer operands",
+        /// `false` => "Bitwise not requires integer operand".
+        plural: bool,
+        span: Span,
+    },
+    /// Map literal key/value type mismatch (no Types in original text).
+    MapEntryTypeMismatch {
+        /// `false` => "Map key type mismatch", `true` => "Map value type mismatch".
+        value: bool,
+        span: Span,
+    },
+    /// Compound assignment operand types do not match.
+    CompoundAssignmentTypeMismatch {
+        span: Span,
+    },
+    /// Calling a non-function value. Carries the Type (display_name in text).
+    NotAFunction {
+        ty: Type,
+        span: Span,
+    },
+    /// Indexing a non-indexable Type. Carries the Type.
+    CannotIndex {
+        ty: Type,
+        span: Span,
+    },
+    /// Field access on a non-aggregate Type. Carries the Type.
+    CannotAccessField {
+        ty: Type,
+        span: Span,
+    },
+    /// Unknown enum name in a path expression.
+    UnknownEnum {
+        name: String,
+        span: Span,
+    },
     GenericError {
         message: String,
         span: Span,
@@ -89,6 +182,17 @@ impl CheckerError {
             | Self::ContinueOutsideLoop { span }
             | Self::TraitNotImplemented { span, .. }
             | Self::MissingSelfParameter { span, .. }
+            | Self::TypeMismatchContext { span, .. }
+            | Self::ConditionMustBeBool { span, .. }
+            | Self::MustBeInteger { span, .. }
+            | Self::RequiresBoolOperand { span, .. }
+            | Self::RequiresIntegerOperand { span, .. }
+            | Self::MapEntryTypeMismatch { span, .. }
+            | Self::CompoundAssignmentTypeMismatch { span }
+            | Self::NotAFunction { span, .. }
+            | Self::CannotIndex { span, .. }
+            | Self::CannotAccessField { span, .. }
+            | Self::UnknownEnum { span, .. }
             | Self::GenericError { span, .. } => span,
         }
     }
@@ -199,6 +303,129 @@ impl CheckerError {
                     "{}:{}: Method '{}' must have 'self' as first parameter",
                     span.line, span.column, method
                 )
+            }
+            Self::TypeMismatchContext {
+                context,
+                expected,
+                got,
+                span,
+            } => {
+                let e = expected.display_name();
+                let g = got.display_name();
+                match context {
+                    TypeContext::VarInit => format!(
+                        "{}:{}: Type mismatch: expected '{}', got '{}'",
+                        span.line, span.column, e, g
+                    ),
+                    TypeContext::Return => format!(
+                        "{}:{}: Return type mismatch: expected '{}', got '{}'",
+                        span.line, span.column, e, g
+                    ),
+                    TypeContext::Assignment => format!(
+                        "{}:{}: Assignment type mismatch: expected '{}', got '{}'",
+                        span.line, span.column, e, g
+                    ),
+                    TypeContext::Argument => format!(
+                        "{}:{}: Argument type mismatch: expected '{}', got '{}'",
+                        span.line, span.column, e, g
+                    ),
+                    TypeContext::ArrayElement => format!(
+                        "{}:{}: Array element type mismatch: expected '{}', got '{}'",
+                        span.line, span.column, e, g
+                    ),
+                    TypeContext::MatchArm => format!(
+                        "{}:{}: Match arm type mismatch: expected '{}', got '{}'",
+                        span.line, span.column, e, g
+                    ),
+                    TypeContext::DefaultValue { param } => format!(
+                        "{}:{}: Default value type mismatch: parameter '{}' expects '{}', got '{}'",
+                        span.line, span.column, param, e, g
+                    ),
+                }
+            }
+            Self::ConditionMustBeBool { got, span } => match got {
+                Some(t) => format!(
+                    "{}:{}: Condition must be bool, got '{}'",
+                    span.line,
+                    span.column,
+                    t.display_name()
+                ),
+                None => format!("{}:{}: If condition must be bool", span.line, span.column),
+            },
+            Self::MustBeInteger { context, span } => {
+                let what = match context {
+                    IntContext::ArrayIndex => "Array index",
+                    IntContext::StringIndex => "String index",
+                    IntContext::RangeStart => "Range start",
+                    IntContext::RangeEnd => "Range end",
+                };
+                format!("{}:{}: {} must be integer", span.line, span.column, what)
+            }
+            Self::RequiresBoolOperand { plural, span } => {
+                if *plural {
+                    format!(
+                        "{}:{}: Logical operators require bool operands",
+                        span.line, span.column
+                    )
+                } else {
+                    format!(
+                        "{}:{}: Logical not requires bool operand",
+                        span.line, span.column
+                    )
+                }
+            }
+            Self::RequiresIntegerOperand { plural, span } => {
+                if *plural {
+                    format!(
+                        "{}:{}: Bitwise operators require integer operands",
+                        span.line, span.column
+                    )
+                } else {
+                    format!(
+                        "{}:{}: Bitwise not requires integer operand",
+                        span.line, span.column
+                    )
+                }
+            }
+            Self::MapEntryTypeMismatch { value, span } => {
+                if *value {
+                    format!("{}:{}: Map value type mismatch", span.line, span.column)
+                } else {
+                    format!("{}:{}: Map key type mismatch", span.line, span.column)
+                }
+            }
+            Self::CompoundAssignmentTypeMismatch { span } => {
+                format!(
+                    "{}:{}: Compound assignment type mismatch",
+                    span.line, span.column
+                )
+            }
+            Self::NotAFunction { ty, span } => {
+                format!(
+                    "{}:{}: Cannot call non-function type: '{}'",
+                    span.line,
+                    span.column,
+                    ty.display_name()
+                )
+            }
+            Self::CannotIndex { ty, span } => {
+                format!(
+                    "{}:{}: Cannot index type: '{}'",
+                    span.line,
+                    span.column,
+                    ty.display_name()
+                )
+            }
+            Self::CannotAccessField { ty, span } => {
+                format!(
+                    "{}:{}: Cannot access field on type: '{}'",
+                    span.line,
+                    span.column,
+                    ty.display_name()
+                )
+            }
+            Self::UnknownEnum { name, span } => {
+                format!("{}:{}: Unknown enum: {}", span.line, span.column, name)
             }
             Self::GenericError { message, span } => {
                 format!("{}:{}: {}", span.line, span.column, message)
