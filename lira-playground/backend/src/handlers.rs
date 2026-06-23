@@ -151,8 +151,10 @@ pub async fn run(Json(req): Json<RunRequest>) -> impl IntoResponse {
 
     // Execute with optional breakpoints
     if req.breakpoints.is_empty() {
-        // Fast path: no breakpoints, use simple run
-        match liravm::run_with_capture(&bytecode) {
+        // Fast path: no breakpoints, use simple run. The structured variant
+        // surfaces the real source location (and any output produced before
+        // the failure) instead of `None`.
+        match liravm::run_with_capture_structured(&bytecode) {
             Ok((exit_code, output)) => Json(RunResponse {
                 success: true,
                 output,
@@ -161,14 +163,14 @@ pub async fn run(Json(req): Json<RunRequest>) -> impl IntoResponse {
                 execution_time_ms: start.elapsed().as_millis() as u64,
                 breakpoint: None,
             }),
-            Err(e) => Json(RunResponse {
+            Err((output, err)) => Json(RunResponse {
                 success: false,
-                output: vec![],
+                output,
                 exit_code: None,
                 errors: vec![CompileError {
-                    message: e,
-                    line: None,
-                    column: None,
+                    message: err.message,
+                    line: err.line,
+                    column: err.column,
                     severity: ErrorSeverity::Error,
                 }],
                 execution_time_ms: start.elapsed().as_millis() as u64,
@@ -204,15 +206,22 @@ pub async fn run(Json(req): Json<RunRequest>) -> impl IntoResponse {
                                 breakpoint: Some(bp),
                             })
                         } else {
-                            // Actual runtime error
+                            // Actual runtime error: recover the source location
+                            // from the VM and drop the "line:col: " prefix that
+                            // run() attaches to the message.
+                            let (line, column) = match vm.get_current_location() {
+                                Some((line, column)) => (Some(line), Some(column)),
+                                None => (None, None),
+                            };
+                            let message = strip_location_prefix(&e, line, column);
                             Json(RunResponse {
                                 success: false,
                                 output: vm.get_output().to_vec(),
                                 exit_code: None,
                                 errors: vec![CompileError {
-                                    message: e,
-                                    line: None,
-                                    column: None,
+                                    message,
+                                    line,
+                                    column,
                                     severity: ErrorSeverity::Error,
                                 }],
                                 execution_time_ms: start.elapsed().as_millis() as u64,
@@ -506,6 +515,19 @@ pub fn compile_source(source: &str) -> Result<(lirac::ast::Program, Vec<u8>), Ve
     let bytecode = lirac::codegen::generate(&typed_ast).map_err(|e| parse_error_message(&e))?;
 
     Ok((ast, bytecode))
+}
+
+/// Remove a `"line:col: "` prefix that [`liravm::VM::run`] attaches to runtime
+/// error messages, given the location parsed back out of the VM. Returns the
+/// original message unchanged when no matching prefix is present.
+fn strip_location_prefix(message: &str, line: Option<u32>, column: Option<u32>) -> String {
+    if let (Some(line), Some(column)) = (line, column) {
+        let prefix = format!("{}:{}: ", line, column);
+        if let Some(rest) = message.strip_prefix(&prefix) {
+            return rest.to_string();
+        }
+    }
+    message.to_string()
 }
 
 /// Parse error message into structured errors

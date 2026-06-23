@@ -673,3 +673,31 @@ fn test_lambda_expression() {
 
     assert_eq!(output, vec!["7"]);
 }
+
+// =============================================================================
+// Runtime error: source locations + readable messages
+// =============================================================================
+
+/// Source whose `a / b` (b == 0) divide is a runtime error the checker cannot
+/// catch. The divide sits on line 4, column 5 (statement-start indentation).
+const DIV_BY_ZERO_SOURCE: &str =
+    "fn main() {\n    let a = 10\n    let b = 0\n    let c = a / b\n    print(c)\n}\n";
+
+#[test]
+fn test_runtime_error_message_is_location_prefixed() {
+    let bytecode = lirac::compile(DIV_BY_ZERO_SOURCE).expect("Compilation failed");
+    let err = liravm::run_with_capture(&bytecode)
+        .expect_err("division by zero should be a runtime error");
+    // Located, readable message: "line:col: Division by zero" (NOT Debug format).
+    assert_eq!(err, "4:5: Division by zero");
+}
+
+#[test]
+fn test_runtime_error_structured_carries_location() {
+    let bytecode = lirac::compile(DIV_BY_ZERO_SOURCE).expect("Compilation failed");
+    let (_output, err) = liravm::run_with_capture_structured(&bytecode)
+        .expect_err("division by zero should be a runtime error");
+    assert_eq!(err.message, "Division by zero");
+    assert_eq!(err.line, Some(4));
+    assert_eq!(err.column, Some(5));
+}

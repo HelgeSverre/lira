@@ -24,7 +24,7 @@ pub use debug::{
 pub use debug_session::{DebugEvent, DebugSession, SessionState};
 pub use fiber::FiberEvent;
 pub use value::{ChannelId, FiberId, Value};
-pub use vm::{ChannelSnapshot, FiberSnapshot, StepResult, VmSnapshot, VM};
+pub use vm::{ChannelSnapshot, FiberSnapshot, RuntimeError, StepResult, VmSnapshot, VM};
 
 use std::fs;
 
@@ -64,6 +64,51 @@ pub fn run_with_capture(bytecode: &[u8]) -> Result<(i32, Vec<String>), String> {
     let exit_code = vm.run()?;
 
     Ok((exit_code, vm.get_output().to_vec()))
+}
+
+/// Run bytecode and capture output, returning a structured [`RuntimeError`] on
+/// failure.
+///
+/// Behaves like [`run_with_capture`], but on a runtime error returns the bare
+/// message together with the source location (when recoverable) and the output
+/// produced before the failure. Intended for callers (e.g. the playground) that
+/// need to surface a real source location rather than parsing the prefixed
+/// string form.
+pub fn run_with_capture_structured(
+    bytecode: &[u8],
+) -> Result<(i32, Vec<String>), (Vec<String>, RuntimeError)> {
+    let program = bytecode::load(bytecode).map_err(|message| {
+        (
+            vec![],
+            RuntimeError {
+                message,
+                line: None,
+                column: None,
+            },
+        )
+    })?;
+
+    let mut vm = vm::VM::new(program);
+    vm.set_fiber_mode(true);
+    vm.set_capture_output(true);
+
+    match vm.run_inner() {
+        Ok(exit_code) => Ok((exit_code, vm.get_output().to_vec())),
+        Err(message) => {
+            let (line, column) = match vm.get_current_location() {
+                Some((line, column)) => (Some(line), Some(column)),
+                None => (None, None),
+            };
+            Err((
+                vm.get_output().to_vec(),
+                RuntimeError {
+                    message,
+                    line,
+                    column,
+                },
+            ))
+        }
+    }
 }
 
 /// Run bytecode with debug tracing enabled

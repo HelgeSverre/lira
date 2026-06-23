@@ -42,6 +42,21 @@ pub enum StepResult {
     Stopped,
 }
 
+/// A runtime error with an optional source location.
+///
+/// The `message` is the bare error text (NOT location-prefixed); `line` and
+/// `column` carry the source position recovered from the VM's debug info at
+/// the point of failure, when available.
+#[derive(Debug, Clone)]
+pub struct RuntimeError {
+    /// The bare error message (not prefixed with a location).
+    pub message: String,
+    /// Source line (1-based) where the error occurred, if known.
+    pub line: Option<u32>,
+    /// Source column (1-based) where the error occurred, if known.
+    pub column: Option<u32>,
+}
+
 /// Snapshot of VM state for debugging/visualization
 #[derive(Debug, Clone)]
 pub struct VmSnapshot {
@@ -541,7 +556,7 @@ impl VM {
             .map(|v| {
                 ValueInfo::with_rich_value(
                     format!("{:?}", v),
-                    self.value_type_name(v),
+                    v.type_name().to_string(),
                     RichValue::from_value(v),
                 )
             })
@@ -558,7 +573,7 @@ impl VM {
                 name: local_names.get(&(i as u16)).map(|s| s.to_string()),
                 value: ValueInfo::with_rich_value(
                     format!("{:?}", v),
-                    self.value_type_name(v),
+                    v.type_name().to_string(),
                     RichValue::from_value(v),
                 ),
             })
@@ -587,27 +602,36 @@ impl VM {
         }
     }
 
-    /// Get the type name for a value
-    fn value_type_name(&self, value: &Value) -> String {
-        match value {
-            Value::Null => "null".to_string(),
-            Value::Bool(_) => "bool".to_string(),
-            Value::Int(_) => "int".to_string(),
-            Value::Float(_) => "float".to_string(),
-            Value::String(_) => "string".to_string(),
-            Value::Array(_) => "array".to_string(),
-            Value::Object(_) => "object".to_string(),
-            Value::Function(_) => "function".to_string(),
-            Value::Closure(_) => "closure".to_string(),
-            Value::Fiber(_) => "fiber".to_string(),
-            Value::Channel(_) => "channel".to_string(),
+    // ==================== End Stepping Methods ====================
+
+    /// Run the program and return exit code.
+    ///
+    /// On a runtime error, the returned message is prefixed with the source
+    /// location (`"line:column: message"`) when one can be recovered from the
+    /// VM's debug info. Breakpoint-hit sentinels are passed through unchanged
+    /// so downstream parsers (e.g. the playground) keep working.
+    pub fn run(&mut self) -> Result<i32, String> {
+        match self.run_inner() {
+            Ok(code) => Ok(code),
+            Err(msg) => {
+                // Don't re-prefix breakpoint sentinels (parsed by callers).
+                if msg.starts_with("Breakpoint hit at line ") {
+                    return Err(msg);
+                }
+                match self.get_current_location() {
+                    Some((line, col)) => Err(format!("{}:{}: {}", line, col, msg)),
+                    None => Err(msg),
+                }
+            }
         }
     }
 
-    // ==================== End Stepping Methods ====================
-
-    /// Run the program and return exit code
-    pub fn run(&mut self) -> Result<i32, String> {
+    /// Run the program loop without attaching a source location to errors.
+    ///
+    /// This holds the actual execution loop; [`VM::run`] wraps it to prefix the
+    /// location, and structured callers use it directly to recover the bare
+    /// message alongside [`VM::get_current_location`].
+    pub(crate) fn run_inner(&mut self) -> Result<i32, String> {
         // Start at entry point
         self.ip = self.program.entry_point;
 
@@ -826,7 +850,7 @@ impl VM {
                             .unwrap_or(Value::Null);
                         self.stack.push(value);
                     }
-                    _ => return Err(format!("Cannot get field from {:?}", object)),
+                    _ => return Err(format!("Cannot get field from {}", object.type_name())),
                 }
             }
 
@@ -843,7 +867,7 @@ impl VM {
                     Value::Object(obj) => {
                         obj.borrow_mut().insert(field_name, value);
                     }
-                    _ => return Err(format!("Cannot set field on {:?}", object)),
+                    _ => return Err(format!("Cannot set field on {}", object.type_name())),
                 }
             }
 
@@ -1000,7 +1024,13 @@ impl VM {
                     }
                     (Value::String(a), b) => Value::String(Rc::new(format!("{}{}", a, b))),
                     (a, Value::String(b)) => Value::String(Rc::new(format!("{}{}", a, b))),
-                    _ => return Err(format!("Cannot add {:?} and {:?}", a, b)),
+                    _ => {
+                        return Err(format!(
+                            "Cannot add {} and {}",
+                            a.type_name(),
+                            b.type_name()
+                        ))
+                    }
                 };
                 self.stack.push(result);
             }
@@ -1013,7 +1043,13 @@ impl VM {
                     (Value::Float(a), Value::Float(b)) => Value::Float(a - b),
                     (Value::Int(a), Value::Float(b)) => Value::Float(*a as f64 - b),
                     (Value::Float(a), Value::Int(b)) => Value::Float(a - *b as f64),
-                    _ => return Err(format!("Cannot subtract {:?} from {:?}", b, a)),
+                    _ => {
+                        return Err(format!(
+                            "Cannot subtract {} from {}",
+                            b.type_name(),
+                            a.type_name()
+                        ))
+                    }
                 };
                 self.stack.push(result);
             }
@@ -1026,7 +1062,13 @@ impl VM {
                     (Value::Float(a), Value::Float(b)) => Value::Float(a * b),
                     (Value::Int(a), Value::Float(b)) => Value::Float(*a as f64 * b),
                     (Value::Float(a), Value::Int(b)) => Value::Float(a * *b as f64),
-                    _ => return Err(format!("Cannot multiply {:?} and {:?}", a, b)),
+                    _ => {
+                        return Err(format!(
+                            "Cannot multiply {} and {}",
+                            a.type_name(),
+                            b.type_name()
+                        ))
+                    }
                 };
                 self.stack.push(result);
             }
@@ -1044,7 +1086,13 @@ impl VM {
                     (Value::Float(a), Value::Float(b)) => Value::Float(a / b),
                     (Value::Int(a), Value::Float(b)) => Value::Float(*a as f64 / b),
                     (Value::Float(a), Value::Int(b)) => Value::Float(a / *b as f64),
-                    _ => return Err(format!("Cannot divide {:?} by {:?}", a, b)),
+                    _ => {
+                        return Err(format!(
+                            "Cannot divide {} by {}",
+                            a.type_name(),
+                            b.type_name()
+                        ))
+                    }
                 };
                 self.stack.push(result);
             }
@@ -1060,7 +1108,13 @@ impl VM {
                         Value::Int(a % b)
                     }
                     (Value::Float(a), Value::Float(b)) => Value::Float(a % b),
-                    _ => return Err(format!("Cannot modulo {:?} by {:?}", a, b)),
+                    _ => {
+                        return Err(format!(
+                            "Cannot modulo {} by {}",
+                            a.type_name(),
+                            b.type_name()
+                        ))
+                    }
                 };
                 self.stack.push(result);
             }
@@ -1070,7 +1124,7 @@ impl VM {
                 let result = match a {
                     Value::Int(n) => Value::Int(-n),
                     Value::Float(f) => Value::Float(-f),
-                    _ => return Err(format!("Cannot negate {:?}", a)),
+                    _ => return Err(format!("Cannot negate {}", a.type_name())),
                 };
                 self.stack.push(result);
             }
@@ -1090,7 +1144,13 @@ impl VM {
                         Value::Float((*base as f64).powf(*exp))
                     }
                     (Value::Float(base), Value::Int(exp)) => Value::Float(base.powi(*exp as i32)),
-                    _ => return Err(format!("Cannot compute power of {:?} ^ {:?}", a, b)),
+                    _ => {
+                        return Err(format!(
+                            "Cannot compute power of {} ^ {}",
+                            a.type_name(),
+                            b.type_name()
+                        ))
+                    }
                 };
                 self.stack.push(result);
             }
@@ -1327,7 +1387,7 @@ impl VM {
                         // Jump to closure code
                         self.ip = closure_data.code_offset;
                     }
-                    _ => return Err(format!("Cannot call {:?}", callee)),
+                    _ => return Err(format!("Cannot call {}", callee.type_name())),
                 }
             }
 
@@ -1903,7 +1963,11 @@ impl VM {
                 Ok(a.partial_cmp(&b).map(|o| o as i32).unwrap_or(0))
             }
             (Value::String(a), Value::String(b)) => Ok(a.cmp(b) as i32),
-            _ => Err(format!("Cannot compare {:?} and {:?}", a, b)),
+            _ => Err(format!(
+                "Cannot compare {} and {}",
+                a.type_name(),
+                b.type_name()
+            )),
         }
     }
 

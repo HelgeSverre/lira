@@ -42,6 +42,26 @@ pub struct ClosureData {
 }
 
 impl Value {
+    /// Return the user-facing type name for this value (e.g. `int`, `string`).
+    ///
+    /// Used in runtime error messages so users see `Cannot add string and int`
+    /// rather than the `Debug` rendering of the underlying variant.
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            Value::Null => "null",
+            Value::Bool(_) => "bool",
+            Value::Int(_) => "int",
+            Value::Float(_) => "float",
+            Value::String(_) => "string",
+            Value::Array(_) => "array",
+            Value::Object(_) => "object",
+            Value::Function(_) => "function",
+            Value::Closure(_) => "closure",
+            Value::Fiber(_) => "fiber",
+            Value::Channel(_) => "channel",
+        }
+    }
+
     /// Check if value is truthy
     pub fn is_truthy(&self) -> bool {
         match self {
@@ -85,5 +105,31 @@ impl fmt::Display for Value {
             Value::Fiber(id) => write!(f, "<fiber#{}>", id),
             Value::Channel(id) => write!(f, "<channel#{}>", id),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn type_name_is_user_facing_not_debug() {
+        // These are the names used in runtime error messages; they must be the
+        // readable forms, not the Debug rendering (`Int(..)`, `String(..)`).
+        assert_eq!(Value::Null.type_name(), "null");
+        assert_eq!(Value::Bool(true).type_name(), "bool");
+        assert_eq!(Value::Int(3).type_name(), "int");
+        assert_eq!(Value::Float(1.5).type_name(), "float");
+        assert_eq!(
+            Value::String(Rc::new("x".to_string())).type_name(),
+            "string"
+        );
+    }
+
+    #[test]
+    fn display_renders_without_debug_wrapper() {
+        // Display backs the value-rendering error sites; `3` not `Int(3)`.
+        assert_eq!(Value::Int(3).to_string(), "3");
+        assert_eq!(Value::String(Rc::new("hi".to_string())).to_string(), "hi");
     }
 }
