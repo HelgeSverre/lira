@@ -10,6 +10,135 @@ use lira_core::opcode::Opcode;
 use lira_core::{BYTECODE_MAGIC, BYTECODE_VERSION};
 use std::collections::HashMap;
 
+/// Table of syscall-based builtins: (function_name, syscall_number, required_arg_count).
+/// Special builtins (print, chan, send, recv, close, fiber_yield, fiber_id, len, push, pop)
+/// use custom opcodes and are handled as explicit match arms instead.
+const SYSCALL_BUILTINS: &[(&str, u8, usize)] = &[
+    // Time (syscalls 4-8, 130-135)
+    ("time_ms", 4, 0),
+    ("sleep", 5, 1),
+    ("time_secs", 6, 0),
+    ("time_micros", 7, 0),
+    ("time_nanos", 8, 0),
+    ("time_format_iso", 130, 1),
+    ("time_format", 131, 2),
+    ("time_parse_iso", 132, 1),
+    ("time_timezone_offset", 133, 0),
+    ("time_components", 134, 1),
+    ("time_from_components", 135, 6),
+    // File I/O (syscalls 10-15)
+    ("file_open", 10, 2),
+    ("file_read", 11, 2),
+    ("file_write", 12, 2),
+    ("file_close", 13, 1),
+    ("file_exists", 14, 1),
+    ("file_size", 15, 1),
+    // Environment (syscalls 20-21, 200-207)
+    ("env_get", 20, 1),
+    ("env_args", 21, 0),
+    ("env_set", 200, 2),
+    ("env_remove", 201, 1),
+    ("env_all", 202, 0),
+    ("env_keys", 203, 0),
+    ("env_has", 204, 1),
+    ("env_exe", 205, 0),
+    ("env_temp_dir", 206, 0),
+    ("env_home_dir", 207, 0),
+    // String operations (syscalls 30-39)
+    ("str_char_code", 30, 2),
+    ("str_from_char_code", 31, 1),
+    ("str_to_upper", 32, 1),
+    ("str_to_lower", 33, 1),
+    ("str_substring", 34, 3),
+    ("str_index_of", 35, 2),
+    ("str_split", 36, 2),
+    ("str_trim", 37, 1),
+    ("str_trim_start", 38, 1),
+    ("str_trim_end", 39, 1),
+    // Random (syscalls 40-41)
+    ("random", 40, 0),
+    ("random_int", 41, 2),
+    // JSON (syscalls 50-52)
+    ("json_parse", 50, 1),
+    ("json_stringify", 51, 1),
+    ("json_pretty", 52, 1),
+    // Base64 (syscalls 60-63)
+    ("base64_encode", 60, 1),
+    ("base64_decode", 61, 1),
+    ("base64_encode_url", 62, 1),
+    ("base64_decode_url", 63, 1),
+    // Crypto (syscalls 70-73)
+    ("md5", 70, 1),
+    ("sha1", 71, 1),
+    ("sha256", 72, 1),
+    ("sha512", 73, 1),
+    // TCP networking (syscalls 80-84)
+    ("tcp_connect", 80, 2),
+    ("tcp_write", 81, 2),
+    ("tcp_read", 82, 2),
+    ("tcp_close", 83, 1),
+    ("dns_lookup", 84, 1),
+    // OS (syscalls 90-101)
+    ("getcwd", 90, 0),
+    ("chdir", 91, 1),
+    ("mkdir", 92, 1),
+    ("mkdir_all", 93, 1),
+    ("rmdir", 94, 1),
+    ("remove", 95, 1),
+    ("remove_all", 96, 1),
+    ("listdir", 97, 1),
+    ("is_dir", 98, 1),
+    ("is_file", 99, 1),
+    ("rename", 100, 2),
+    ("copy", 101, 2),
+    // URL encoding (syscalls 110-111)
+    ("url_encode", 110, 1),
+    ("url_decode", 111, 1),
+    // HTTP (syscalls 120-122)
+    ("http_get", 120, 1),
+    ("http_post", 121, 3),
+    ("http_request", 122, 4),
+    // Math (syscalls 140-163)
+    ("sqrt", 140, 1),
+    ("pow", 141, 2),
+    ("exp", 142, 1),
+    ("ln", 143, 1),
+    ("log10", 144, 1),
+    ("log2", 145, 1),
+    ("sin", 146, 1),
+    ("cos", 147, 1),
+    ("tan", 148, 1),
+    ("asin", 149, 1),
+    ("acos", 150, 1),
+    ("atan", 151, 1),
+    ("atan2", 152, 2),
+    ("sinh", 153, 1),
+    ("cosh", 154, 1),
+    ("tanh", 155, 1),
+    ("floor", 156, 1),
+    ("ceil", 157, 1),
+    ("round", 158, 1),
+    ("trunc", 159, 1),
+    ("is_nan", 160, 1),
+    ("is_infinite", 161, 1),
+    ("is_finite", 162, 1),
+    ("abs", 163, 1),
+    // Regex (syscalls 170-177)
+    ("regex_match", 170, 2),
+    ("regex_find", 171, 2),
+    ("regex_find_all", 172, 2),
+    ("regex_replace", 173, 3),
+    ("regex_replace_all", 174, 3),
+    ("regex_split", 175, 2),
+    ("regex_captures", 176, 2),
+    ("regex_is_valid", 177, 1),
+    // UUID (syscalls 190-193)
+    ("uuid_v4", 190, 0),
+    ("uuid_v7", 191, 0),
+    ("uuid_is_valid", 192, 1),
+    ("uuid_nil", 193, 0),
+];
+
 /// Code generator
 pub struct CodeGenerator {
     /// Constant pool
@@ -472,15 +601,28 @@ impl CodeGenerator {
             TypeExprKind::Optional(inner) => format!("{}?", self.type_expr_to_string(inner)),
             TypeExprKind::Array(inner) => format!("[{}]", self.type_expr_to_string(inner)),
             TypeExprKind::Tuple(types) => {
-                let parts: Vec<String> = types.iter().map(|t| self.type_expr_to_string(t)).collect();
+                let parts: Vec<String> =
+                    types.iter().map(|t| self.type_expr_to_string(t)).collect();
                 format!("({})", parts.join(", "))
             }
-            TypeExprKind::Function { params, return_type } => {
-                let param_strs: Vec<String> = params.iter().map(|t| self.type_expr_to_string(t)).collect();
-                format!("fn({}) -> {}", param_strs.join(", "), self.type_expr_to_string(return_type))
+            TypeExprKind::Function {
+                params,
+                return_type,
+            } => {
+                let param_strs: Vec<String> =
+                    params.iter().map(|t| self.type_expr_to_string(t)).collect();
+                format!(
+                    "fn({}) -> {}",
+                    param_strs.join(", "),
+                    self.type_expr_to_string(return_type)
+                )
             }
             TypeExprKind::Result { ok_type, err_type } => {
-                format!("Result<{}, {}>", self.type_expr_to_string(ok_type), self.type_expr_to_string(err_type))
+                format!(
+                    "Result<{}, {}>",
+                    self.type_expr_to_string(ok_type),
+                    self.type_expr_to_string(err_type)
+                )
             }
             TypeExprKind::Path(parts) => parts.join("::"),
         }
@@ -1002,7 +1144,11 @@ impl CodeGenerator {
                 name, params, body, ..
             } => {
                 // Find function index
-                let func_idx = self.functions.iter().position(|f| f.name == *name).unwrap();
+                let func_idx = self
+                    .functions
+                    .iter()
+                    .position(|f| f.name == *name)
+                    .unwrap_or_else(|| panic!("Function '{}' not found in function table", name));
 
                 // Save state
                 let prev_locals = std::mem::take(&mut self.locals);
@@ -1124,7 +1270,10 @@ impl CodeGenerator {
                 self.patch_jump(end_jump, self.current_offset());
 
                 // Patch break statements
-                let loop_ctx = self.loop_stack.pop().unwrap();
+                let loop_ctx = self
+                    .loop_stack
+                    .pop()
+                    .expect("loop stack should have context");
                 for break_offset in loop_ctx.break_patches {
                     self.patch_jump(break_offset, self.current_offset());
                 }
@@ -1232,7 +1381,10 @@ impl CodeGenerator {
                 // Patch exit jump
                 self.patch_jump(exit_jump, self.current_offset());
 
-                let loop_ctx = self.loop_stack.pop().unwrap();
+                let loop_ctx = self
+                    .loop_stack
+                    .pop()
+                    .expect("loop stack should have context");
                 for break_offset in loop_ctx.break_patches {
                     self.patch_jump(break_offset, self.current_offset());
                 }
@@ -1259,7 +1411,10 @@ impl CodeGenerator {
                 let delta = (loop_start as i16) - (self.current_offset() as i16) - 2;
                 self.emit_i16(delta);
 
-                let loop_ctx = self.loop_stack.pop().unwrap();
+                let loop_ctx = self
+                    .loop_stack
+                    .pop()
+                    .expect("loop stack should have context");
                 for break_offset in loop_ctx.break_patches {
                     self.patch_jump(break_offset, self.current_offset());
                 }
@@ -1375,7 +1530,9 @@ impl CodeGenerator {
                             .functions
                             .iter()
                             .position(|f| f.name == mangled_name)
-                            .unwrap();
+                            .unwrap_or_else(|| {
+                                panic!("Method function '{}' not found", mangled_name)
+                            });
                         self.functions[func_idx].code_offset = func_offset;
 
                         // Store the struct method mapping for method dispatch
@@ -1743,1273 +1900,30 @@ impl CodeGenerator {
                             return;
                         }
 
-                        // ================================================================
-                        // File I/O built-ins (syscalls 10-15)
-                        // ================================================================
-                        "file_open" => {
-                            // file_open(path: string, mode: int) -> int
-                            // mode: 0=read, 1=write, 2=append, 3=read+write
-                            if args.len() >= 2 {
-                                self.generate_expression(&args[0].value); // path
-                                self.generate_expression(&args[1].value); // mode
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(10);
-                            } else {
-                                self.errors
-                                    .push("file_open() requires 2 arguments".to_string());
-                            }
-                            return;
-                        }
-                        "file_read" => {
-                            // file_read(fd: int, max_bytes: int) -> string
-                            if args.len() >= 2 {
-                                self.generate_expression(&args[0].value); // fd
-                                self.generate_expression(&args[1].value); // max_bytes
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(11);
-                            } else {
-                                self.errors
-                                    .push("file_read() requires 2 arguments".to_string());
-                            }
-                            return;
-                        }
-                        "file_write" => {
-                            // file_write(fd: int, data: string) -> int
-                            if args.len() >= 2 {
-                                self.generate_expression(&args[0].value); // fd
-                                self.generate_expression(&args[1].value); // data
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(12);
-                            } else {
-                                self.errors
-                                    .push("file_write() requires 2 arguments".to_string());
-                            }
-                            return;
-                        }
-                        "file_close" => {
-                            // file_close(fd: int) -> bool
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(13);
-                            } else {
-                                self.errors
-                                    .push("file_close() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "file_exists" => {
-                            // file_exists(path: string) -> bool
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(14);
-                            } else {
-                                self.errors
-                                    .push("file_exists() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "file_size" => {
-                            // file_size(path: string) -> int
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(15);
-                            } else {
-                                self.errors
-                                    .push("file_size() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-
-                        // ================================================================
-                        // Environment built-ins (syscalls 20-21)
-                        // ================================================================
-                        "env_get" => {
-                            // env_get(name: string) -> string?
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(20);
-                            } else {
-                                self.errors
-                                    .push("env_get() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "env_args" => {
-                            // env_args() -> [string]
-                            self.emit_opcode(Opcode::Syscall);
-                            self.emit_u8(21);
-                            return;
-                        }
-                        "env_set" => {
-                            // env_set(name: string, value: string) -> bool
-                            if args.len() >= 2 {
-                                self.generate_expression(&args[0].value); // name
-                                self.generate_expression(&args[1].value); // value
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(200);
-                            } else {
-                                self.errors
-                                    .push("env_set() requires 2 arguments".to_string());
-                            }
-                            return;
-                        }
-                        "env_remove" => {
-                            // env_remove(name: string) -> bool
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(201);
-                            } else {
-                                self.errors
-                                    .push("env_remove() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "env_all" => {
-                            // env_all() -> [string]
-                            self.emit_opcode(Opcode::Syscall);
-                            self.emit_u8(202);
-                            return;
-                        }
-                        "env_keys" => {
-                            // env_keys() -> [string]
-                            self.emit_opcode(Opcode::Syscall);
-                            self.emit_u8(203);
-                            return;
-                        }
-                        "env_has" => {
-                            // env_has(name: string) -> bool
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(204);
-                            } else {
-                                self.errors
-                                    .push("env_has() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "env_exe" => {
-                            // env_exe() -> string
-                            self.emit_opcode(Opcode::Syscall);
-                            self.emit_u8(205);
-                            return;
-                        }
-                        "env_temp_dir" => {
-                            // env_temp_dir() -> string
-                            self.emit_opcode(Opcode::Syscall);
-                            self.emit_u8(206);
-                            return;
-                        }
-                        "env_home_dir" => {
-                            // env_home_dir() -> string
-                            self.emit_opcode(Opcode::Syscall);
-                            self.emit_u8(207);
-                            return;
-                        }
-
-                        // ================================================================
-                        // Time built-ins (syscalls 4-8, 130-135)
-                        // ================================================================
-                        "time_ms" => {
-                            // time_ms() -> int
-                            self.emit_opcode(Opcode::Syscall);
-                            self.emit_u8(4);
-                            return;
-                        }
-                        "sleep" => {
-                            // sleep(millis: int)
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(5);
-                            } else {
-                                self.errors.push("sleep() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "time_secs" => {
-                            // time_secs() -> int
-                            self.emit_opcode(Opcode::Syscall);
-                            self.emit_u8(6);
-                            return;
-                        }
-                        "time_micros" => {
-                            // time_micros() -> int
-                            self.emit_opcode(Opcode::Syscall);
-                            self.emit_u8(7);
-                            return;
-                        }
-                        "time_nanos" => {
-                            // time_nanos() -> int
-                            self.emit_opcode(Opcode::Syscall);
-                            self.emit_u8(8);
-                            return;
-                        }
-                        "time_format_iso" => {
-                            // time_format_iso(timestamp_ms: int) -> string
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(130);
-                            } else {
-                                self.errors
-                                    .push("time_format_iso() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "time_format" => {
-                            // time_format(timestamp_ms: int, format: string) -> string
-                            if args.len() >= 2 {
-                                self.generate_expression(&args[0].value); // timestamp_ms
-                                self.generate_expression(&args[1].value); // format
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(131);
-                            } else {
-                                self.errors
-                                    .push("time_format() requires 2 arguments".to_string());
-                            }
-                            return;
-                        }
-                        "time_parse_iso" => {
-                            // time_parse_iso(string) -> int
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(132);
-                            } else {
-                                self.errors
-                                    .push("time_parse_iso() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "time_timezone_offset" => {
-                            // time_timezone_offset() -> int
-                            self.emit_opcode(Opcode::Syscall);
-                            self.emit_u8(133);
-                            return;
-                        }
-                        "time_components" => {
-                            // time_components(timestamp_ms: int) -> [int]
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(134);
-                            } else {
-                                self.errors
-                                    .push("time_components() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "time_from_components" => {
-                            // time_from_components(year, month, day, hour, min, sec) -> int
-                            if args.len() >= 6 {
-                                self.generate_expression(&args[0].value); // year
-                                self.generate_expression(&args[1].value); // month
-                                self.generate_expression(&args[2].value); // day
-                                self.generate_expression(&args[3].value); // hour
-                                self.generate_expression(&args[4].value); // min
-                                self.generate_expression(&args[5].value); // sec
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(135);
-                            } else {
-                                self.errors.push(
-                                    "time_from_components() requires 6 arguments".to_string(),
-                                );
-                            }
-                            return;
-                        }
-
-                        // ================================================================
-                        // Random number generation built-ins (syscalls 40-41)
-                        // ================================================================
-                        "random" => {
-                            // random() -> float (0.0 to 1.0)
-                            self.emit_opcode(Opcode::Syscall);
-                            self.emit_u8(40);
-                            return;
-                        }
-                        "random_int" => {
-                            // random_int(min: int, max: int) -> int
-                            if args.len() >= 2 {
-                                self.generate_expression(&args[0].value); // min
-                                self.generate_expression(&args[1].value); // max
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(41);
-                            } else {
-                                self.errors
-                                    .push("random_int() requires 2 arguments".to_string());
-                            }
-                            return;
-                        }
-
-                        // ================================================================
-                        // Math built-ins (syscalls 140-163)
-                        // ================================================================
-                        "sqrt" => {
-                            // sqrt(x: float) -> float
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(140);
-                            } else {
-                                self.errors.push("sqrt() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "pow" => {
-                            // pow(base: float, exp: float) -> float
-                            if args.len() >= 2 {
-                                self.generate_expression(&args[0].value); // base
-                                self.generate_expression(&args[1].value); // exp
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(141);
-                            } else {
-                                self.errors.push("pow() requires 2 arguments".to_string());
-                            }
-                            return;
-                        }
-                        "exp" => {
-                            // exp(x: float) -> float
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(142);
-                            } else {
-                                self.errors.push("exp() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "ln" => {
-                            // ln(x: float) -> float
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(143);
-                            } else {
-                                self.errors.push("ln() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "log10" => {
-                            // log10(x: float) -> float
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(144);
-                            } else {
-                                self.errors.push("log10() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "log2" => {
-                            // log2(x: float) -> float
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(145);
-                            } else {
-                                self.errors.push("log2() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "sin" => {
-                            // sin(x: float) -> float
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(146);
-                            } else {
-                                self.errors.push("sin() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "cos" => {
-                            // cos(x: float) -> float
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(147);
-                            } else {
-                                self.errors.push("cos() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "tan" => {
-                            // tan(x: float) -> float
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(148);
-                            } else {
-                                self.errors.push("tan() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "asin" => {
-                            // asin(x: float) -> float
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(149);
-                            } else {
-                                self.errors.push("asin() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "acos" => {
-                            // acos(x: float) -> float
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(150);
-                            } else {
-                                self.errors.push("acos() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "atan" => {
-                            // atan(x: float) -> float
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(151);
-                            } else {
-                                self.errors.push("atan() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "atan2" => {
-                            // atan2(y: float, x: float) -> float
-                            if args.len() >= 2 {
-                                self.generate_expression(&args[0].value); // y
-                                self.generate_expression(&args[1].value); // x
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(152);
-                            } else {
-                                self.errors.push("atan2() requires 2 arguments".to_string());
-                            }
-                            return;
-                        }
-                        "sinh" => {
-                            // sinh(x: float) -> float
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(153);
-                            } else {
-                                self.errors.push("sinh() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "cosh" => {
-                            // cosh(x: float) -> float
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(154);
-                            } else {
-                                self.errors.push("cosh() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "tanh" => {
-                            // tanh(x: float) -> float
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(155);
-                            } else {
-                                self.errors.push("tanh() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "floor" => {
-                            // floor(x: float) -> float
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(156);
-                            } else {
-                                self.errors.push("floor() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "ceil" => {
-                            // ceil(x: float) -> float
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(157);
-                            } else {
-                                self.errors.push("ceil() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "round" => {
-                            // round(x: float) -> float
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(158);
-                            } else {
-                                self.errors.push("round() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "trunc" => {
-                            // trunc(x: float) -> float
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(159);
-                            } else {
-                                self.errors.push("trunc() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "is_nan" => {
-                            // is_nan(x: float) -> bool
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(160);
-                            } else {
-                                self.errors.push("is_nan() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "is_infinite" => {
-                            // is_infinite(x: float) -> bool
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(161);
-                            } else {
-                                self.errors
-                                    .push("is_infinite() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "is_finite" => {
-                            // is_finite(x: float) -> bool
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(162);
-                            } else {
-                                self.errors
-                                    .push("is_finite() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "abs" => {
-                            // abs(x: float) -> float
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(163);
-                            } else {
-                                self.errors.push("abs() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-
-                        // ================================================================
-                        // String operation built-ins (syscalls 30-39)
-                        // ================================================================
-                        "str_char_code" => {
-                            // str_char_code(str: string, index: int) -> int
-                            if args.len() >= 2 {
-                                self.generate_expression(&args[0].value); // str
-                                self.generate_expression(&args[1].value); // index
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(30);
-                            } else {
-                                self.errors
-                                    .push("str_char_code() requires 2 arguments".to_string());
-                            }
-                            return;
-                        }
-                        "str_from_char_code" => {
-                            // str_from_char_code(code: int) -> string
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value); // code
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(31);
-                            } else {
-                                self.errors
-                                    .push("str_from_char_code() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "str_to_upper" => {
-                            // str_to_upper(str: string) -> string
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(32);
-                            } else {
-                                self.errors
-                                    .push("str_to_upper() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "str_to_lower" => {
-                            // str_to_lower(str: string) -> string
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(33);
-                            } else {
-                                self.errors
-                                    .push("str_to_lower() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "str_substring" => {
-                            // str_substring(str: string, start: int, end: int) -> string
-                            if args.len() >= 3 {
-                                self.generate_expression(&args[0].value); // str
-                                self.generate_expression(&args[1].value); // start
-                                self.generate_expression(&args[2].value); // end
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(34);
-                            } else {
-                                self.errors
-                                    .push("str_substring() requires 3 arguments".to_string());
-                            }
-                            return;
-                        }
-                        "str_index_of" => {
-                            // str_index_of(str: string, substr: string) -> int
-                            if args.len() >= 2 {
-                                self.generate_expression(&args[0].value); // str
-                                self.generate_expression(&args[1].value); // substr
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(35);
-                            } else {
-                                self.errors
-                                    .push("str_index_of() requires 2 arguments".to_string());
-                            }
-                            return;
-                        }
-                        "str_split" => {
-                            // str_split(str: string, delimiter: string) -> [string]
-                            if args.len() >= 2 {
-                                self.generate_expression(&args[0].value); // str
-                                self.generate_expression(&args[1].value); // delimiter
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(36);
-                            } else {
-                                self.errors
-                                    .push("str_split() requires 2 arguments".to_string());
-                            }
-                            return;
-                        }
-                        "str_trim" => {
-                            // str_trim(str: string) -> string
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(37);
-                            } else {
-                                self.errors
-                                    .push("str_trim() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "str_trim_start" => {
-                            // str_trim_start(str: string) -> string
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(38);
-                            } else {
-                                self.errors
-                                    .push("str_trim_start() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "str_trim_end" => {
-                            // str_trim_end(str: string) -> string
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(39);
-                            } else {
-                                self.errors
-                                    .push("str_trim_end() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-
-                        // ================================================================
-                        // Base64 encoding/decoding built-ins (syscalls 60-63)
-                        // ================================================================
-                        "base64_encode" => {
-                            // base64_encode(input: string) -> string
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(60);
-                            } else {
-                                self.errors
-                                    .push("base64_encode() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "base64_decode" => {
-                            // base64_decode(input: string) -> string
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(61);
-                            } else {
-                                self.errors
-                                    .push("base64_decode() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "base64_encode_url" => {
-                            // base64_encode_url(input: string) -> string
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(62);
-                            } else {
-                                self.errors
-                                    .push("base64_encode_url() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "base64_decode_url" => {
-                            // base64_decode_url(input: string) -> string
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(63);
-                            } else {
-                                self.errors
-                                    .push("base64_decode_url() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-
-                        // ================================================================
-                        // URL encoding/decoding built-ins (syscalls 110-111)
-                        // ================================================================
-                        "url_encode" => {
-                            // url_encode(input: string) -> string
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(110);
-                            } else {
-                                self.errors
-                                    .push("url_encode() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "url_decode" => {
-                            // url_decode(input: string) -> string
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(111);
-                            } else {
-                                self.errors
-                                    .push("url_decode() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-
-                        // ================================================================
-                        // HTTP Client built-ins (syscalls 120-122)
-                        // ================================================================
-                        "http_get" => {
-                            // http_get(url: string) -> [int, string]
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value); // url
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(120);
-                            } else {
-                                self.errors
-                                    .push("http_get() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "http_post" => {
-                            // http_post(url: string, body: string, content_type: string) -> [int, string]
-                            if args.len() >= 3 {
-                                self.generate_expression(&args[0].value); // url
-                                self.generate_expression(&args[1].value); // body
-                                self.generate_expression(&args[2].value); // content_type
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(121);
-                            } else {
-                                self.errors
-                                    .push("http_post() requires 3 arguments".to_string());
-                            }
-                            return;
-                        }
-                        "http_request" => {
-                            // http_request(method: string, url: string, headers: string, body: string) -> [int, string]
-                            if args.len() >= 4 {
-                                self.generate_expression(&args[0].value); // method
-                                self.generate_expression(&args[1].value); // url
-                                self.generate_expression(&args[2].value); // headers
-                                self.generate_expression(&args[3].value); // body
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(122);
-                            } else {
-                                self.errors
-                                    .push("http_request() requires 4 arguments".to_string());
-                            }
-                            return;
-                        }
-
-                        // ================================================================
-                        // Cryptographic hash built-ins (syscalls 70-73)
-                        // ================================================================
-                        "md5" => {
-                            // md5(input: string) -> string (hex)
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(70);
-                            } else {
-                                self.errors.push("md5() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "sha1" => {
-                            // sha1(input: string) -> string (hex)
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(71);
-                            } else {
-                                self.errors.push("sha1() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "sha256" => {
-                            // sha256(input: string) -> string (hex)
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(72);
-                            } else {
-                                self.errors.push("sha256() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "sha512" => {
-                            // sha512(input: string) -> string (hex)
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(73);
-                            } else {
-                                self.errors.push("sha512() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-
-                        // ================================================================
-                        // JSON built-ins (syscalls 50-52)
-                        // ================================================================
-                        "json_parse" => {
-                            // json_parse(json_str: string) -> value
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(50);
-                            } else {
-                                self.errors
-                                    .push("json_parse() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "json_stringify" => {
-                            // json_stringify(value) -> string
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(51);
-                            } else {
-                                self.errors
-                                    .push("json_stringify() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "json_pretty" => {
-                            // json_pretty(value) -> string (with pretty printing)
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(52);
-                            } else {
-                                self.errors
-                                    .push("json_pretty() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-
-                        // ================================================================
-                        // TCP Networking built-ins (syscalls 80-84)
-                        // ================================================================
-                        "tcp_connect" => {
-                            // tcp_connect(host: string, port: int) -> int
-                            if args.len() >= 2 {
-                                self.generate_expression(&args[0].value); // host
-                                self.generate_expression(&args[1].value); // port
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(80);
-                            } else {
-                                self.errors
-                                    .push("tcp_connect() requires 2 arguments".to_string());
-                            }
-                            return;
-                        }
-                        "tcp_write" => {
-                            // tcp_write(socket_id: int, data: string) -> int
-                            if args.len() >= 2 {
-                                self.generate_expression(&args[0].value); // socket_id
-                                self.generate_expression(&args[1].value); // data
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(81);
-                            } else {
-                                self.errors
-                                    .push("tcp_write() requires 2 arguments".to_string());
-                            }
-                            return;
-                        }
-                        "tcp_read" => {
-                            // tcp_read(socket_id: int, max_bytes: int) -> string
-                            if args.len() >= 2 {
-                                self.generate_expression(&args[0].value); // socket_id
-                                self.generate_expression(&args[1].value); // max_bytes
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(82);
-                            } else {
-                                self.errors
-                                    .push("tcp_read() requires 2 arguments".to_string());
-                            }
-                            return;
-                        }
-                        "tcp_close" => {
-                            // tcp_close(socket_id: int) -> bool
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(83);
-                            } else {
-                                self.errors
-                                    .push("tcp_close() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "dns_lookup" => {
-                            // dns_lookup(hostname: string) -> string
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(84);
-                            } else {
-                                self.errors
-                                    .push("dns_lookup() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-
-                        // ================================================================
-                        // OS built-ins (syscalls 90-101)
-                        // ================================================================
-                        "getcwd" => {
-                            // getcwd() -> string
-                            self.emit_opcode(Opcode::Syscall);
-                            self.emit_u8(90);
-                            return;
-                        }
-                        "chdir" => {
-                            // chdir(path: string) -> bool
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(91);
-                            } else {
-                                self.errors.push("chdir() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "mkdir" => {
-                            // mkdir(path: string) -> bool
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(92);
-                            } else {
-                                self.errors.push("mkdir() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "mkdir_all" => {
-                            // mkdir_all(path: string) -> bool
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(93);
-                            } else {
-                                self.errors
-                                    .push("mkdir_all() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "rmdir" => {
-                            // rmdir(path: string) -> bool
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(94);
-                            } else {
-                                self.errors.push("rmdir() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "remove" => {
-                            // remove(path: string) -> bool
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(95);
-                            } else {
-                                self.errors.push("remove() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "remove_all" => {
-                            // remove_all(path: string) -> bool
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(96);
-                            } else {
-                                self.errors
-                                    .push("remove_all() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "listdir" => {
-                            // listdir(path: string) -> [string]
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(97);
-                            } else {
-                                self.errors
-                                    .push("listdir() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "is_dir" => {
-                            // is_dir(path: string) -> bool
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(98);
-                            } else {
-                                self.errors.push("is_dir() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "is_file" => {
-                            // is_file(path: string) -> bool
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(99);
-                            } else {
-                                self.errors
-                                    .push("is_file() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "rename" => {
-                            // rename(from: string, to: string) -> bool
-                            if args.len() >= 2 {
-                                self.generate_expression(&args[0].value); // from
-                                self.generate_expression(&args[1].value); // to
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(100);
-                            } else {
-                                self.errors
-                                    .push("rename() requires 2 arguments".to_string());
-                            }
-                            return;
-                        }
-                        "copy" => {
-                            // copy(from: string, to: string) -> bool
-                            if args.len() >= 2 {
-                                self.generate_expression(&args[0].value); // from
-                                self.generate_expression(&args[1].value); // to
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(101);
-                            } else {
-                                self.errors.push("copy() requires 2 arguments".to_string());
-                            }
-                            return;
-                        }
-
-                        // ================================================================
-                        // Regex built-ins (syscalls 170-177)
-                        // ================================================================
-                        "regex_match" => {
-                            // regex_match(pattern: string, text: string) -> bool
-                            if args.len() >= 2 {
-                                self.generate_expression(&args[0].value); // pattern
-                                self.generate_expression(&args[1].value); // text
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(170);
-                            } else {
-                                self.errors
-                                    .push("regex_match() requires 2 arguments".to_string());
-                            }
-                            return;
-                        }
-                        "regex_find" => {
-                            // regex_find(pattern: string, text: string) -> string
-                            if args.len() >= 2 {
-                                self.generate_expression(&args[0].value); // pattern
-                                self.generate_expression(&args[1].value); // text
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(171);
-                            } else {
-                                self.errors
-                                    .push("regex_find() requires 2 arguments".to_string());
-                            }
-                            return;
-                        }
-                        "regex_find_all" => {
-                            // regex_find_all(pattern: string, text: string) -> [string]
-                            if args.len() >= 2 {
-                                self.generate_expression(&args[0].value); // pattern
-                                self.generate_expression(&args[1].value); // text
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(172);
-                            } else {
-                                self.errors
-                                    .push("regex_find_all() requires 2 arguments".to_string());
-                            }
-                            return;
-                        }
-                        "regex_replace" => {
-                            // regex_replace(pattern: string, text: string, replacement: string) -> string
-                            if args.len() >= 3 {
-                                self.generate_expression(&args[0].value); // pattern
-                                self.generate_expression(&args[1].value); // text
-                                self.generate_expression(&args[2].value); // replacement
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(173);
-                            } else {
-                                self.errors
-                                    .push("regex_replace() requires 3 arguments".to_string());
-                            }
-                            return;
-                        }
-                        "regex_replace_all" => {
-                            // regex_replace_all(pattern: string, text: string, replacement: string) -> string
-                            if args.len() >= 3 {
-                                self.generate_expression(&args[0].value); // pattern
-                                self.generate_expression(&args[1].value); // text
-                                self.generate_expression(&args[2].value); // replacement
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(174);
-                            } else {
-                                self.errors
-                                    .push("regex_replace_all() requires 3 arguments".to_string());
-                            }
-                            return;
-                        }
-                        "regex_split" => {
-                            // regex_split(pattern: string, text: string) -> [string]
-                            if args.len() >= 2 {
-                                self.generate_expression(&args[0].value); // pattern
-                                self.generate_expression(&args[1].value); // text
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(175);
-                            } else {
-                                self.errors
-                                    .push("regex_split() requires 2 arguments".to_string());
-                            }
-                            return;
-                        }
-                        "regex_captures" => {
-                            // regex_captures(pattern: string, text: string) -> [string]
-                            if args.len() >= 2 {
-                                self.generate_expression(&args[0].value); // pattern
-                                self.generate_expression(&args[1].value); // text
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(176);
-                            } else {
-                                self.errors
-                                    .push("regex_captures() requires 2 arguments".to_string());
-                            }
-                            return;
-                        }
-                        "regex_is_valid" => {
-                            // regex_is_valid(pattern: string) -> bool
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value); // pattern
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(177);
-                            } else {
-                                self.errors
-                                    .push("regex_is_valid() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-
-                        // ================================================================
-                        // UUID functions (syscalls 190-193)
-                        // ================================================================
-                        "uuid_v4" => {
-                            // uuid_v4() -> string
-                            self.emit_opcode(Opcode::Syscall);
-                            self.emit_u8(190);
-                            return;
-                        }
-                        "uuid_v7" => {
-                            // uuid_v7() -> string
-                            self.emit_opcode(Opcode::Syscall);
-                            self.emit_u8(191);
-                            return;
-                        }
-                        "uuid_is_valid" => {
-                            // uuid_is_valid(s: string) -> bool
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value); // string to validate
-                                self.emit_opcode(Opcode::Syscall);
-                                self.emit_u8(192);
-                            } else {
-                                self.errors
-                                    .push("uuid_is_valid() requires 1 argument".to_string());
-                            }
-                            return;
-                        }
-                        "uuid_nil" => {
-                            // uuid_nil() -> string
-                            self.emit_opcode(Opcode::Syscall);
-                            self.emit_u8(193);
-                            return;
-                        }
-
                         _ => {}
+                    }
+
+                    // Syscall table lookup for builtins that use the generic syscall dispatch
+                    if let Some((_, syscall_num, required_args)) = SYSCALL_BUILTINS
+                        .iter()
+                        .copied()
+                        .find(|(n, _, _)| *n == name.as_str())
+                    {
+                        if args.len() >= required_args {
+                            for arg in args {
+                                self.generate_expression(&arg.value);
+                            }
+                            self.emit_opcode(Opcode::Syscall);
+                            self.emit_u8(syscall_num);
+                        } else {
+                            self.errors.push(format!(
+                                "{}() requires {} argument{}",
+                                name,
+                                required_args,
+                                if required_args == 1 { "" } else { "s" }
+                            ));
+                        }
+                        return;
                     }
                 }
 
@@ -3095,8 +2009,7 @@ impl CodeGenerator {
                                     }
                                 } else {
                                     // Check for impl methods (works for all types, not just primitives)
-                                    if let Some(methods) = self.impl_methods.get(obj_type)
-                                    {
+                                    if let Some(methods) = self.impl_methods.get(obj_type) {
                                         if let Some(mangled_name) = methods.get(field).cloned() {
                                             // Get function offset before mutable borrow
                                             let func_offset = self
@@ -3112,10 +2025,12 @@ impl CodeGenerator {
                                                     self.generate_expression(&arg.value);
                                                 }
                                                 // Then load function and call
-                                                let idx =
-                                                    self.add_constant_internal(Constant::Function(offset));
+                                                let idx = self.add_constant_internal(
+                                                    Constant::Function(offset),
+                                                );
                                                 if offset == 0 {
-                                                    self.pending_func_patches.push((idx, mangled_name));
+                                                    self.pending_func_patches
+                                                        .push((idx, mangled_name));
                                                 }
                                                 self.emit_opcode(Opcode::LoadConst);
                                                 self.emit_u16(idx);
@@ -3141,8 +2056,7 @@ impl CodeGenerator {
                                 // No type info - check for primitive impl methods
                                 let receiver_type = self.expr_type_name(object);
                                 if let Some(ref type_name) = receiver_type {
-                                    if let Some(methods) = self.impl_methods.get(type_name)
-                                    {
+                                    if let Some(methods) = self.impl_methods.get(type_name) {
                                         if let Some(mangled_name) = methods.get(field).cloned() {
                                             // Get function offset before mutable borrow
                                             let func_offset = self
@@ -3158,10 +2072,12 @@ impl CodeGenerator {
                                                     self.generate_expression(&arg.value);
                                                 }
                                                 // Then load function and call
-                                                let idx =
-                                                    self.add_constant_internal(Constant::Function(offset));
+                                                let idx = self.add_constant_internal(
+                                                    Constant::Function(offset),
+                                                );
                                                 if offset == 0 {
-                                                    self.pending_func_patches.push((idx, mangled_name));
+                                                    self.pending_func_patches
+                                                        .push((idx, mangled_name));
                                                 }
                                                 self.emit_opcode(Opcode::LoadConst);
                                                 self.emit_u16(idx);
@@ -4152,20 +3068,18 @@ impl CodeGenerator {
                     None
                 }
             }
-            ExpressionKind::Binary { left, right, op } => {
-                match op {
-                    BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
-                        let left_type = self.expr_type_name(left);
-                        let right_type = self.expr_type_name(right);
-                        match (left_type.as_deref(), right_type.as_deref()) {
-                            (Some("float"), _) | (_, Some("float")) => Some("float".to_string()),
-                            (Some("int"), Some("int")) => Some("int".to_string()),
-                            _ => None,
-                        }
+            ExpressionKind::Binary { left, right, op } => match op {
+                BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
+                    let left_type = self.expr_type_name(left);
+                    let right_type = self.expr_type_name(right);
+                    match (left_type.as_deref(), right_type.as_deref()) {
+                        (Some("float"), _) | (_, Some("float")) => Some("float".to_string()),
+                        (Some("int"), Some("int")) => Some("int".to_string()),
+                        _ => None,
                     }
-                    _ => None,
                 }
-            }
+                _ => None,
+            },
             _ => None,
         }
     }

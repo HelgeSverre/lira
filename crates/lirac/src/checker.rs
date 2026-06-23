@@ -4,6 +4,7 @@
 //! See docs/lira/02-type-system.md for the full specification.
 
 use crate::ast::*;
+use crate::errors::CheckerError;
 use crate::ids::SymbolId;
 use crate::sema::SemanticTables;
 use std::collections::{HashMap, HashSet};
@@ -284,6 +285,7 @@ pub struct TypeEnv {
     generic_functions: HashMap<String, Vec<String>>, // fn_name -> [T, U, ...]
     next_type_var: u32,
     errors: Vec<String>,
+    structured_errors: Vec<CheckerError>,
 }
 
 /// Type definition for user-defined types
@@ -325,51 +327,26 @@ impl TypeEnv {
             generic_functions: HashMap::new(),
             next_type_var: 0,
             errors: Vec::new(),
+            structured_errors: Vec::new(),
         };
 
         // Add built-in types
-        env.type_defs.insert(
-            "int".to_string(),
-            TypeDef {
-                name: "int".to_string(),
-                kind: TypeDefKind::Alias(Type::Int),
-            },
-        );
-        env.type_defs.insert(
-            "float".to_string(),
-            TypeDef {
-                name: "float".to_string(),
-                kind: TypeDefKind::Alias(Type::Float),
-            },
-        );
-        env.type_defs.insert(
-            "bool".to_string(),
-            TypeDef {
-                name: "bool".to_string(),
-                kind: TypeDefKind::Alias(Type::Bool),
-            },
-        );
-        env.type_defs.insert(
-            "string".to_string(),
-            TypeDef {
-                name: "string".to_string(),
-                kind: TypeDefKind::Alias(Type::String),
-            },
-        );
-        env.type_defs.insert(
-            "char".to_string(),
-            TypeDef {
-                name: "char".to_string(),
-                kind: TypeDefKind::Alias(Type::Char),
-            },
-        );
-        env.type_defs.insert(
-            "void".to_string(),
-            TypeDef {
-                name: "void".to_string(),
-                kind: TypeDefKind::Alias(Type::Void),
-            },
-        );
+        for (name, ty) in [
+            ("int", Type::Int),
+            ("float", Type::Float),
+            ("bool", Type::Bool),
+            ("string", Type::String),
+            ("char", Type::Char),
+            ("void", Type::Void),
+        ] {
+            env.type_defs.insert(
+                name.to_string(),
+                TypeDef {
+                    name: name.to_string(),
+                    kind: TypeDefKind::Alias(ty),
+                },
+            );
+        }
 
         // Add Result as a built-in enum-like type with Ok and Err variants
         // Result::Ok(value) and Result::Err(error) are the constructors
@@ -378,8 +355,6 @@ impl TypeEnv {
             TypeDef {
                 name: "Result".to_string(),
                 kind: TypeDefKind::Enum {
-                    // Ok variant takes one value, Err variant takes one value
-                    // The actual types are generic but we use Any for the built-in
                     variants: vec![
                         ("Ok".to_string(), vec![Type::Any]),
                         ("Err".to_string(), vec![Type::Any]),
@@ -388,1386 +363,302 @@ impl TypeEnv {
             },
         );
 
-        // Add built-in functions
-        env.define(Symbol {
-            name: "print".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Any],
-                return_type: Box::new(Type::Void),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
+        let mut reg = |name: &str, params: Vec<Type>, ret: Type, required: usize| {
+            env.define(Symbol {
+                name: name.to_string(),
+                ty: Type::Function {
+                    params,
+                    return_type: Box::new(ret),
+                    required_params: required,
+                },
+                mutable: false,
+                kind: SymbolKind::Function,
+            });
+        };
 
-        env.define(Symbol {
-            name: "println".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Any],
-                return_type: Box::new(Type::Void),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
+        // Core built-in functions
+        reg("print", vec![Type::Any], Type::Void, 1);
+        reg("println", vec![Type::Any], Type::Void, 1);
 
         // Channel built-in functions
-        // chan() or chan(capacity)
-        env.define(Symbol {
-            name: "chan".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Int],          // Optional capacity (variadic in practice)
-                return_type: Box::new(Type::Any), // Channel type
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "send".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Any, Type::Any], // channel, value
-                return_type: Box::new(Type::Void),
-                required_params: 2,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "recv".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Any],          // channel
-                return_type: Box::new(Type::Any), // received value
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "close".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Any], // channel
-                return_type: Box::new(Type::Void),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
+        reg("chan", vec![Type::Int], Type::Any, 1);
+        reg("send", vec![Type::Any, Type::Any], Type::Void, 2);
+        reg("recv", vec![Type::Any], Type::Any, 1);
+        reg("close", vec![Type::Any], Type::Void, 1);
 
         // Fiber built-in functions
-        env.define(Symbol {
-            name: "fiber_yield".to_string(),
-            ty: Type::Function {
-                params: vec![],
-                return_type: Box::new(Type::Void),
-                required_params: 0,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "fiber_id".to_string(),
-            ty: Type::Function {
-                params: vec![],
-                return_type: Box::new(Type::Int),
-                required_params: 0,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
+        reg("fiber_yield", vec![], Type::Void, 0);
+        reg("fiber_id", vec![], Type::Int, 0);
 
         // Array built-in functions
-        env.define(Symbol {
-            name: "len".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Any], // array or string
-                return_type: Box::new(Type::Int),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "push".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Any, Type::Any], // array, value
-                return_type: Box::new(Type::Void),
-                required_params: 2,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "pop".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Any], // array
-                return_type: Box::new(Type::Any),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
+        reg("len", vec![Type::Any], Type::Int, 1);
+        reg("push", vec![Type::Any, Type::Any], Type::Void, 2);
+        reg("pop", vec![Type::Any], Type::Any, 1);
 
         // ================================================================
         // File I/O built-in functions
         // ================================================================
-
-        env.define(Symbol {
-            name: "file_open".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String, Type::Int], // path, mode
-                return_type: Box::new(Type::Int),      // file descriptor
-                required_params: 2,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "file_read".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Int, Type::Int], // fd, max_bytes
-                return_type: Box::new(Type::String),
-                required_params: 2,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "file_write".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Int, Type::String], // fd, data
-                return_type: Box::new(Type::Int),      // bytes written
-                required_params: 2,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "file_close".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Int], // fd
-                return_type: Box::new(Type::Bool),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "file_exists".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String], // path
-                return_type: Box::new(Type::Bool),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "file_size".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String], // path
-                return_type: Box::new(Type::Int),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
+        reg("file_open", vec![Type::String, Type::Int], Type::Int, 2);
+        reg("file_read", vec![Type::Int, Type::Int], Type::String, 2);
+        reg("file_write", vec![Type::Int, Type::String], Type::Int, 2);
+        reg("file_close", vec![Type::Int], Type::Bool, 1);
+        reg("file_exists", vec![Type::String], Type::Bool, 1);
+        reg("file_size", vec![Type::String], Type::Int, 1);
 
         // ================================================================
         // Environment built-in functions
         // ================================================================
-
-        env.define(Symbol {
-            name: "env_get".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String], // env var name
-                return_type: Box::new(Type::Optional(Box::new(Type::String))),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "env_args".to_string(),
-            ty: Type::Function {
-                params: vec![],
-                return_type: Box::new(Type::Array(Box::new(Type::String))),
-                required_params: 0,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "env_set".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String, Type::String], // name, value
-                return_type: Box::new(Type::Bool),
-                required_params: 2,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "env_remove".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String], // name
-                return_type: Box::new(Type::Bool),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "env_all".to_string(),
-            ty: Type::Function {
-                params: vec![],
-                return_type: Box::new(Type::Array(Box::new(Type::String))),
-                required_params: 0,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "env_keys".to_string(),
-            ty: Type::Function {
-                params: vec![],
-                return_type: Box::new(Type::Array(Box::new(Type::String))),
-                required_params: 0,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "env_has".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String], // name
-                return_type: Box::new(Type::Bool),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "env_exe".to_string(),
-            ty: Type::Function {
-                params: vec![],
-                return_type: Box::new(Type::String),
-                required_params: 0,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "env_temp_dir".to_string(),
-            ty: Type::Function {
-                params: vec![],
-                return_type: Box::new(Type::String),
-                required_params: 0,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "env_home_dir".to_string(),
-            ty: Type::Function {
-                params: vec![],
-                return_type: Box::new(Type::String),
-                required_params: 0,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
+        reg(
+            "env_get",
+            vec![Type::String],
+            Type::Optional(Box::new(Type::String)),
+            1,
+        );
+        reg("env_args", vec![], Type::Array(Box::new(Type::String)), 0);
+        reg("env_set", vec![Type::String, Type::String], Type::Bool, 2);
+        reg("env_remove", vec![Type::String], Type::Bool, 1);
+        reg("env_all", vec![], Type::Array(Box::new(Type::String)), 0);
+        reg("env_keys", vec![], Type::Array(Box::new(Type::String)), 0);
+        reg("env_has", vec![Type::String], Type::Bool, 1);
+        reg("env_exe", vec![], Type::String, 0);
+        reg("env_temp_dir", vec![], Type::String, 0);
+        reg("env_home_dir", vec![], Type::String, 0);
 
         // ================================================================
         // Time built-in functions
         // ================================================================
-
-        env.define(Symbol {
-            name: "time_ms".to_string(),
-            ty: Type::Function {
-                params: vec![],
-                return_type: Box::new(Type::Int),
-                required_params: 0,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "sleep".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Int], // milliseconds
-                return_type: Box::new(Type::Void),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "time_secs".to_string(),
-            ty: Type::Function {
-                params: vec![],
-                return_type: Box::new(Type::Int),
-                required_params: 0,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "time_micros".to_string(),
-            ty: Type::Function {
-                params: vec![],
-                return_type: Box::new(Type::Int),
-                required_params: 0,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "time_nanos".to_string(),
-            ty: Type::Function {
-                params: vec![],
-                return_type: Box::new(Type::Int),
-                required_params: 0,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "time_format_iso".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Int], // timestamp_ms
-                return_type: Box::new(Type::String),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "time_format".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Int, Type::String], // timestamp_ms, format
-                return_type: Box::new(Type::String),
-                required_params: 2,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "time_parse_iso".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String], // ISO 8601 string
-                return_type: Box::new(Type::Int),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "time_timezone_offset".to_string(),
-            ty: Type::Function {
-                params: vec![],
-                return_type: Box::new(Type::Int), // offset in minutes
-                required_params: 0,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "time_components".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Int],                                 // timestamp_ms
-                return_type: Box::new(Type::Array(Box::new(Type::Int))), // [year, month, day, hour, min, sec]
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "time_from_components".to_string(),
-            ty: Type::Function {
-                params: vec![
-                    Type::Int, // year
-                    Type::Int, // month
-                    Type::Int, // day
-                    Type::Int, // hour
-                    Type::Int, // minute
-                    Type::Int, // second
-                ],
-                return_type: Box::new(Type::Int), // timestamp_ms
-                required_params: 6,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
+        reg("time_ms", vec![], Type::Int, 0);
+        reg("sleep", vec![Type::Int], Type::Void, 1);
+        reg("time_secs", vec![], Type::Int, 0);
+        reg("time_micros", vec![], Type::Int, 0);
+        reg("time_nanos", vec![], Type::Int, 0);
+        reg("time_format_iso", vec![Type::Int], Type::String, 1);
+        reg(
+            "time_format",
+            vec![Type::Int, Type::String],
+            Type::String,
+            2,
+        );
+        reg("time_parse_iso", vec![Type::String], Type::Int, 1);
+        reg("time_timezone_offset", vec![], Type::Int, 0);
+        reg(
+            "time_components",
+            vec![Type::Int],
+            Type::Array(Box::new(Type::Int)),
+            1,
+        );
+        reg(
+            "time_from_components",
+            vec![
+                Type::Int,
+                Type::Int,
+                Type::Int,
+                Type::Int,
+                Type::Int,
+                Type::Int,
+            ],
+            Type::Int,
+            6,
+        );
 
         // ================================================================
         // String operation built-in functions
         // ================================================================
-
-        env.define(Symbol {
-            name: "str_char_code".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String, Type::Int], // str, index
-                return_type: Box::new(Type::Int),      // char code (-1 if out of bounds)
-                required_params: 2,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "str_from_char_code".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Int], // char code
-                return_type: Box::new(Type::String),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "str_to_upper".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String],
-                return_type: Box::new(Type::String),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "str_to_lower".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String],
-                return_type: Box::new(Type::String),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "str_substring".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String, Type::Int, Type::Int], // str, start, end
-                return_type: Box::new(Type::String),
-                required_params: 3,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "str_index_of".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String, Type::String], // str, substr
-                return_type: Box::new(Type::Int),         // -1 if not found
-                required_params: 2,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "str_split".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String, Type::String], // str, delimiter
-                return_type: Box::new(Type::Array(Box::new(Type::String))),
-                required_params: 2,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "str_trim".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String],
-                return_type: Box::new(Type::String),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "str_trim_start".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String],
-                return_type: Box::new(Type::String),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "str_trim_end".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String],
-                return_type: Box::new(Type::String),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
+        reg("str_char_code", vec![Type::String, Type::Int], Type::Int, 2);
+        reg("str_from_char_code", vec![Type::Int], Type::String, 1);
+        reg("str_to_upper", vec![Type::String], Type::String, 1);
+        reg("str_to_lower", vec![Type::String], Type::String, 1);
+        reg(
+            "str_substring",
+            vec![Type::String, Type::Int, Type::Int],
+            Type::String,
+            3,
+        );
+        reg(
+            "str_index_of",
+            vec![Type::String, Type::String],
+            Type::Int,
+            2,
+        );
+        reg(
+            "str_split",
+            vec![Type::String, Type::String],
+            Type::Array(Box::new(Type::String)),
+            2,
+        );
+        reg("str_trim", vec![Type::String], Type::String, 1);
+        reg("str_trim_start", vec![Type::String], Type::String, 1);
+        reg("str_trim_end", vec![Type::String], Type::String, 1);
 
         // ================================================================
         // Random number generation built-in functions
         // ================================================================
-
-        env.define(Symbol {
-            name: "random".to_string(),
-            ty: Type::Function {
-                params: vec![],
-                return_type: Box::new(Type::Float),
-                required_params: 0,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "random_int".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Int, Type::Int], // min, max
-                return_type: Box::new(Type::Int),
-                required_params: 2,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
+        reg("random", vec![], Type::Float, 0);
+        reg("random_int", vec![Type::Int, Type::Int], Type::Int, 2);
 
         // ================================================================
         // Base64 encoding/decoding built-in functions
         // ================================================================
-
-        env.define(Symbol {
-            name: "base64_encode".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String],
-                return_type: Box::new(Type::String),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "base64_decode".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String],
-                return_type: Box::new(Type::String),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "base64_encode_url".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String],
-                return_type: Box::new(Type::String),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "base64_decode_url".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String],
-                return_type: Box::new(Type::String),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
+        reg("base64_encode", vec![Type::String], Type::String, 1);
+        reg("base64_decode", vec![Type::String], Type::String, 1);
+        reg("base64_encode_url", vec![Type::String], Type::String, 1);
+        reg("base64_decode_url", vec![Type::String], Type::String, 1);
 
         // ================================================================
         // URL encoding/decoding built-in functions
         // ================================================================
-
-        env.define(Symbol {
-            name: "url_encode".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String],
-                return_type: Box::new(Type::String),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "url_decode".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String],
-                return_type: Box::new(Type::String),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
+        reg("url_encode", vec![Type::String], Type::String, 1);
+        reg("url_decode", vec![Type::String], Type::String, 1);
 
         // ================================================================
         // HTTP Client built-in functions
         // ================================================================
-
-        env.define(Symbol {
-            name: "http_get".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String],                              // url
-                return_type: Box::new(Type::Array(Box::new(Type::Any))), // [status, body]
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "http_post".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String, Type::String, Type::String], // url, body, content_type
-                return_type: Box::new(Type::Array(Box::new(Type::Any))), // [status, body]
-                required_params: 3,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "http_request".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String, Type::String, Type::String, Type::String], // method, url, headers, body
-                return_type: Box::new(Type::Array(Box::new(Type::Any))), // [status, body]
-                required_params: 4,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
+        reg(
+            "http_get",
+            vec![Type::String],
+            Type::Array(Box::new(Type::Any)),
+            1,
+        );
+        reg(
+            "http_post",
+            vec![Type::String, Type::String, Type::String],
+            Type::Array(Box::new(Type::Any)),
+            3,
+        );
+        reg(
+            "http_request",
+            vec![Type::String, Type::String, Type::String, Type::String],
+            Type::Array(Box::new(Type::Any)),
+            4,
+        );
 
         // ================================================================
         // Cryptographic hash built-in functions
         // ================================================================
-
-        env.define(Symbol {
-            name: "md5".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String],
-                return_type: Box::new(Type::String),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "sha1".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String],
-                return_type: Box::new(Type::String),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "sha256".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String],
-                return_type: Box::new(Type::String),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "sha512".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String],
-                return_type: Box::new(Type::String),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
+        reg("md5", vec![Type::String], Type::String, 1);
+        reg("sha1", vec![Type::String], Type::String, 1);
+        reg("sha256", vec![Type::String], Type::String, 1);
+        reg("sha512", vec![Type::String], Type::String, 1);
 
         // ================================================================
         // JSON built-in functions
         // ================================================================
-
-        env.define(Symbol {
-            name: "json_parse".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String],
-                return_type: Box::new(Type::Any), // Can return any JSON value type
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "json_stringify".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Any],
-                return_type: Box::new(Type::String),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "json_pretty".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Any],
-                return_type: Box::new(Type::String),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
+        reg("json_parse", vec![Type::String], Type::Any, 1);
+        reg("json_stringify", vec![Type::Any], Type::String, 1);
+        reg("json_pretty", vec![Type::Any], Type::String, 1);
 
         // ================================================================
         // TCP Networking built-in functions
         // ================================================================
-
-        env.define(Symbol {
-            name: "tcp_connect".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String, Type::Int], // host, port
-                return_type: Box::new(Type::Int),      // socket id or -1
-                required_params: 2,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "tcp_write".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Int, Type::String], // socket_id, data
-                return_type: Box::new(Type::Int),      // bytes written or -1
-                required_params: 2,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "tcp_read".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Int, Type::Int], // socket_id, max_bytes
-                return_type: Box::new(Type::String),
-                required_params: 2,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "tcp_close".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Int], // socket_id
-                return_type: Box::new(Type::Bool),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "dns_lookup".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String],          // hostname
-                return_type: Box::new(Type::String), // IP address
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
+        reg("tcp_connect", vec![Type::String, Type::Int], Type::Int, 2);
+        reg("tcp_write", vec![Type::Int, Type::String], Type::Int, 2);
+        reg("tcp_read", vec![Type::Int, Type::Int], Type::String, 2);
+        reg("tcp_close", vec![Type::Int], Type::Bool, 1);
+        reg("dns_lookup", vec![Type::String], Type::String, 1);
 
         // ================================================================
         // OS built-in functions
         // ================================================================
-
-        env.define(Symbol {
-            name: "getcwd".to_string(),
-            ty: Type::Function {
-                params: vec![],
-                return_type: Box::new(Type::String),
-                required_params: 0,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "chdir".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String], // path
-                return_type: Box::new(Type::Bool),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "mkdir".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String], // path
-                return_type: Box::new(Type::Bool),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "mkdir_all".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String], // path
-                return_type: Box::new(Type::Bool),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "rmdir".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String], // path
-                return_type: Box::new(Type::Bool),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "remove".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String], // path
-                return_type: Box::new(Type::Bool),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "remove_all".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String], // path
-                return_type: Box::new(Type::Bool),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "listdir".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String], // path
-                return_type: Box::new(Type::Array(Box::new(Type::String))),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "is_dir".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String], // path
-                return_type: Box::new(Type::Bool),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "is_file".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String], // path
-                return_type: Box::new(Type::Bool),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "rename".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String, Type::String], // from, to
-                return_type: Box::new(Type::Bool),
-                required_params: 2,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "copy".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String, Type::String], // from, to
-                return_type: Box::new(Type::Bool),
-                required_params: 2,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
+        reg("getcwd", vec![], Type::String, 0);
+        reg("chdir", vec![Type::String], Type::Bool, 1);
+        reg("mkdir", vec![Type::String], Type::Bool, 1);
+        reg("mkdir_all", vec![Type::String], Type::Bool, 1);
+        reg("rmdir", vec![Type::String], Type::Bool, 1);
+        reg("remove", vec![Type::String], Type::Bool, 1);
+        reg("remove_all", vec![Type::String], Type::Bool, 1);
+        reg(
+            "listdir",
+            vec![Type::String],
+            Type::Array(Box::new(Type::String)),
+            1,
+        );
+        reg("is_dir", vec![Type::String], Type::Bool, 1);
+        reg("is_file", vec![Type::String], Type::Bool, 1);
+        reg("rename", vec![Type::String, Type::String], Type::Bool, 2);
+        reg("copy", vec![Type::String, Type::String], Type::Bool, 2);
 
         // ================================================================
         // Regex built-in functions
         // ================================================================
-
-        env.define(Symbol {
-            name: "regex_match".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String, Type::String],
-                return_type: Box::new(Type::Bool),
-                required_params: 2,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "regex_find".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String, Type::String],
-                return_type: Box::new(Type::String),
-                required_params: 2,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "regex_find_all".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String, Type::String],
-                return_type: Box::new(Type::Array(Box::new(Type::String))),
-                required_params: 2,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "regex_replace".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String, Type::String, Type::String],
-                return_type: Box::new(Type::String),
-                required_params: 3,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "regex_replace_all".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String, Type::String, Type::String],
-                return_type: Box::new(Type::String),
-                required_params: 3,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "regex_split".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String, Type::String],
-                return_type: Box::new(Type::Array(Box::new(Type::String))),
-                required_params: 2,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "regex_captures".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String, Type::String],
-                return_type: Box::new(Type::Array(Box::new(Type::String))),
-                required_params: 2,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "regex_is_valid".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String],
-                return_type: Box::new(Type::Bool),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
+        reg(
+            "regex_match",
+            vec![Type::String, Type::String],
+            Type::Bool,
+            2,
+        );
+        reg(
+            "regex_find",
+            vec![Type::String, Type::String],
+            Type::String,
+            2,
+        );
+        reg(
+            "regex_find_all",
+            vec![Type::String, Type::String],
+            Type::Array(Box::new(Type::String)),
+            2,
+        );
+        reg(
+            "regex_replace",
+            vec![Type::String, Type::String, Type::String],
+            Type::String,
+            3,
+        );
+        reg(
+            "regex_replace_all",
+            vec![Type::String, Type::String, Type::String],
+            Type::String,
+            3,
+        );
+        reg(
+            "regex_split",
+            vec![Type::String, Type::String],
+            Type::Array(Box::new(Type::String)),
+            2,
+        );
+        reg(
+            "regex_captures",
+            vec![Type::String, Type::String],
+            Type::Array(Box::new(Type::String)),
+            2,
+        );
+        reg("regex_is_valid", vec![Type::String], Type::Bool, 1);
 
         // ================================================================
         // UUID built-in functions
         // ================================================================
-
-        env.define(Symbol {
-            name: "uuid_v4".to_string(),
-            ty: Type::Function {
-                params: vec![],
-                return_type: Box::new(Type::String),
-                required_params: 0,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "uuid_v7".to_string(),
-            ty: Type::Function {
-                params: vec![],
-                return_type: Box::new(Type::String),
-                required_params: 0,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "uuid_is_valid".to_string(),
-            ty: Type::Function {
-                params: vec![Type::String],
-                return_type: Box::new(Type::Bool),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "uuid_nil".to_string(),
-            ty: Type::Function {
-                params: vec![],
-                return_type: Box::new(Type::String),
-                required_params: 0,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
+        reg("uuid_v4", vec![], Type::String, 0);
+        reg("uuid_v7", vec![], Type::String, 0);
+        reg("uuid_is_valid", vec![Type::String], Type::Bool, 1);
+        reg("uuid_nil", vec![], Type::String, 0);
 
         // ================================================================
         // Math built-in functions
         // ================================================================
-
-        env.define(Symbol {
-            name: "sqrt".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Float],
-                return_type: Box::new(Type::Float),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "pow".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Float, Type::Float], // base, exponent
-                return_type: Box::new(Type::Float),
-                required_params: 2,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "exp".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Float],
-                return_type: Box::new(Type::Float),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "ln".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Float],
-                return_type: Box::new(Type::Float),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "log10".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Float],
-                return_type: Box::new(Type::Float),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "log2".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Float],
-                return_type: Box::new(Type::Float),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "sin".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Float],
-                return_type: Box::new(Type::Float),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "cos".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Float],
-                return_type: Box::new(Type::Float),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "tan".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Float],
-                return_type: Box::new(Type::Float),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "asin".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Float],
-                return_type: Box::new(Type::Float),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "acos".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Float],
-                return_type: Box::new(Type::Float),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "atan".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Float],
-                return_type: Box::new(Type::Float),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "atan2".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Float, Type::Float], // y, x
-                return_type: Box::new(Type::Float),
-                required_params: 2,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "sinh".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Float],
-                return_type: Box::new(Type::Float),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "cosh".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Float],
-                return_type: Box::new(Type::Float),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "tanh".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Float],
-                return_type: Box::new(Type::Float),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "floor".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Float],
-                return_type: Box::new(Type::Float),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "ceil".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Float],
-                return_type: Box::new(Type::Float),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "round".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Float],
-                return_type: Box::new(Type::Float),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "trunc".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Float],
-                return_type: Box::new(Type::Float),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "abs".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Float],
-                return_type: Box::new(Type::Float),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "is_nan".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Float],
-                return_type: Box::new(Type::Bool),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "is_infinite".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Float],
-                return_type: Box::new(Type::Bool),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
-
-        env.define(Symbol {
-            name: "is_finite".to_string(),
-            ty: Type::Function {
-                params: vec![Type::Float],
-                return_type: Box::new(Type::Bool),
-                required_params: 1,
-            },
-            mutable: false,
-            kind: SymbolKind::Function,
-        });
+        reg("sqrt", vec![Type::Float], Type::Float, 1);
+        reg("pow", vec![Type::Float, Type::Float], Type::Float, 2);
+        reg("exp", vec![Type::Float], Type::Float, 1);
+        reg("ln", vec![Type::Float], Type::Float, 1);
+        reg("log10", vec![Type::Float], Type::Float, 1);
+        reg("log2", vec![Type::Float], Type::Float, 1);
+        reg("sin", vec![Type::Float], Type::Float, 1);
+        reg("cos", vec![Type::Float], Type::Float, 1);
+        reg("tan", vec![Type::Float], Type::Float, 1);
+        reg("asin", vec![Type::Float], Type::Float, 1);
+        reg("acos", vec![Type::Float], Type::Float, 1);
+        reg("atan", vec![Type::Float], Type::Float, 1);
+        reg("atan2", vec![Type::Float, Type::Float], Type::Float, 2);
+        reg("sinh", vec![Type::Float], Type::Float, 1);
+        reg("cosh", vec![Type::Float], Type::Float, 1);
+        reg("tanh", vec![Type::Float], Type::Float, 1);
+        reg("floor", vec![Type::Float], Type::Float, 1);
+        reg("ceil", vec![Type::Float], Type::Float, 1);
+        reg("round", vec![Type::Float], Type::Float, 1);
+        reg("trunc", vec![Type::Float], Type::Float, 1);
+        reg("abs", vec![Type::Float], Type::Float, 1);
+        reg("is_nan", vec![Type::Float], Type::Bool, 1);
+        reg("is_infinite", vec![Type::Float], Type::Bool, 1);
+        reg("is_finite", vec![Type::Float], Type::Bool, 1);
 
         env
     }
@@ -1927,11 +818,20 @@ impl TypeEnv {
     }
 
     pub fn has_errors(&self) -> bool {
-        !self.errors.is_empty()
+        !self.errors.is_empty() || !self.structured_errors.is_empty()
     }
 
     pub fn get_errors(&self) -> &[String] {
         &self.errors
+    }
+
+    pub fn get_structured_errors(&self) -> &[CheckerError] {
+        &self.structured_errors
+    }
+
+    /// Record a structured error (preferred over string-based error())
+    pub fn record_error(&mut self, error: CheckerError) {
+        self.structured_errors.push(error);
     }
 }
 
@@ -2058,14 +958,21 @@ impl TypeChecker {
         }
 
         if self.env.has_errors() {
-            Err(self.env.get_errors().join("\n"))
+            // Combine legacy string errors and new structured errors
+            let mut all_errors: Vec<String> = self.env.get_errors().to_vec();
+            for err in self.env.get_structured_errors() {
+                all_errors.push(err.message());
+            }
+            Err(all_errors.join("\n"))
         } else {
             // Transfer generic instantiations to sema
             for inst in &self.generic_instantiations {
-                self.sema.generic_instantiations.push(crate::sema::GenericInstantiation {
-                    generic_name: inst.function_name.clone(),
-                    concrete_type: Type::Unknown, // TODO: Store actual type
-                });
+                self.sema
+                    .generic_instantiations
+                    .push(crate::sema::GenericInstantiation {
+                        generic_name: inst.function_name.clone(),
+                        concrete_type: Type::Unknown, // TODO: Store actual type
+                    });
             }
             Ok(CheckedProgram {
                 program: program.clone(),
@@ -3015,13 +1922,16 @@ impl TypeChecker {
                     drop(symbol);
                     // Record the symbol reference
                     let sym_id = self.next_symbol_id();
-                    self.sema.symbols.insert(sym_id, crate::sema::SymbolEntry {
-                        id: sym_id,
-                        name: name.clone(),
-                        ty: sym_ty.clone(),
-                        kind: crate::sema::SymbolKind::Variable,
-                        decl_node: expr.id,
-                    });
+                    self.sema.symbols.insert(
+                        sym_id,
+                        crate::sema::SymbolEntry {
+                            id: sym_id,
+                            name: name.clone(),
+                            ty: sym_ty.clone(),
+                            kind: crate::sema::SymbolKind::Variable,
+                            decl_node: expr.id,
+                        },
+                    );
                     self.sema.symbol_refs.insert(expr.id, sym_id);
                     sym_ty
                 } else if let Some(type_def) = self.env.lookup_type(name) {
@@ -3242,23 +2152,22 @@ impl TypeChecker {
 
                 // Check if this is an instance method call (callee is FieldAccess with implicit self)
                 // Static methods (no self) should NOT be treated as method calls for arg counting
-                let is_method_call = if let ExpressionKind::FieldAccess { object, field } =
-                    &callee.kind
-                {
-                    // Check if this is a static method call on a type name
-                    if let ExpressionKind::Identifier(type_name) = &object.kind {
-                        // If we can look up the method and it doesn't have self, it's static
-                        if let Some(impl_method) = self.env.lookup_method(type_name, field) {
-                            impl_method.has_self // Only treat as method call if it has self
+                let is_method_call =
+                    if let ExpressionKind::FieldAccess { object, field } = &callee.kind {
+                        // Check if this is a static method call on a type name
+                        if let ExpressionKind::Identifier(type_name) = &object.kind {
+                            // If we can look up the method and it doesn't have self, it's static
+                            if let Some(impl_method) = self.env.lookup_method(type_name, field) {
+                                impl_method.has_self // Only treat as method call if it has self
+                            } else {
+                                true // Assume instance method if not found
+                            }
                         } else {
-                            true // Assume instance method if not found
+                            true // Instance method call on an expression (e.g., obj.method())
                         }
                     } else {
-                        true // Instance method call on an expression (e.g., obj.method())
-                    }
-                } else {
-                    false // Not a field access, not a method call
-                };
+                        false // Not a field access, not a method call
+                    };
 
                 match callee_type {
                     Type::Function {
@@ -3353,12 +2262,15 @@ impl TypeChecker {
                 let obj_type = self.check_expression(object);
                 let resolved_type = self.resolve_field_access(&obj_type, object, field, &expr.span);
                 // Record field resolution
-                self.sema.field_resolution.insert(expr.id, crate::sema::FieldResolution {
-                    owner_type: obj_type,
-                    field_name: field.clone(),
-                    is_method: matches!(&resolved_type, Type::Function { .. }),
-                    resolved_type: resolved_type.clone(),
-                });
+                self.sema.field_resolution.insert(
+                    expr.id,
+                    crate::sema::FieldResolution {
+                        owner_type: obj_type,
+                        field_name: field.clone(),
+                        is_method: matches!(&resolved_type, Type::Function { .. }),
+                        resolved_type: resolved_type.clone(),
+                    },
+                );
                 resolved_type
             }
 
@@ -4188,8 +3100,33 @@ impl TypeChecker {
         }
     }
 
+    /// Look up an impl method and convert it to a Function type.
+    /// Returns None if the method doesn't exist.
+    fn impl_method_to_function(&self, type_name: &str, method: &str) -> Option<Type> {
+        self.env
+            .lookup_method(type_name, method)
+            .map(|impl_method| {
+                let param_types: Vec<Type> = impl_method
+                    .params
+                    .iter()
+                    .map(|(_, ty)| ty.clone())
+                    .collect();
+                Type::Function {
+                    params: param_types.clone(),
+                    return_type: Box::new(impl_method.return_type.clone()),
+                    required_params: param_types.len(),
+                }
+            })
+    }
+
     /// Resolve field access on a type
-    fn resolve_field_access(&mut self, obj_type: &Type, object: &Expression, field: &str, span: &Span) -> Type {
+    fn resolve_field_access(
+        &mut self,
+        obj_type: &Type,
+        object: &Expression,
+        field: &str,
+        span: &Span,
+    ) -> Type {
         match obj_type {
             Type::Enum(_) => {
                 if field == "__enum" || field == "__variant" {
@@ -4218,15 +3155,13 @@ impl TypeChecker {
                         return method_type.clone();
                     }
                 }
-                if let Some(impl_method) = self.env.lookup_method(name, field) {
-                    let param_types: Vec<Type> = impl_method.params.iter().map(|(_, ty)| ty.clone()).collect();
-                    return Type::Function {
-                        params: param_types.clone(),
-                        return_type: Box::new(impl_method.return_type.clone()),
-                        required_params: param_types.len(),
-                    };
+                if let Some(ty) = self.impl_method_to_function(name, field) {
+                    return ty;
                 }
-                self.env.error(span, format!("Unknown field or method: {} on type {}", field, name));
+                self.env.error(
+                    span,
+                    format!("Unknown field or method: {} on type {}", field, name),
+                );
                 Type::Unknown
             }
             Type::Struct(name) => {
@@ -4242,15 +3177,13 @@ impl TypeChecker {
                                 return method_type.clone();
                             }
                         }
-                        if let Some(impl_method) = self.env.lookup_method(name, field) {
-                            let param_types: Vec<Type> = impl_method.params.iter().map(|(_, ty)| ty.clone()).collect();
-                            return Type::Function {
-                                params: param_types.clone(),
-                                return_type: Box::new(impl_method.return_type.clone()),
-                                required_params: param_types.len(),
-                            };
+                        if let Some(ty) = self.impl_method_to_function(name, field) {
+                            return ty;
                         }
-                        self.env.error(span, format!("Unknown field or method: {} on type {}", field, name));
+                        self.env.error(
+                            span,
+                            format!("Unknown field or method: {} on type {}", field, name),
+                        );
                     }
                 }
                 Type::Unknown
@@ -4259,12 +3192,7 @@ impl TypeChecker {
                 if let ExpressionKind::Identifier(type_name) = &object.kind {
                     if let Some(impl_method) = self.env.lookup_method(type_name, field) {
                         if !impl_method.has_self {
-                            let param_types: Vec<Type> = impl_method.params.iter().map(|(_, ty)| ty.clone()).collect();
-                            return Type::Function {
-                                params: param_types.clone(),
-                                return_type: Box::new(impl_method.return_type.clone()),
-                                required_params: param_types.len(),
-                            };
+                            return self.impl_method_to_function(type_name, field).unwrap();
                         }
                     }
                 }
@@ -4272,37 +3200,24 @@ impl TypeChecker {
             }
             Type::Any => Type::Any,
             Type::Int => {
-                if let Some(impl_method) = self.env.lookup_method("int", field) {
-                    let param_types: Vec<Type> = impl_method.params.iter().map(|(_, ty)| ty.clone()).collect();
-                    return Type::Function {
-                        params: param_types.clone(),
-                        return_type: Box::new(impl_method.return_type.clone()),
-                        required_params: param_types.len(),
-                    };
+                if let Some(ty) = self.impl_method_to_function("int", field) {
+                    return ty;
                 }
-                self.env.error(span, format!("Unknown method: {} on int", field));
+                self.env
+                    .error(span, format!("Unknown method: {} on int", field));
                 Type::Unknown
             }
             Type::Float => {
-                if let Some(impl_method) = self.env.lookup_method("float", field) {
-                    let param_types: Vec<Type> = impl_method.params.iter().map(|(_, ty)| ty.clone()).collect();
-                    return Type::Function {
-                        params: param_types.clone(),
-                        return_type: Box::new(impl_method.return_type.clone()),
-                        required_params: param_types.len(),
-                    };
+                if let Some(ty) = self.impl_method_to_function("float", field) {
+                    return ty;
                 }
-                self.env.error(span, format!("Unknown method: {} on float", field));
+                self.env
+                    .error(span, format!("Unknown method: {} on float", field));
                 Type::Unknown
             }
             Type::String => {
-                if let Some(impl_method) = self.env.lookup_method("string", field) {
-                    let param_types: Vec<Type> = impl_method.params.iter().map(|(_, ty)| ty.clone()).collect();
-                    return Type::Function {
-                        params: param_types.clone(),
-                        return_type: Box::new(impl_method.return_type.clone()),
-                        required_params: param_types.len(),
-                    };
+                if let Some(ty) = self.impl_method_to_function("string", field) {
+                    return ty;
                 }
                 if field == "len" {
                     return Type::Function {
@@ -4311,26 +3226,17 @@ impl TypeChecker {
                         required_params: 0,
                     };
                 }
-                self.env.error(span, format!("Unknown method: {} on string", field));
+                self.env
+                    .error(span, format!("Unknown method: {} on string", field));
                 Type::Unknown
             }
             Type::Array(inner) => {
                 let specific_type_name = format!("[{}]", inner.display_name());
-                if let Some(impl_method) = self.env.lookup_method(&specific_type_name, field) {
-                    let param_types: Vec<Type> = impl_method.params.iter().map(|(_, ty)| ty.clone()).collect();
-                    return Type::Function {
-                        params: param_types.clone(),
-                        return_type: Box::new(impl_method.return_type.clone()),
-                        required_params: param_types.len(),
-                    };
+                if let Some(ty) = self.impl_method_to_function(&specific_type_name, field) {
+                    return ty;
                 }
-                if let Some(impl_method) = self.env.lookup_method("array", field) {
-                    let param_types: Vec<Type> = impl_method.params.iter().map(|(_, ty)| ty.clone()).collect();
-                    return Type::Function {
-                        params: param_types.clone(),
-                        return_type: Box::new(impl_method.return_type.clone()),
-                        required_params: param_types.len(),
-                    };
+                if let Some(ty) = self.impl_method_to_function("array", field) {
+                    return ty;
                 }
                 match field.as_ref() {
                     "len" => Type::Function {
@@ -4349,13 +3255,17 @@ impl TypeChecker {
                         required_params: 0,
                     },
                     _ => {
-                        self.env.error(span, format!("Unknown method: {} on array", field));
+                        self.env
+                            .error(span, format!("Unknown method: {} on array", field));
                         Type::Unknown
                     }
                 }
             }
             _ => {
-                self.env.error(span, format!("Cannot access field on type: '{}'", obj_type.display_name()));
+                self.env.error(
+                    span,
+                    format!("Cannot access field on type: '{}'", obj_type.display_name()),
+                );
                 Type::Unknown
             }
         }
@@ -6979,8 +5889,10 @@ mod tests {
         let checked = check(&ast).unwrap();
 
         // SemanticTables should be created and populated with expression types
-        assert!(!checked.sema.expr_types.is_empty(),
-            "SemanticTables should have expression types after checking");
+        assert!(
+            !checked.sema.expr_types.is_empty(),
+            "SemanticTables should have expression types after checking"
+        );
     }
 
     #[test]
@@ -6994,7 +5906,11 @@ mod tests {
 
         // The variable x should have a type recorded
         // Find the VarDecl statement
-        if let StatementKind::VarDecl { initializer: Some(init), .. } = &checked.program.statements[0].kind {
+        if let StatementKind::VarDecl {
+            initializer: Some(init),
+            ..
+        } = &checked.program.statements[0].kind
+        {
             // The initializer expression should have a type
             if let Some(ty) = checked.sema.expr_types.get(&init.id) {
                 assert_eq!(*ty, Type::Int, "x should be typed as Int");
@@ -7012,7 +5928,11 @@ mod tests {
         let checked = check(&ast).unwrap();
 
         // The binary expression 1 + 2 should have a type
-        if let StatementKind::VarDecl { initializer: Some(init), .. } = &checked.program.statements[0].kind {
+        if let StatementKind::VarDecl {
+            initializer: Some(init),
+            ..
+        } = &checked.program.statements[0].kind
+        {
             if let Some(ty) = checked.sema.expr_types.get(&init.id) {
                 assert_eq!(*ty, Type::Int, "1 + 2 should be typed as Int");
             }
@@ -7032,8 +5952,10 @@ mod tests {
 
         // The function should be in the symbol table
         // For now, just verify the check succeeds
-        assert!(!checked.sema.symbols.is_empty() || checked.sema.generic_instantiations.is_empty(),
-            "SemanticTables should be populated after checking");
+        assert!(
+            !checked.sema.symbols.is_empty() || checked.sema.generic_instantiations.is_empty(),
+            "SemanticTables should be populated after checking"
+        );
     }
 
     // ========================================================================
@@ -7051,9 +5973,15 @@ mod tests {
         let checked = check(&ast).unwrap();
 
         // The second statement references x
-        if let StatementKind::VarDecl { initializer: Some(init), .. } = &checked.program.statements[1].kind {
-            assert!(checked.sema.symbol_refs.contains_key(&init.id),
-                "Symbol reference should be recorded for identifier 'x'");
+        if let StatementKind::VarDecl {
+            initializer: Some(init),
+            ..
+        } = &checked.program.statements[1].kind
+        {
+            assert!(
+                checked.sema.symbol_refs.contains_key(&init.id),
+                "Symbol reference should be recorded for identifier 'x'"
+            );
         }
     }
 
@@ -7068,8 +5996,10 @@ mod tests {
         let checked = check(&ast).unwrap();
 
         // A symbol entry should be created when referencing a variable
-        assert!(!checked.sema.symbols.is_empty(),
-            "Symbols should be recorded after checking variable references");
+        assert!(
+            !checked.sema.symbols.is_empty(),
+            "Symbols should be recorded after checking variable references"
+        );
     }
 
     // ========================================================================
@@ -7089,7 +6019,11 @@ mod tests {
         let checked = check(&ast).unwrap();
 
         // The call to add() should have call resolution
-        if let StatementKind::VarDecl { initializer: Some(init), .. } = &checked.program.statements[1].kind {
+        if let StatementKind::VarDecl {
+            initializer: Some(init),
+            ..
+        } = &checked.program.statements[1].kind
+        {
             if let Some(resolution) = checked.sema.call_resolution.get(&init.id) {
                 match resolution {
                     crate::sema::CallResolution::Function { name } => {
@@ -7115,9 +6049,15 @@ mod tests {
         let checked = check(&ast).unwrap();
 
         // The enum constructor Color::Green should be resolved
-        if let StatementKind::VarDecl { initializer: Some(init), .. } = &checked.program.statements[1].kind {
-            assert!(checked.sema.expr_types.contains_key(&init.id),
-                "Expression type should be recorded for enum constructor");
+        if let StatementKind::VarDecl {
+            initializer: Some(init),
+            ..
+        } = &checked.program.statements[1].kind
+        {
+            assert!(
+                checked.sema.expr_types.contains_key(&init.id),
+                "Expression type should be recorded for enum constructor"
+            );
         }
     }
 
@@ -7144,10 +6084,17 @@ mod tests {
         let checked = check(&ast).unwrap();
 
         // The call to p.add(q) should have call resolution
-        if let StatementKind::VarDecl { initializer: Some(init), .. } = &checked.program.statements[3].kind {
+        if let StatementKind::VarDecl {
+            initializer: Some(init),
+            ..
+        } = &checked.program.statements[3].kind
+        {
             if let Some(resolution) = checked.sema.call_resolution.get(&init.id) {
                 match resolution {
-                    crate::sema::CallResolution::Method { type_name, method_name } => {
+                    crate::sema::CallResolution::Method {
+                        type_name,
+                        method_name,
+                    } => {
                         assert_eq!(type_name, "Point", "Should resolve to type 'Point'");
                         assert_eq!(method_name, "add", "Should resolve to method 'add'");
                     }
@@ -7177,7 +6124,11 @@ mod tests {
         let checked = check(&ast).unwrap();
 
         // The field access p.x should have field resolution
-        if let StatementKind::VarDecl { initializer: Some(init), .. } = &checked.program.statements[1].kind {
+        if let StatementKind::VarDecl {
+            initializer: Some(init),
+            ..
+        } = &checked.program.statements[1].kind
+        {
             if let Some(resolution) = checked.sema.field_resolution.get(&init.id) {
                 assert_eq!(resolution.field_name, "x", "Should resolve field 'x'");
                 assert!(!resolution.is_method, "Should not be a method");

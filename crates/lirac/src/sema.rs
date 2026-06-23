@@ -86,9 +86,15 @@ pub enum CallResolution {
     /// Free function call: foo(args)
     Function { name: String },
     /// Method call: obj.method(args)
-    Method { type_name: String, method_name: String },
+    Method {
+        type_name: String,
+        method_name: String,
+    },
     /// Static method call: Type::method(args)
-    StaticMethod { type_name: String, method_name: String },
+    StaticMethod {
+        type_name: String,
+        method_name: String,
+    },
 }
 
 /// How a field access was resolved
@@ -143,9 +149,17 @@ mod tests {
 
     #[test]
     fn test_call_resolution_variants() {
-        let func = CallResolution::Function { name: "foo".to_string() };
-        let method = CallResolution::Method { type_name: "Bar".to_string(), method_name: "baz".to_string() };
-        let static_method = CallResolution::StaticMethod { type_name: "Qux".to_string(), method_name: "new".to_string() };
+        let func = CallResolution::Function {
+            name: "foo".to_string(),
+        };
+        let method = CallResolution::Method {
+            type_name: "Bar".to_string(),
+            method_name: "baz".to_string(),
+        };
+        let static_method = CallResolution::StaticMethod {
+            type_name: "Qux".to_string(),
+            method_name: "new".to_string(),
+        };
 
         assert!(matches!(func, CallResolution::Function { .. }));
         assert!(matches!(method, CallResolution::Method { .. }));
