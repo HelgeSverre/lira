@@ -700,9 +700,14 @@ impl TypeEnv {
         Type::TypeVar(id)
     }
 
+    /// Record a type error. Errors that do not yet have a dedicated
+    /// [`CheckerError`] variant are stored as `GenericError`, so every error
+    /// flows through the structured channel with its span intact.
     pub fn error(&mut self, span: &Span, message: String) {
-        self.errors
-            .push(format!("{}:{}: {}", span.line, span.column, message));
+        self.structured_errors.push(CheckerError::GenericError {
+            message,
+            span: span.clone(),
+        });
     }
 
     /// Add a method from an impl block
@@ -5638,6 +5643,27 @@ mod tests {
                 .any(|e| matches!(e, CheckerError::BreakOutsideLoop { .. })),
             "expected a structured BreakOutsideLoop error, got: {:?}",
             checker.env.get_structured_errors()
+        );
+    }
+
+    #[test]
+    fn bespoke_type_error_is_recorded_as_structured() {
+        // "Condition must be bool" still uses the generic env.error() path; it
+        // must now surface as a structured error carrying the statement span.
+        let checker = check_source_capturing_errors("if 1 {\n}");
+        let structured = checker.env.get_structured_errors();
+        assert!(
+            structured
+                .iter()
+                .any(|e| e.body().starts_with("Condition must be bool")),
+            "expected the condition error as a structured diagnostic, got: {:?}",
+            structured
+        );
+        // The legacy string channel should no longer carry it.
+        assert!(
+            checker.env.get_errors().is_empty(),
+            "expected no legacy string errors, got: {:?}",
+            checker.env.get_errors()
         );
     }
 
