@@ -1295,7 +1295,7 @@ impl TypeChecker {
                             let ret = return_type
                                 .as_ref()
                                 .map(|t| self.resolve_type_expr(t))
-                                .unwrap_or(Type::Void);
+                                .unwrap_or(Type::Any);
                             Some((
                                 method_name.clone(),
                                 Type::Function {
@@ -1370,7 +1370,7 @@ impl TypeChecker {
                             let ret = return_type
                                 .as_ref()
                                 .map(|t| self.resolve_type_expr(t))
-                                .unwrap_or(Type::Void);
+                                .unwrap_or(Type::Any);
                             Some((
                                 name.clone(),
                                 Type::Function {
@@ -1428,7 +1428,7 @@ impl TypeChecker {
                             .return_type
                             .as_ref()
                             .map(|t| self.resolve_type_expr(t))
-                            .unwrap_or(Type::Void);
+                            .unwrap_or(Type::Any);
                         (
                             m.name.clone(),
                             Type::Function {
@@ -1484,7 +1484,7 @@ impl TypeChecker {
                             .return_type
                             .as_ref()
                             .map(|t| self.resolve_type_expr(t))
-                            .unwrap_or(Type::Void);
+                            .unwrap_or(Type::Any);
                         ImplMethod {
                             name: m.name.clone(),
                             params: param_types,
@@ -1525,7 +1525,7 @@ impl TypeChecker {
                         let ret = return_type
                             .as_ref()
                             .map(|t| self.resolve_type_expr(t))
-                            .unwrap_or(Type::Void);
+                            .unwrap_or(Type::Any);
 
                         impl_methods.push(ImplMethod {
                             name: name.clone(),
@@ -1734,7 +1734,7 @@ impl TypeChecker {
             let ret_type = return_type
                 .as_ref()
                 .map(|t| self.resolve_type_expr(t))
-                .unwrap_or(Type::Void);
+                .unwrap_or(Type::Any);
 
             // Restore old type params
             self.current_type_params = old_type_params;
@@ -1871,7 +1871,7 @@ impl TypeChecker {
                 let ret_type = return_type
                     .as_ref()
                     .map(|t| self.resolve_type_expr(t))
-                    .unwrap_or(Type::Void);
+                    .unwrap_or(Type::Any);
 
                 // Check function body
                 self.env.push_scope();
@@ -1906,7 +1906,7 @@ impl TypeChecker {
                 let return_type = value
                     .as_ref()
                     .map(|e| self.check_expression(e))
-                    .unwrap_or(Type::Void);
+                    .unwrap_or(Type::Any);
 
                 if let Some(expected) = self.current_function_return_type.clone() {
                     if !return_type.is_compatible_with(&expected) {
@@ -2140,6 +2140,15 @@ impl TypeChecker {
                         // String concatenation is always allowed (toString works on any type)
                         if *op == BinaryOp::Add && left_type == Type::String {
                             Type::String
+                        // Untyped (Any) operand: permissive — the tagged dynamic VM
+                        // dispatches at runtime. Concatenate if the other side is a
+                        // String, otherwise the result is Any.
+                        } else if left_type == Type::Any || right_type == Type::Any {
+                            if *op == BinaryOp::Add && right_type == Type::String {
+                                Type::String
+                            } else {
+                                Type::Any
+                            }
                         // Bound-aware: a `Numeric`-bounded type parameter may use
                         // arithmetic. The result keeps the generic type so that
                         // `fn add<T: Numeric>(a: T, b: T) -> T { return a + b }`
@@ -2193,7 +2202,9 @@ impl TypeChecker {
                         let right_ordered =
                             self.type_param_satisfies_any_bound(&right_type, &ordering_bounds);
 
-                        if left_ordered || right_ordered {
+                        if left_type == Type::Any || right_type == Type::Any {
+                            // Untyped (Any) operand: permissive dynamic comparison.
+                        } else if left_ordered || right_ordered {
                             // Permitted: at least one operand is an ordering-bounded
                             // type parameter. The other must be compatible (the same
                             // type parameter or numeric).
@@ -2219,7 +2230,10 @@ impl TypeChecker {
                         Type::Bool
                     }
                     BinaryOp::And | BinaryOp::Or => {
-                        if left_type != Type::Bool || right_type != Type::Bool {
+                        // Untyped (Any) operands are permitted (dynamic dispatch).
+                        let left_ok = left_type == Type::Bool || left_type == Type::Any;
+                        let right_ok = right_type == Type::Bool || right_type == Type::Any;
+                        if !left_ok || !right_ok {
                             self.env.record_error(CheckerError::RequiresBoolOperand {
                                 arity: crate::errors::OperandArity::Multiple,
                                 span: expr.span.clone(),
@@ -2241,7 +2255,9 @@ impl TypeChecker {
                         let right_ok =
                             self.type_param_satisfies_any_bound(&right_type, &bitwise_bounds);
 
-                        if left_ok || right_ok {
+                        if left_type == Type::Any || right_type == Type::Any {
+                            // Untyped (Any) operand: permissive — dynamic dispatch.
+                        } else if left_ok || right_ok {
                             // Permitted: at least one operand is a Numeric-bounded
                             // type parameter.
                         } else if self.is_unsatisfied_type_param(&left_type, &bitwise_bounds)

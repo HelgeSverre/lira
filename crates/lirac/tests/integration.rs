@@ -241,6 +241,7 @@ example_test!(test_pattern_guards, "pattern_guards.li");
 example_test!(test_pattern_tuple, "pattern_tuple.li");
 example_test!(test_pattern_tuple_simple, "pattern_tuple_simple.li");
 example_test!(test_pattern_tuple_literals, "pattern_tuple_literals.li");
+example_test!(test_untyped_function_ops, "untyped_function_ops.li");
 example_test!(test_pattern_constructor, "pattern_constructor.li");
 example_test!(
     test_pattern_constructor_verify,

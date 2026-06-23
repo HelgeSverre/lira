@@ -1,0 +1,19 @@
+// Untyped (no-annotation) function params and returns are dynamic (Any):
+// operators and concrete returns work, dispatched at runtime.
+// @expect: 5
+// @expect: 10
+// @expect: pos
+// @expect: hi!
+// @expect: 6
+
+fn add(a, b) { return a + b }
+fn double(x) { return x * 2 }
+fn pos(x) { if x > 0 { return "pos" } return "neg" }
+fn label(x) { return x + "!" }
+fn name() { return "Bob" }
+
+println(add(2, 3))
+println(double(5))
+println(pos(7))
+println(label("hi"))
+println(len(name()) + 3)
