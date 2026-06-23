@@ -4,7 +4,8 @@
 //! See docs/lira/10-bytecode-format.md for output format.
 
 use crate::ast::*;
-use crate::checker::CheckedProgram;
+use crate::checker::{CheckedProgram, Type};
+use crate::sema::SemanticTables;
 use lira_core::bytecode::{Constant, DebugInfo};
 use lira_core::opcode::Opcode;
 use lira_core::{BYTECODE_MAGIC, BYTECODE_VERSION};
@@ -178,6 +179,8 @@ pub struct CodeGenerator {
     module_consts: HashMap<String, u16>,
     /// Impl methods for all types: type_name -> {method_name -> mangled_function_name}
     impl_methods: HashMap<String, HashMap<String, String>>,
+    /// Semantic tables produced by the type checker (authoritative expression types).
+    sema: SemanticTables,
 }
 
 /// Key for constant deduplication
@@ -231,6 +234,7 @@ impl CodeGenerator {
             function_defaults: HashMap::new(),
             module_consts: HashMap::new(),
             impl_methods: HashMap::new(),
+            sema: SemanticTables::new(),
         }
     }
 
@@ -250,6 +254,10 @@ impl CodeGenerator {
 
     /// Generate bytecode from a type-checked program
     pub fn generate(&mut self, program: &CheckedProgram) -> Result<Vec<u8>, String> {
+        // Adopt the checker's semantic tables as the authoritative source of
+        // expression types for method dispatch.
+        self.sema = program.sema.clone();
+
         // First pass: collect functions (but don't generate code yet)
         for stmt in &program.program.statements {
             match &stmt.kind {
@@ -3041,6 +3049,16 @@ impl CodeGenerator {
     /// Get the display name of an expression's type for method dispatch.
     /// Used for method dispatch (e.g., arr.sum() needs to know arr is [int]).
     fn expr_type_name(&self, expr: &Expression) -> Option<String> {
+        // Prefer the checker's recorded type — it is authoritative and covers
+        // expression shapes the syntactic fallback below cannot resolve (call
+        // results, field access, etc.). Unknown/Any carry no dispatch value, so
+        // fall through to the heuristic for those.
+        if let Some(ty) = self.sema.expr_types.get(&expr.id) {
+            if !matches!(ty, Type::Unknown | Type::Any) {
+                return Some(ty.display_name());
+            }
+        }
+
         match &expr.kind {
             ExpressionKind::IntLiteral(_) => Some("int".to_string()),
             ExpressionKind::FloatLiteral(_) => Some("float".to_string()),
