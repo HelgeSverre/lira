@@ -1836,15 +1836,17 @@ impl TypeChecker {
 
             StatementKind::Break(_) => {
                 if !self.in_loop {
-                    self.env
-                        .error(&stmt.span, "break outside of loop".to_string());
+                    self.env.record_error(CheckerError::BreakOutsideLoop {
+                        span: stmt.span.clone(),
+                    });
                 }
             }
 
             StatementKind::Continue => {
                 if !self.in_loop {
-                    self.env
-                        .error(&stmt.span, "continue outside of loop".to_string());
+                    self.env.record_error(CheckerError::ContinueOutsideLoop {
+                        span: stmt.span.clone(),
+                    });
                 }
             }
 
@@ -2626,8 +2628,10 @@ impl TypeChecker {
                         }
                         Type::Struct(type_name.clone())
                     } else {
-                        self.env
-                            .error(&expr.span, format!("Unknown type: {}", type_name));
+                        self.env.record_error(CheckerError::UnknownType {
+                            name: type_name.clone(),
+                            span: expr.span.clone(),
+                        });
                         Type::Unknown
                     }
                 } else {
@@ -2684,8 +2688,10 @@ impl TypeChecker {
                             Type::Unknown
                         }
                     } else {
-                        self.env
-                            .error(&expr.span, format!("'{}' is not an enum", enum_name));
+                        self.env.record_error(CheckerError::NotAnEnum {
+                            type_name: enum_name.clone(),
+                            span: expr.span.clone(),
+                        });
                         Type::Unknown
                     }
                 } else {
@@ -3001,8 +3007,10 @@ impl TypeChecker {
                                 TypeDefKind::Alias(ty) => ty.clone(),
                             }
                         } else {
-                            self.env
-                                .error(&type_expr.span, format!("Unknown type: {}", other));
+                            self.env.record_error(CheckerError::UnknownType {
+                                name: other.to_string(),
+                                span: type_expr.span.clone(),
+                            });
                             Type::Unknown
                         }
                     }
@@ -3205,16 +3213,22 @@ impl TypeChecker {
                 if let Some(ty) = self.impl_method_to_function("int", field) {
                     return ty;
                 }
-                self.env
-                    .error(span, format!("Unknown method: {} on int", field));
+                self.env.record_error(CheckerError::UnknownMethod {
+                    method: field.to_string(),
+                    on_type: "int".to_string(),
+                    span: span.clone(),
+                });
                 Type::Unknown
             }
             Type::Float => {
                 if let Some(ty) = self.impl_method_to_function("float", field) {
                     return ty;
                 }
-                self.env
-                    .error(span, format!("Unknown method: {} on float", field));
+                self.env.record_error(CheckerError::UnknownMethod {
+                    method: field.to_string(),
+                    on_type: "float".to_string(),
+                    span: span.clone(),
+                });
                 Type::Unknown
             }
             Type::String => {
@@ -3228,8 +3242,11 @@ impl TypeChecker {
                         required_params: 0,
                     };
                 }
-                self.env
-                    .error(span, format!("Unknown method: {} on string", field));
+                self.env.record_error(CheckerError::UnknownMethod {
+                    method: field.to_string(),
+                    on_type: "string".to_string(),
+                    span: span.clone(),
+                });
                 Type::Unknown
             }
             Type::Array(inner) => {
@@ -3257,8 +3274,11 @@ impl TypeChecker {
                         required_params: 0,
                     },
                     _ => {
-                        self.env
-                            .error(span, format!("Unknown method: {} on array", field));
+                        self.env.record_error(CheckerError::UnknownMethod {
+                            method: field.to_string(),
+                            on_type: "array".to_string(),
+                            span: span.clone(),
+                        });
                         Type::Unknown
                     }
                 }
@@ -5586,6 +5606,34 @@ mod tests {
             )),
             "expected a structured UndefinedVariable error, got: {:?}",
             structured
+        );
+    }
+
+    #[test]
+    fn break_outside_loop_produces_structured_error() {
+        let checker = check_source_capturing_errors("fn f() {\n    break\n}");
+        assert!(
+            checker
+                .env
+                .get_structured_errors()
+                .iter()
+                .any(|e| matches!(e, CheckerError::BreakOutsideLoop { .. })),
+            "expected a structured BreakOutsideLoop error, got: {:?}",
+            checker.env.get_structured_errors()
+        );
+    }
+
+    #[test]
+    fn unknown_primitive_method_produces_structured_error() {
+        let checker = check_source_capturing_errors("let n = 1\nn.no_such_method()");
+        assert!(
+            checker.env.get_structured_errors().iter().any(|e| matches!(
+                e,
+                CheckerError::UnknownMethod { method, on_type, .. }
+                    if method == "no_such_method" && on_type == "int"
+            )),
+            "expected a structured UnknownMethod error, got: {:?}",
+            checker.env.get_structured_errors()
         );
     }
 

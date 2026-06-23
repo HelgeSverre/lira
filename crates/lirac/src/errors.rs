@@ -179,10 +179,10 @@ impl CheckerError {
                 )
             }
             Self::BreakOutsideLoop { span } => {
-                format!("{}:{}: 'break' outside loop", span.line, span.column)
+                format!("{}:{}: break outside of loop", span.line, span.column)
             }
             Self::ContinueOutsideLoop { span } => {
-                format!("{}:{}: 'continue' outside loop", span.line, span.column)
+                format!("{}:{}: continue outside of loop", span.line, span.column)
             }
             Self::TraitNotImplemented {
                 trait_name,
