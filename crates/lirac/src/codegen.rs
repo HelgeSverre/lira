@@ -994,6 +994,59 @@ impl CodeGenerator {
         }
     }
 
+    /// Whether a pattern emits a runtime test (vs. always matching by binding).
+    /// Literals and constructors always test; a tuple tests if any element does;
+    /// or-patterns/bindings test if any alternative/inner does.
+    fn pattern_needs_check(pattern: &Pattern) -> bool {
+        match &pattern.kind {
+            PatternKind::Wildcard | PatternKind::Variable(_) => false,
+            PatternKind::Literal(_) | PatternKind::Constructor { .. } => true,
+            PatternKind::Tuple(patterns) => patterns.iter().any(Self::pattern_needs_check),
+            PatternKind::Or(patterns) => patterns.iter().any(Self::pattern_needs_check),
+            PatternKind::Binding { pattern, .. } => Self::pattern_needs_check(pattern),
+            _ => false,
+        }
+    }
+
+    /// Test a sub-pattern against a value on top of the stack, consuming it and
+    /// leaving a single boolean. Used inside tuple-pattern checks so that
+    /// literal/constructor elements emit their equality guard recursively.
+    /// Precondition: `Self::pattern_needs_check(pattern)` is true.
+    fn generate_subpattern_test(&mut self, pattern: &Pattern) {
+        match &pattern.kind {
+            PatternKind::Literal(expr) => {
+                self.generate_expression(expr);
+                self.emit_opcode(Opcode::Eq);
+            }
+            PatternKind::Constructor { name, .. } => {
+                let variant_name = name
+                    .rfind("::")
+                    .map_or(name.as_str(), |pos| &name[pos + 2..]);
+                let variant_field = self.add_constant(Constant::String("__variant".to_string()));
+                self.emit_opcode(Opcode::GetField);
+                self.emit_u16(variant_field);
+                let expected = self.add_constant(Constant::String(variant_name.to_string()));
+                self.emit_opcode(Opcode::LoadConst);
+                self.emit_u16(expected);
+                self.emit_opcode(Opcode::Eq);
+            }
+            PatternKind::Tuple(_) => {
+                // Nested tuple: reuse the full tuple check, which leaves a bool.
+                // generate_pattern_check returns true only when no test is needed,
+                // but the precondition guarantees a test is required here.
+                self.generate_pattern_check(pattern);
+            }
+            // Variable/wildcard never reach here (filtered by pattern_needs_check),
+            // but bind-by-value still always matches for those: just discard.
+            _ => {
+                self.emit_opcode(Opcode::Pop);
+                let true_idx = self.add_constant(Constant::Bool(true));
+                self.emit_opcode(Opcode::LoadConst);
+                self.emit_u16(true_idx);
+            }
+        }
+    }
+
     /// Generate pattern check code.
     /// Returns true if the pattern always matches (wildcard, variable).
     /// For patterns that need runtime checks, leaves a bool on the stack.
@@ -1039,11 +1092,51 @@ impl CodeGenerator {
                 // The match code will reload subject for binding if this succeeds
                 false
             }
-            PatternKind::Tuple(_patterns) => {
-                // Tuple patterns always match (we just destructure)
-                // Pop the subject since we'll reload it for binding
-                self.emit_opcode(Opcode::Pop);
-                true
+            PatternKind::Tuple(patterns) => {
+                // A tuple pattern only needs a runtime test if one of its
+                // sub-patterns is a literal/constructor (or a nested tuple that
+                // itself needs a test). Variable/wildcard elements just bind.
+                if !patterns.iter().any(Self::pattern_needs_check) {
+                    // Nothing to test - pop the subject (reloaded later for binding)
+                    self.emit_opcode(Opcode::Pop);
+                    return true;
+                }
+
+                // Stash the tuple in a temp local so we can index into it
+                // repeatedly without stack juggling. Stack: [tuple] -> [].
+                let tuple_slot = self.next_local;
+                self.next_local += 1;
+                self.emit_opcode(Opcode::StoreLocal);
+                self.emit_u16(tuple_slot);
+
+                // Build a single boolean by AND-ing the tests of each
+                // sub-pattern that needs one. Seed the accumulator with `true`.
+                let true_idx = self.add_constant(Constant::Bool(true));
+                self.emit_opcode(Opcode::LoadConst);
+                self.emit_u16(true_idx);
+                // Stack: [acc]
+
+                for (i, pat) in patterns.iter().enumerate() {
+                    if !Self::pattern_needs_check(pat) {
+                        continue;
+                    }
+                    // Load element i from the stashed tuple.
+                    self.emit_opcode(Opcode::LoadLocal);
+                    self.emit_u16(tuple_slot);
+                    let idx = self.add_constant(Constant::Int(i as i64));
+                    self.emit_opcode(Opcode::LoadConst);
+                    self.emit_u16(idx);
+                    self.emit_opcode(Opcode::ArrayGet);
+                    // Stack: [acc, element]
+                    // Recursively test the element; leaves a bool, consuming it.
+                    self.generate_subpattern_test(pat);
+                    // Stack: [acc, test]
+                    self.emit_opcode(Opcode::And);
+                    // Stack: [acc']
+                }
+
+                // Stack: [acc] - the combined boolean.
+                false // Needs runtime check
             }
             PatternKind::Or(_patterns) => {
                 // Any of the patterns can match

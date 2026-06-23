@@ -1,0 +1,50 @@
+// Tuple patterns with literal sub-patterns must emit equality guards.
+// Regression test: previously every tuple input matched the first arm.
+// @expect: origin
+// @expect: other
+// @expect: yaxis
+// @expect: xaxis
+// @expect: all-zero
+// @expect: origin-z
+// @expect: pair-zero
+// @expect: general
+// @expect: mid-zero
+// @expect: mid-other
+
+fn quadrant(p: (int, int)) -> string {
+    return match p {
+        (0, 0) => "origin",
+        (0, y) => "yaxis",
+        (x, 0) => "xaxis",
+        (x, y) => "other"
+    }
+}
+
+fn classify(p: ((int, int), int)) -> string {
+    return match p {
+        ((0, 0), 0) => "all-zero",
+        ((0, 0), z) => "origin-z",
+        ((x, y), 0) => "pair-zero",
+        ((x, y), z) => "general"
+    }
+}
+
+fn mid(t: (int, int, int)) -> string {
+    return match t {
+        (x, 0, z) => "mid-zero",
+        (x, y, z) => "mid-other"
+    }
+}
+
+fn main() {
+    print(quadrant((0, 0)))
+    print(quadrant((3, 4)))
+    print(quadrant((0, 5)))
+    print(quadrant((3, 0)))
+    print(classify(((0, 0), 0)))
+    print(classify(((0, 0), 5)))
+    print(classify(((1, 2), 0)))
+    print(classify(((1, 2), 3)))
+    print(mid((9, 0, 9)))
+    print(mid((9, 9, 9)))
+}
