@@ -481,8 +481,13 @@ impl VM {
         }
     }
 
-    /// Execute a single instruction, returning Some(exit_code) if halted
-    fn execute_one(&mut self) -> Result<Option<i32>, String> {
+    /// Fetch and decode the opcode at the current instruction pointer,
+    /// advancing `ip` past the opcode byte.
+    ///
+    /// Emits the per-instruction debug trace when `self.debug` is set. This is
+    /// the shared decode step used by both `run()` and `execute_one()`; the
+    /// caller is responsible for any bounds check on `ip` before calling.
+    fn decode_next(&mut self) -> Result<Opcode, String> {
         let opcode_byte = self.program.code[self.ip];
         self.ip += 1;
 
@@ -505,6 +510,12 @@ impl VM {
             );
         }
 
+        Ok(opcode)
+    }
+
+    /// Execute a single instruction, returning Some(exit_code) if halted
+    fn execute_one(&mut self) -> Result<Option<i32>, String> {
+        let opcode = self.decode_next()?;
         // Execute the opcode and return whether we should halt
         self.execute_opcode(opcode)
     }
@@ -619,28 +630,7 @@ impl VM {
                 return Ok(0);
             }
 
-            let opcode_byte = self.program.code[self.ip];
-            self.ip += 1;
-
-            let opcode = Opcode::from_byte(opcode_byte).ok_or_else(|| {
-                format!(
-                    "Invalid opcode: 0x{:02X} at offset {}",
-                    opcode_byte,
-                    self.ip - 1
-                )
-            })?;
-
-            if self.debug {
-                let stack_repr: Vec<String> =
-                    self.stack.iter().map(|v| format!("{:?}", v)).collect();
-                eprintln!(
-                    "[VM] ip={:04} {:?} stack=[{}] locals={}",
-                    self.ip - 1,
-                    opcode,
-                    stack_repr.join(", "),
-                    self.locals.len()
-                );
-            }
+            let opcode = self.decode_next()?;
 
             // Execute the opcode
             if let Some(exit_code) = self.execute_opcode(opcode)? {
@@ -652,8 +642,83 @@ impl VM {
     /// Execute a single opcode, returning Some(exit_code) for Halt, None otherwise
     fn execute_opcode(&mut self, opcode: Opcode) -> Result<Option<i32>, String> {
         match opcode {
-            Opcode::Nop => {}
+            Opcode::Nop => Ok(None),
 
+            // Stack / local / object / array / closure data operations
+            Opcode::LoadConst
+            | Opcode::Pop
+            | Opcode::Dup
+            | Opcode::LoadLocal
+            | Opcode::StoreLocal
+            | Opcode::GetField
+            | Opcode::SetField
+            | Opcode::NewObject
+            | Opcode::NewArray
+            | Opcode::ArrayGet
+            | Opcode::ArraySet
+            | Opcode::ArrayLen
+            | Opcode::ArrayPush
+            | Opcode::ArrayPop
+            | Opcode::MakeClosure
+            | Opcode::LoadCapture => self.execute_memory(opcode),
+
+            // Arithmetic operations
+            Opcode::Add
+            | Opcode::Sub
+            | Opcode::Mul
+            | Opcode::Div
+            | Opcode::Mod
+            | Opcode::Neg
+            | Opcode::Pow => self.execute_arithmetic(opcode),
+
+            // Comparison / logical / bitwise operations
+            Opcode::Eq
+            | Opcode::Ne
+            | Opcode::Lt
+            | Opcode::Le
+            | Opcode::Gt
+            | Opcode::Ge
+            | Opcode::And
+            | Opcode::Or
+            | Opcode::Not
+            | Opcode::BitAnd
+            | Opcode::BitOr
+            | Opcode::BitXor
+            | Opcode::BitNot
+            | Opcode::Shl
+            | Opcode::Shr
+            | Opcode::UShr => self.execute_comparison(opcode),
+
+            // Control flow and function call/return
+            Opcode::Jump
+            | Opcode::JumpIfTrue
+            | Opcode::JumpIfFalse
+            | Opcode::Call
+            | Opcode::Return
+            | Opcode::Halt => self.execute_control_flow(opcode),
+
+            // Type operations
+            Opcode::TypeIs | Opcode::Cast => self.execute_type(opcode),
+
+            // System operations
+            Opcode::Print | Opcode::Syscall => self.execute_system(opcode),
+
+            // Fiber and channel operations
+            Opcode::Spawn
+            | Opcode::Yield
+            | Opcode::FiberId
+            | Opcode::ChanNew
+            | Opcode::ChanSend
+            | Opcode::ChanRecv
+            | Opcode::ChanClose
+            | Opcode::ChanTryRecv
+            | Opcode::Select => self.execute_fiber_channel(opcode),
+        }
+    }
+
+    /// Stack, local variable, object, array and closure-data operations.
+    fn execute_memory(&mut self, opcode: Opcode) -> Result<Option<i32>, String> {
+        match opcode {
             // Stack operations
             Opcode::LoadConst => {
                 let index = self.read_u16()? as usize;
@@ -703,6 +768,184 @@ impl VM {
                 self.locals[index] = value;
             }
 
+            // Object operations
+            Opcode::GetField => {
+                let field_idx = self.read_u16()? as usize;
+                let field_name = match self.program.constants.get(field_idx) {
+                    Some(Value::String(s)) => s.clone(),
+                    _ => return Err("Invalid field name constant".to_string()),
+                };
+                let object = self.pop()?;
+
+                match object {
+                    Value::Object(obj) => {
+                        let value = obj
+                            .borrow()
+                            .get(&*field_name)
+                            .cloned()
+                            .unwrap_or(Value::Null);
+                        self.stack.push(value);
+                    }
+                    _ => return Err(format!("Cannot get field from {:?}", object)),
+                }
+            }
+
+            Opcode::SetField => {
+                let field_idx = self.read_u16()? as usize;
+                let field_name = match self.program.constants.get(field_idx) {
+                    Some(Value::String(s)) => (**s).clone(),
+                    _ => return Err("Invalid field name constant".to_string()),
+                };
+                let value = self.pop()?;
+                let object = self.pop()?;
+
+                match object {
+                    Value::Object(obj) => {
+                        obj.borrow_mut().insert(field_name, value);
+                    }
+                    _ => return Err(format!("Cannot set field on {:?}", object)),
+                }
+            }
+
+            Opcode::NewObject => {
+                let obj = Rc::new(RefCell::new(HashMap::new()));
+                self.stack.push(Value::Object(obj));
+            }
+
+            // Array operations
+            Opcode::NewArray => {
+                let size = self.pop()?;
+                let size = match size {
+                    Value::Int(n) => n as usize,
+                    _ => return Err("Array size must be an integer".to_string()),
+                };
+                let arr = Rc::new(RefCell::new(vec![Value::Null; size]));
+                self.stack.push(Value::Array(arr));
+            }
+
+            Opcode::ArrayGet => {
+                let index = self.pop()?;
+                let array = self.pop()?;
+
+                match (array, index) {
+                    (Value::Array(arr), Value::Int(idx)) => {
+                        let idx = idx as usize;
+                        let value = arr.borrow().get(idx).cloned().unwrap_or(Value::Null);
+                        self.stack.push(value);
+                    }
+                    (Value::String(s), Value::Int(idx)) => {
+                        let idx = idx as usize;
+                        let value = s
+                            .chars()
+                            .nth(idx)
+                            .map(|c| Value::String(Rc::new(c.to_string())))
+                            .unwrap_or(Value::Null);
+                        self.stack.push(value);
+                    }
+                    // Support object indexing with string keys (for JSON objects)
+                    (Value::Object(obj), Value::String(key)) => {
+                        let value = obj.borrow().get(&*key).cloned().unwrap_or(Value::Null);
+                        self.stack.push(value);
+                    }
+                    _ => return Err("Invalid array/index types".to_string()),
+                }
+            }
+
+            Opcode::ArraySet => {
+                let value = self.pop()?;
+                let index = self.pop()?;
+                let array = self.pop()?;
+
+                match (array, index) {
+                    (Value::Array(arr), Value::Int(idx)) => {
+                        let idx = idx as usize;
+                        let mut arr = arr.borrow_mut();
+                        if idx < arr.len() {
+                            arr[idx] = value;
+                        }
+                    }
+                    _ => return Err("Invalid array/index types".to_string()),
+                }
+            }
+
+            Opcode::ArrayLen => {
+                let array = self.pop()?;
+                let len = match array {
+                    Value::Array(arr) => arr.borrow().len() as i64,
+                    Value::String(s) => s.len() as i64,
+                    _ => return Err("Cannot get length of non-array/string".to_string()),
+                };
+                self.stack.push(Value::Int(len));
+            }
+
+            Opcode::ArrayPush => {
+                let value = self.pop()?;
+                let array = self.pop()?;
+                match array {
+                    Value::Array(arr) => {
+                        arr.borrow_mut().push(value);
+                    }
+                    _ => return Err("Cannot push to non-array".to_string()),
+                }
+            }
+
+            Opcode::ArrayPop => {
+                let array = self.pop()?;
+                match array {
+                    Value::Array(arr) => {
+                        let value = arr.borrow_mut().pop().unwrap_or(Value::Null);
+                        self.stack.push(value);
+                    }
+                    _ => return Err("Cannot pop from non-array".to_string()),
+                }
+            }
+
+            // Closure operations
+            Opcode::MakeClosure => {
+                let code_offset = self.read_u16()? as usize;
+                let capture_count = self.read_u8()? as usize;
+
+                // Pop captured values from stack (in reverse order)
+                let mut captures = Vec::with_capacity(capture_count);
+                for _ in 0..capture_count {
+                    captures.push(self.pop()?);
+                }
+                captures.reverse();
+
+                let closure = ClosureData {
+                    code_offset,
+                    captures,
+                };
+                self.stack.push(Value::Closure(Rc::new(closure)));
+            }
+
+            Opcode::LoadCapture => {
+                let capture_idx = self.read_u8()? as usize;
+
+                // Get captures from current call frame
+                if let Some(frame) = self.call_stack.last() {
+                    if let Some(ref closure) = frame.captures {
+                        if capture_idx < closure.captures.len() {
+                            self.stack.push(closure.captures[capture_idx].clone());
+                        } else {
+                            return Err(format!("Capture index {} out of bounds", capture_idx));
+                        }
+                    } else {
+                        return Err("LoadCapture outside of closure".to_string());
+                    }
+                } else {
+                    return Err("LoadCapture with no call frame".to_string());
+                }
+            }
+
+            _ => unreachable!("execute_memory called with non-memory opcode"),
+        }
+        Ok(None)
+    }
+
+    /// Arithmetic operations.
+    fn execute_arithmetic(&mut self, opcode: Opcode) -> Result<Option<i32>, String> {
+        match opcode {
             // Arithmetic operations
             Opcode::Add => {
                 let b = self.pop()?;
@@ -812,6 +1055,14 @@ impl VM {
                 self.stack.push(result);
             }
 
+            _ => unreachable!("execute_arithmetic called with non-arithmetic opcode"),
+        }
+        Ok(None)
+    }
+
+    /// Comparison, logical and bitwise operations.
+    fn execute_comparison(&mut self, opcode: Opcode) -> Result<Option<i32>, String> {
+        match opcode {
             // Comparison operations
             Opcode::Eq => {
                 let b = self.pop()?;
@@ -948,6 +1199,14 @@ impl VM {
                 }
             }
 
+            _ => unreachable!("execute_comparison called with non-comparison opcode"),
+        }
+        Ok(None)
+    }
+
+    /// Control flow, function calls and program halt.
+    fn execute_control_flow(&mut self, opcode: Opcode) -> Result<Option<i32>, String> {
+        match opcode {
             // Control flow
             Opcode::Jump => {
                 let offset = self.read_i16()?;
@@ -1050,138 +1309,18 @@ impl VM {
                 }
             }
 
-            // Object operations
-            Opcode::GetField => {
-                let field_idx = self.read_u16()? as usize;
-                let field_name = match self.program.constants.get(field_idx) {
-                    Some(Value::String(s)) => s.clone(),
-                    _ => return Err("Invalid field name constant".to_string()),
-                };
-                let object = self.pop()?;
-
-                match object {
-                    Value::Object(obj) => {
-                        let value = obj
-                            .borrow()
-                            .get(&*field_name)
-                            .cloned()
-                            .unwrap_or(Value::Null);
-                        self.stack.push(value);
-                    }
-                    _ => return Err(format!("Cannot get field from {:?}", object)),
-                }
+            Opcode::Halt => {
+                return Ok(Some(0));
             }
 
-            Opcode::SetField => {
-                let field_idx = self.read_u16()? as usize;
-                let field_name = match self.program.constants.get(field_idx) {
-                    Some(Value::String(s)) => (**s).clone(),
-                    _ => return Err("Invalid field name constant".to_string()),
-                };
-                let value = self.pop()?;
-                let object = self.pop()?;
+            _ => unreachable!("execute_control_flow called with non-control-flow opcode"),
+        }
+        Ok(None)
+    }
 
-                match object {
-                    Value::Object(obj) => {
-                        obj.borrow_mut().insert(field_name, value);
-                    }
-                    _ => return Err(format!("Cannot set field on {:?}", object)),
-                }
-            }
-
-            Opcode::NewObject => {
-                let obj = Rc::new(RefCell::new(HashMap::new()));
-                self.stack.push(Value::Object(obj));
-            }
-
-            // Array operations
-            Opcode::NewArray => {
-                let size = self.pop()?;
-                let size = match size {
-                    Value::Int(n) => n as usize,
-                    _ => return Err("Array size must be an integer".to_string()),
-                };
-                let arr = Rc::new(RefCell::new(vec![Value::Null; size]));
-                self.stack.push(Value::Array(arr));
-            }
-
-            Opcode::ArrayGet => {
-                let index = self.pop()?;
-                let array = self.pop()?;
-
-                match (array, index) {
-                    (Value::Array(arr), Value::Int(idx)) => {
-                        let idx = idx as usize;
-                        let value = arr.borrow().get(idx).cloned().unwrap_or(Value::Null);
-                        self.stack.push(value);
-                    }
-                    (Value::String(s), Value::Int(idx)) => {
-                        let idx = idx as usize;
-                        let value = s
-                            .chars()
-                            .nth(idx)
-                            .map(|c| Value::String(Rc::new(c.to_string())))
-                            .unwrap_or(Value::Null);
-                        self.stack.push(value);
-                    }
-                    // Support object indexing with string keys (for JSON objects)
-                    (Value::Object(obj), Value::String(key)) => {
-                        let value = obj.borrow().get(&*key).cloned().unwrap_or(Value::Null);
-                        self.stack.push(value);
-                    }
-                    _ => return Err("Invalid array/index types".to_string()),
-                }
-            }
-
-            Opcode::ArraySet => {
-                let value = self.pop()?;
-                let index = self.pop()?;
-                let array = self.pop()?;
-
-                match (array, index) {
-                    (Value::Array(arr), Value::Int(idx)) => {
-                        let idx = idx as usize;
-                        let mut arr = arr.borrow_mut();
-                        if idx < arr.len() {
-                            arr[idx] = value;
-                        }
-                    }
-                    _ => return Err("Invalid array/index types".to_string()),
-                }
-            }
-
-            Opcode::ArrayLen => {
-                let array = self.pop()?;
-                let len = match array {
-                    Value::Array(arr) => arr.borrow().len() as i64,
-                    Value::String(s) => s.len() as i64,
-                    _ => return Err("Cannot get length of non-array/string".to_string()),
-                };
-                self.stack.push(Value::Int(len));
-            }
-
-            Opcode::ArrayPush => {
-                let value = self.pop()?;
-                let array = self.pop()?;
-                match array {
-                    Value::Array(arr) => {
-                        arr.borrow_mut().push(value);
-                    }
-                    _ => return Err("Cannot push to non-array".to_string()),
-                }
-            }
-
-            Opcode::ArrayPop => {
-                let array = self.pop()?;
-                match array {
-                    Value::Array(arr) => {
-                        let value = arr.borrow_mut().pop().unwrap_or(Value::Null);
-                        self.stack.push(value);
-                    }
-                    _ => return Err("Cannot pop from non-array".to_string()),
-                }
-            }
-
+    /// Type test and cast operations.
+    fn execute_type(&mut self, opcode: Opcode) -> Result<Option<i32>, String> {
+        match opcode {
             // Type operations
             Opcode::TypeIs => {
                 let type_id = self.read_u8()?;
@@ -1229,6 +1368,14 @@ impl VM {
                 self.stack.push(result);
             }
 
+            _ => unreachable!("execute_type called with non-type opcode"),
+        }
+        Ok(None)
+    }
+
+    /// System operations (print and syscall dispatch).
+    fn execute_system(&mut self, opcode: Opcode) -> Result<Option<i32>, String> {
+        match opcode {
             // System operations
             Opcode::Print => {
                 let value = self.pop()?;
@@ -1251,6 +1398,17 @@ impl VM {
                 self.handle_syscall(syscall_num)?;
             }
 
+            _ => unreachable!("execute_system called with non-system opcode"),
+        }
+        Ok(None)
+    }
+
+    /// Fiber and channel operations.
+    ///
+    /// Kept together as a single unit so the scheduler/channel machinery can be
+    /// evolved cohesively by later work.
+    fn execute_fiber_channel(&mut self, opcode: Opcode) -> Result<Option<i32>, String> {
+        match opcode {
             // Fiber operations
             Opcode::Spawn => {
                 let code_offset = self.read_u16()? as usize;
@@ -1387,47 +1545,7 @@ impl VM {
                 // This opcode exists for future optimization but isn't used currently
             }
 
-            // Closure operations
-            Opcode::MakeClosure => {
-                let code_offset = self.read_u16()? as usize;
-                let capture_count = self.read_u8()? as usize;
-
-                // Pop captured values from stack (in reverse order)
-                let mut captures = Vec::with_capacity(capture_count);
-                for _ in 0..capture_count {
-                    captures.push(self.pop()?);
-                }
-                captures.reverse();
-
-                let closure = ClosureData {
-                    code_offset,
-                    captures,
-                };
-                self.stack.push(Value::Closure(Rc::new(closure)));
-            }
-
-            Opcode::LoadCapture => {
-                let capture_idx = self.read_u8()? as usize;
-
-                // Get captures from current call frame
-                if let Some(frame) = self.call_stack.last() {
-                    if let Some(ref closure) = frame.captures {
-                        if capture_idx < closure.captures.len() {
-                            self.stack.push(closure.captures[capture_idx].clone());
-                        } else {
-                            return Err(format!("Capture index {} out of bounds", capture_idx));
-                        }
-                    } else {
-                        return Err("LoadCapture outside of closure".to_string());
-                    }
-                } else {
-                    return Err("LoadCapture with no call frame".to_string());
-                }
-            }
-
-            Opcode::Halt => {
-                return Ok(Some(0));
-            }
+            _ => unreachable!("execute_fiber_channel called with non-fiber/channel opcode"),
         }
         Ok(None)
     }
