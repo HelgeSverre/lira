@@ -358,7 +358,10 @@ impl<'a> Lexer<'a> {
             // Concurrency
             "spawn" => TokenKind::Spawn,
             "select" => TokenKind::Select,
-            "send" => TokenKind::Send,
+            // NOTE: `send` is intentionally NOT a keyword. The blocking channel
+            // send is exposed as the `send(channel, value)` builtin (codegen
+            // emits ChanSend); reserving the word would shadow that call. The
+            // select-arm send syntax uses `value -> channel`, not `send`.
             "receive" => TokenKind::Receive,
             "async" => TokenKind::Async,
             "await" => TokenKind::Await,

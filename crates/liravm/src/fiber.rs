@@ -242,11 +242,16 @@ impl Scheduler {
         id
     }
 
-    /// Spawn a fiber with initial arguments on the stack
+    /// Spawn a fiber with initial arguments bound as locals.
+    ///
+    /// Compiled functions read their parameters as locals (slot 0, 1, ...),
+    /// so spawn arguments are placed directly into `locals` rather than the
+    /// operand stack. The spawned fiber begins at the function body with its
+    /// parameters already bound.
     pub fn spawn_with_args(&mut self, ip: usize, args: Vec<Value>) -> FiberId {
         let id = self.spawn(ip);
         if let Some(fiber) = self.fibers.get_mut(&id) {
-            fiber.stack = args;
+            fiber.locals = args;
         }
         id
     }

@@ -140,6 +140,14 @@ pub struct VM {
     pause_flag: PauseFlag,
     /// Receiver for fiber/channel events
     fiber_event_rx: Option<Receiver<FiberEvent>>,
+    /// Fiber id of the main program (when running in fiber mode)
+    main_fiber_id: FiberId,
+    /// Exit code captured when the main fiber finishes
+    main_exit_code: i32,
+    /// Saved native call stacks per fiber. The VM-native `CallFrame` carries
+    /// more state (stack base, captures) than the scheduler's `FiberCallFrame`,
+    /// so each fiber's call stack is parked here across context switches.
+    fiber_call_stacks: HashMap<FiberId, Vec<CallFrame>>,
 }
 
 impl VM {
@@ -170,6 +178,9 @@ impl VM {
             step_context: StepContext::new(),
             pause_flag: PauseFlag::new(),
             fiber_event_rx: Some(rx),
+            main_fiber_id: 0,
+            main_exit_code: 0,
+            fiber_call_stacks: HashMap::new(),
         }
     }
 
@@ -600,7 +611,36 @@ impl VM {
         // Start at entry point
         self.ip = self.program.entry_point;
 
+        // In fiber mode, register the main program as a real fiber so its
+        // context is saved/restored across context switches. Without this,
+        // save_fiber_state/load_fiber_state silently drop main's state because
+        // there is no "current" fiber.
+        if self.fiber_mode {
+            let main_id = self.scheduler.spawn(self.program.entry_point);
+            self.main_fiber_id = main_id;
+            // Pop main straight into the Running state and make it current.
+            self.scheduler.schedule();
+            self.ip = self.program.entry_point;
+        }
+
         loop {
+            // When the current fiber has parked or finished, re-enter the
+            // scheduler to pick the next runnable fiber. Sequential programs
+            // never reach this branch: main stays Running until it Halts.
+            if self.fiber_mode && self.scheduler.current.is_none() {
+                match self.scheduler.schedule() {
+                    Some(_) => self.load_fiber_state(),
+                    None => {
+                        if self.scheduler.is_deadlocked() {
+                            return Err("deadlock: all fibers are blocked".to_string());
+                        }
+                        if !self.scheduler.has_runnable() {
+                            return Ok(self.main_exit_code);
+                        }
+                    }
+                }
+            }
+
             // Check if we should stop (cooperative stopping)
             if let Some(ref check) = self.stop_check {
                 if check() {
@@ -1304,7 +1344,17 @@ impl VM {
                     // Push return value
                     self.stack.push(return_value);
                 } else {
-                    // Top-level return
+                    // Top-level return: the fiber body has run to completion.
+                    if self.fiber_mode {
+                        let finishing = self.scheduler.current;
+                        self.scheduler.finish_current(return_value);
+                        if finishing == Some(self.main_fiber_id) {
+                            self.main_exit_code = 0;
+                        }
+                        // Fall back to the outer scheduler loop to pick the
+                        // next runnable fiber (current is now None).
+                        return Ok(None);
+                    }
                     return Ok(Some(0));
                 }
             }
@@ -1429,16 +1479,11 @@ impl VM {
             Opcode::Yield => {
                 // In non-fiber mode, yield is a no-op
                 if self.fiber_mode {
-                    // Save current state to fiber
+                    // Save the running fiber's state, then park it. Leaving
+                    // current == None hands control back to the outer
+                    // scheduler loop in run(), which selects the next fiber.
                     self.save_fiber_state();
                     self.scheduler.yield_current();
-
-                    // Schedule next fiber
-                    if let Some(_next_id) = self.scheduler.schedule() {
-                        self.load_fiber_state();
-                    } else {
-                        return Ok(Some(0)); // No more fibers
-                    }
                 }
             }
 
@@ -1465,13 +1510,23 @@ impl VM {
                 match channel {
                     Value::Channel(channel_id) => {
                         if self.fiber_mode {
+                            // Snapshot the resume state (ip is already past this
+                            // instruction) into the current fiber before the
+                            // send, in case it blocks and clears `current`.
+                            let blocker = self.scheduler.current;
+                            self.save_fiber_state();
                             match self.scheduler.channel_send(channel_id, value) {
-                                Ok(true) => {} // Sent immediately
-                                Ok(false) => {
-                                    // Blocked - need to switch fibers
-                                    if self.scheduler.schedule().is_some() {
+                                Ok(true) => {
+                                    // Sent immediately; this fiber keeps running,
+                                    // so discard the snapshot by reloading it.
+                                    if blocker.is_some() {
                                         self.load_fiber_state();
                                     }
+                                }
+                                Ok(false) => {
+                                    // Blocked: channel_send cleared `current`.
+                                    // The outer scheduler loop resumes the next
+                                    // runnable fiber.
                                 }
                                 Err(e) => return Err(e),
                             }
@@ -1489,16 +1544,27 @@ impl VM {
                 match channel {
                     Value::Channel(channel_id) => {
                         if self.fiber_mode {
+                            // Snapshot resume state before the receive in case it
+                            // blocks and clears `current`.
+                            let blocker = self.scheduler.current;
+                            self.save_fiber_state();
                             match self.scheduler.channel_receive(channel_id) {
                                 Ok(Some((value, ok))) => {
+                                    // Got a value immediately; this fiber keeps
+                                    // running. Restore our snapshot and push the
+                                    // received pair onto it.
+                                    if blocker.is_some() {
+                                        self.load_fiber_state();
+                                    }
                                     self.stack.push(value);
                                     self.stack.push(Value::Bool(ok));
                                 }
                                 Ok(None) => {
-                                    // Blocked - switch fibers
-                                    if self.scheduler.schedule().is_some() {
-                                        self.load_fiber_state();
-                                    }
+                                    // Blocked: channel_receive cleared `current`.
+                                    // The outer scheduler loop resumes the next
+                                    // runnable fiber. When this fiber is later
+                                    // woken, the sender/closer has already pushed
+                                    // (value, ok) onto its saved stack.
                                 }
                                 Err(e) => return Err(e),
                             }
@@ -1552,19 +1618,31 @@ impl VM {
 
     /// Save current execution state to the current fiber
     fn save_fiber_state(&mut self) {
-        if let Some(fiber) = self.scheduler.current_fiber_mut() {
-            fiber.ip = self.ip;
-            fiber.stack = std::mem::take(&mut self.stack);
-            fiber.locals = std::mem::take(&mut self.locals);
+        if let Some(current_id) = self.scheduler.current {
+            if let Some(fiber) = self.scheduler.fibers.get_mut(&current_id) {
+                fiber.ip = self.ip;
+                fiber.stack = std::mem::take(&mut self.stack);
+                fiber.locals = std::mem::take(&mut self.locals);
+            }
+            // The native call stack lives outside the scheduler's Fiber, so
+            // stash it here so the next fiber starts with its own frames.
+            self.fiber_call_stacks
+                .insert(current_id, std::mem::take(&mut self.call_stack));
         }
     }
 
     /// Load execution state from the current fiber
     fn load_fiber_state(&mut self) {
-        if let Some(fiber) = self.scheduler.current_fiber_mut() {
-            self.ip = fiber.ip;
-            self.stack = std::mem::take(&mut fiber.stack);
-            self.locals = std::mem::take(&mut fiber.locals);
+        if let Some(current_id) = self.scheduler.current {
+            if let Some(fiber) = self.scheduler.fibers.get_mut(&current_id) {
+                self.ip = fiber.ip;
+                self.stack = std::mem::take(&mut fiber.stack);
+                self.locals = std::mem::take(&mut fiber.locals);
+            }
+            self.call_stack = self
+                .fiber_call_stacks
+                .remove(&current_id)
+                .unwrap_or_default();
         }
     }
 
@@ -3981,5 +4059,55 @@ mod tests {
         assert_eq!(snapshot.stack.len(), 2);
         assert_eq!(snapshot.ip, 6);
         assert!(snapshot.location.is_some());
+    }
+
+    /// Effort A gate: a spawned worker must actually run and hand a value back
+    /// to main over a channel. Exercises main-registered-as-fiber, spawn (with
+    /// the channel passed as a fiber-local arg), a real blocking ChanRecv on
+    /// main, the scheduler resuming the worker which sends, and fiber
+    /// completion via Return without killing the VM.
+    #[test]
+    fn test_spawn_channel_handoff() {
+        // Worker starts at offset W; main starts at entry_point 0.
+        const W: u16 = 15;
+        let program = make_program(
+            vec![Value::Int(1), Value::Int(42)],
+            vec![
+                // --- main @0 ---
+                Opcode::LoadConst as u8,
+                0,
+                0,                     // capacity 1
+                Opcode::ChanNew as u8, // -> ch                 @3
+                Opcode::Dup as u8,     // ch, ch                @4
+                Opcode::Spawn as u8,
+                (W & 0xff) as u8,
+                (W >> 8) as u8,
+                1,                      // spawn worker(ch): 1 arg  @5..8
+                Opcode::Pop as u8,      // drop Fiber handle    @9
+                Opcode::Yield as u8,    // park main            @10
+                Opcode::ChanRecv as u8, // -> 42, true          @11
+                Opcode::Pop as u8,      // drop ok flag         @12
+                Opcode::Print as u8,    // print 42             @13
+                Opcode::Halt as u8,     //                      @14
+                // --- worker @15 (locals[0] == ch from spawn arg) ---
+                Opcode::LoadLocal as u8,
+                0,
+                0, // push ch               @15..17
+                Opcode::LoadConst as u8,
+                1,
+                0,                      // push 42               @18..20
+                Opcode::ChanSend as u8, // send 42 into ch       @21
+                Opcode::LoadConst as u8,
+                0,
+                0,                    // dummy return value    @22..24
+                Opcode::Return as u8, //                       @25
+            ],
+        );
+        let mut vm = VM::new(program);
+        vm.set_fiber_mode(true);
+        vm.set_capture_output(true);
+        let code = vm.run().expect("spawn+channel program should run");
+        assert_eq!(code, 0);
+        assert_eq!(vm.get_output(), &["42".to_string()]);
     }
 }

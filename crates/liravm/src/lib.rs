@@ -44,6 +44,7 @@ pub fn run(bytecode: &[u8]) -> Result<i32, String> {
 
     // Create VM
     let mut vm = vm::VM::new(program);
+    vm.set_fiber_mode(true);
 
     // Execute
     vm.run()
@@ -56,6 +57,7 @@ pub fn run_with_capture(bytecode: &[u8]) -> Result<(i32, Vec<String>), String> {
 
     // Create VM with output capture
     let mut vm = vm::VM::new(program);
+    vm.set_fiber_mode(true);
     vm.set_capture_output(true);
 
     // Execute
@@ -71,6 +73,7 @@ pub fn run_with_debug(bytecode: &[u8]) -> Result<i32, String> {
 
     // Create VM with debug enabled
     let mut vm = vm::VM::new(program);
+    vm.set_fiber_mode(true);
     vm.set_debug(true);
 
     // Execute
@@ -88,6 +91,7 @@ where
 
     // Create VM with output callback
     let mut vm = vm::VM::new(program);
+    vm.set_fiber_mode(true);
     vm.set_capture_output(true);
     vm.set_output_callback(on_output);
 
