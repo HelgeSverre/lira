@@ -5,6 +5,7 @@
 
 use crate::ast::*;
 use crate::checker::{CheckedProgram, Type};
+use crate::errors::CodegenError;
 use crate::sema::SemanticTables;
 use lira_core::bytecode::{Constant, DebugInfo};
 use lira_core::opcode::Opcode;
@@ -166,7 +167,7 @@ pub struct CodeGenerator {
     /// Loop context for break/continue
     loop_stack: Vec<LoopContext>,
     /// Errors during code generation
-    errors: Vec<String>,
+    errors: Vec<CodegenError>,
     /// Debug information
     debug_info: DebugInfo,
     /// Struct method table: struct_name -> method_name -> code_offset
@@ -381,7 +382,12 @@ impl CodeGenerator {
         self.emit_opcode(Opcode::Halt);
 
         if !self.errors.is_empty() {
-            return Err(self.errors.join("\n"));
+            return Err(self
+                .errors
+                .iter()
+                .map(CodegenError::message)
+                .collect::<Vec<_>>()
+                .join("\n"));
         }
 
         // Build final bytecode
@@ -1672,7 +1678,8 @@ impl CodeGenerator {
                         self.emit_u16(idx);
                     } else {
                         // Could be a global - for now, error
-                        self.errors.push(format!("Undefined variable: {}", name));
+                        self.errors
+                            .push(CodegenError::UndefinedVariable { name: name.clone() });
                     }
                 }
             }
@@ -1728,8 +1735,9 @@ impl CodeGenerator {
                     BinaryOp::Shr => Opcode::Shr,
                     BinaryOp::UShr => Opcode::UShr,
                     _ => {
-                        self.errors
-                            .push(format!("Unsupported binary operator: {:?}", op));
+                        self.errors.push(CodegenError::GenericError {
+                            message: format!("Unsupported binary operator: {:?}", op),
+                        });
                         return;
                     }
                 };
@@ -1775,8 +1783,9 @@ impl CodeGenerator {
                                 self.emit_u16(slot);
                             }
                         } else {
-                            self.errors
-                                .push("Increment/decrement requires a variable".to_string());
+                            self.errors.push(CodegenError::GenericError {
+                                message: "Increment/decrement requires a variable".to_string(),
+                            });
                         }
                     }
                     UnaryOp::PostInc | UnaryOp::PostDec => {
@@ -1804,8 +1813,9 @@ impl CodeGenerator {
                                 // The old value is left on the stack from the first Dup
                             }
                         } else {
-                            self.errors
-                                .push("Increment/decrement requires a variable".to_string());
+                            self.errors.push(CodegenError::GenericError {
+                                message: "Increment/decrement requires a variable".to_string(),
+                            });
                         }
                     }
                 }
@@ -1842,7 +1852,9 @@ impl CodeGenerator {
                                 self.generate_expression(&args[1].value); // value
                                 self.emit_opcode(Opcode::ChanSend);
                             } else {
-                                self.errors.push("send() requires 2 arguments".to_string());
+                                self.errors.push(CodegenError::GenericError {
+                                    message: "send() requires 2 arguments".to_string(),
+                                });
                             }
                             return;
                         }
@@ -1852,7 +1864,9 @@ impl CodeGenerator {
                                 self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::ChanRecv);
                             } else {
-                                self.errors.push("recv() requires 1 argument".to_string());
+                                self.errors.push(CodegenError::GenericError {
+                                    message: "recv() requires 1 argument".to_string(),
+                                });
                             }
                             return;
                         }
@@ -1862,7 +1876,9 @@ impl CodeGenerator {
                                 self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::ChanClose);
                             } else {
-                                self.errors.push("close() requires 1 argument".to_string());
+                                self.errors.push(CodegenError::GenericError {
+                                    message: "close() requires 1 argument".to_string(),
+                                });
                             }
                             return;
                         }
@@ -1882,7 +1898,9 @@ impl CodeGenerator {
                                 self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::ArrayLen);
                             } else {
-                                self.errors.push("len() requires 1 argument".to_string());
+                                self.errors.push(CodegenError::GenericError {
+                                    message: "len() requires 1 argument".to_string(),
+                                });
                             }
                             return;
                         }
@@ -1893,7 +1911,9 @@ impl CodeGenerator {
                                 self.generate_expression(&args[1].value); // value
                                 self.emit_opcode(Opcode::ArrayPush);
                             } else {
-                                self.errors.push("push() requires 2 arguments".to_string());
+                                self.errors.push(CodegenError::GenericError {
+                                    message: "push() requires 2 arguments".to_string(),
+                                });
                             }
                             return;
                         }
@@ -1903,7 +1923,9 @@ impl CodeGenerator {
                                 self.generate_expression(&args[0].value);
                                 self.emit_opcode(Opcode::ArrayPop);
                             } else {
-                                self.errors.push("pop() requires 1 argument".to_string());
+                                self.errors.push(CodegenError::GenericError {
+                                    message: "pop() requires 1 argument".to_string(),
+                                });
                             }
                             return;
                         }
@@ -1924,12 +1946,14 @@ impl CodeGenerator {
                             self.emit_opcode(Opcode::Syscall);
                             self.emit_u8(syscall_num);
                         } else {
-                            self.errors.push(format!(
-                                "{}() requires {} argument{}",
-                                name,
-                                required_args,
-                                if required_args == 1 { "" } else { "s" }
-                            ));
+                            self.errors.push(CodegenError::GenericError {
+                                message: format!(
+                                    "{}() requires {} argument{}",
+                                    name,
+                                    required_args,
+                                    if required_args == 1 { "" } else { "s" }
+                                ),
+                            });
                         }
                         return;
                     }
@@ -1969,8 +1993,9 @@ impl CodeGenerator {
                                 self.emit_opcode(Opcode::Call);
                                 self.emit_u8(args.len() as u8);
                             } else {
-                                self.errors
-                                    .push(format!("Method not found: {}", mangled_name));
+                                self.errors.push(CodegenError::GenericError {
+                                    message: format!("Method not found: {}", mangled_name),
+                                });
                             }
                         } else {
                             // Check if it's an instance method on a variable (c.method())
@@ -2012,8 +2037,9 @@ impl CodeGenerator {
                                         self.emit_opcode(Opcode::Call);
                                         self.emit_u8((args.len() + 1) as u8); // +1 for self
                                     } else {
-                                        self.errors
-                                            .push(format!("Method not found: {}", mangled_name));
+                                        self.errors.push(CodegenError::GenericError {
+                                            message: format!("Method not found: {}", mangled_name),
+                                        });
                                     }
                                 } else {
                                     // Check for impl methods (works for all types, not just primitives)
@@ -2325,8 +2351,9 @@ impl CodeGenerator {
                     BinaryOp::Shl => Opcode::Shl,
                     BinaryOp::Shr => Opcode::Shr,
                     _ => {
-                        self.errors
-                            .push(format!("Unsupported compound operator: {:?}", op));
+                        self.errors.push(CodegenError::GenericError {
+                            message: format!("Unsupported compound operator: {:?}", op),
+                        });
                         return;
                     }
                 };
@@ -2513,8 +2540,9 @@ impl CodeGenerator {
                                 self.emit_u16(offset as u16);
                                 self.emit_u8(args.len() as u8);
                             } else {
-                                self.errors
-                                    .push(format!("Unknown function in spawn: {}", name));
+                                self.errors.push(CodegenError::GenericError {
+                                    message: format!("Unknown function in spawn: {}", name),
+                                });
                             }
                         } else {
                             // For non-identifier callees, emit the callee and use dynamic spawn
@@ -2879,8 +2907,9 @@ impl CodeGenerator {
             }
 
             ExpressionKind::Map(_) => {
-                self.errors
-                    .push("Map literals not yet implemented".to_string());
+                self.errors.push(CodegenError::GenericError {
+                    message: "Map literals not yet implemented".to_string(),
+                });
             }
 
             ExpressionKind::Path { segments } => {
@@ -2896,8 +2925,9 @@ impl CodeGenerator {
                         self.emit_opcode(Opcode::LoadConst);
                         self.emit_u16(idx);
                     } else {
-                        self.errors
-                            .push(format!("Unknown path: {}", segments.join("::")));
+                        self.errors.push(CodegenError::GenericError {
+                            message: format!("Unknown path: {}", segments.join("::")),
+                        });
                     }
                 }
             }
@@ -3130,6 +3160,29 @@ mod tests {
         let ast = parse(&tokens)?;
         let typed_ast = check(&ast)?;
         generate(&typed_ast)
+    }
+
+    #[test]
+    fn undefined_identifier_records_structured_error() {
+        // The checker normally catches undefined variables, but the code
+        // generator has its own guard. Drive `generate_expression` directly
+        // with an unknown identifier and assert it accumulates a structured
+        // `CodegenError::UndefinedVariable` (not a bare string).
+        let mut generator = CodeGenerator::new();
+        let expr = Expression {
+            id: crate::ids::NodeId::new(0),
+            kind: ExpressionKind::Identifier("ghost".to_string()),
+            span: Span { line: 1, column: 1 },
+        };
+        generator.generate_expression(&expr);
+        assert_eq!(
+            generator.errors,
+            vec![CodegenError::UndefinedVariable {
+                name: "ghost".to_string(),
+            }]
+        );
+        // The boundary still renders the exact legacy text.
+        assert_eq!(generator.errors[0].message(), "Undefined variable: ghost");
     }
 
     /// Check if a specific opcode appears in the bytecode's code section

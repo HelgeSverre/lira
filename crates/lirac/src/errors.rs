@@ -455,7 +455,7 @@ impl fmt::Display for CheckerError {
 }
 
 /// Structured error from the code generator
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum CodegenError {
     UndefinedVariable {
         name: String,
