@@ -274,7 +274,7 @@ This roadmap tracks the implementation of Lira, a modern systems programming lan
 | T7.3  | Module system               | import/export, namespaces                           | [x] (moved to Phase 6.3) |
 | T7.4  | Generic syntax              | `fn foo<T>(x: T) -> T` parsing                      | [x]                      |
 | T7.5  | Generic constraint checking | Reject ops on unconstrained type params             | [x]                      |
-| T7.6  | Generic monomorphization    | Generate specialized code per concrete type         | [x]                      |
+| T7.6  | Generic monomorphization    | Generate specialized code per concrete type         | [ ] (see note below)     |
 | T7.7  | Enum variant access         | `Color::Red` syntax                                 | [x]                      |
 | T7.8  | Classes with inheritance    | extends, super, method override                     | [x]                      |
 | T7.9  | Enums with data             | Enum variants with associated values                | [x]                      |
@@ -293,6 +293,14 @@ This roadmap tracks the implementation of Lira, a modern systems programming lan
 | T7.22 | Destructuring               | let (a, b) = tuple, let { x, y } = struct           | [x]                      |
 | T7.23 | Range expressions           | 1..10, 1..=10                                       | [x]                      |
 | T7.24 | Type expressions            | `x as int`, `x is int`, `x?.field`                  | [x]                      |
+
+> **Note on T7.6 (Generic monomorphization):** Not implemented. Generic
+> functions are statically type-checked (T7.4/T7.5) but execute via **runtime
+> type erasure** on the dynamically-typed VM — type parameters become `Any` at
+> runtime and there is a single shared instantiation. No specialized code is
+> generated per concrete type; codegen does not consume
+> `SemanticTables::generic_instantiations`. Monomorphization remains a future
+> (performance) task.
 
 ---
 
