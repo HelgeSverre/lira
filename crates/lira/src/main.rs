@@ -342,8 +342,33 @@ fn disassemble(bytecode: &[u8]) -> Result<String, String> {
             }
             Some(Opcode::Select) => {
                 if pos < code_end {
-                    let arm_count = read_u8(&mut pos)?;
-                    format!(" arms:{}", arm_count)
+                    let arm_count = read_u8(&mut pos)? as usize;
+                    // Decode the tag table.
+                    let mut tags = Vec::with_capacity(arm_count);
+                    for _ in 0..arm_count {
+                        tags.push(read_u8(&mut pos)?);
+                    }
+                    // Decode the body-offset table (relative i16 per arm).
+                    let mut targets = Vec::with_capacity(arm_count);
+                    for _ in 0..arm_count {
+                        let rel = read_u16(&mut pos)? as i16;
+                        let target = (pos as isize + rel as isize) as usize;
+                        targets.push(target);
+                    }
+                    let arms: Vec<String> = tags
+                        .iter()
+                        .zip(targets.iter())
+                        .map(|(tag, target)| {
+                            let kind = match tag {
+                                0 => "recv",
+                                1 => "send",
+                                2 => "default",
+                                _ => "?",
+                            };
+                            format!("{}->{}", kind, target)
+                        })
+                        .collect();
+                    format!(" arms:{} [{}]", arm_count, arms.join(", "))
                 } else {
                     String::new()
                 }

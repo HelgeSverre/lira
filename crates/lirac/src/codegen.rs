@@ -2568,112 +2568,88 @@ impl CodeGenerator {
             }
 
             ExpressionKind::Select(arms) => {
-                // Select statement bytecode layout:
-                // For each arm:
-                //   - Push channel for recv/send
-                //   - For send: push value
-                //   - Try the operation (ChanTryRecv or try_send)
-                //   - If successful, jump to body
-                // Default arm (if present) falls through
-                // After each body, jump to end
+                // Select bytecode layout (the VM `Select` opcode owns the
+                // try-all-arms-then-maybe-park decision; see vm::execute_select):
+                //
+                //   <push operands for every arm, in arm order>
+                //   Select arm_count [tag × arm_count] [i16 body_rel × arm_count]
+                //   <arm 0 body> Jump end
+                //   <arm 1 body> Jump end
+                //   ...
+                //
+                // Operands per arm: recv pushes the channel; send pushes channel
+                // then value; default pushes nothing. Tags: 0=recv, 1=send,
+                // 2=default. Each i16 body offset is patched to its body.
 
-                let mut end_jumps = Vec::new();
-                let mut arm_jumps = Vec::new();
-
-                // Check for default arm first
-                let has_default = arms
-                    .iter()
-                    .any(|a| matches!(a.kind, SelectArmKind::Default));
-
-                // Try each channel operation
-                for (i, arm) in arms.iter().enumerate() {
+                // 1. Push per-arm operands in arm order.
+                for arm in arms.iter() {
                     match &arm.kind {
                         SelectArmKind::Recv { channel, .. } => {
-                            // Try to receive from channel
                             self.generate_expression(channel);
-                            self.emit_opcode(Opcode::ChanTryRecv);
-
-                            // Check if we got a value (non-null)
-                            self.emit_opcode(Opcode::Dup);
-                            let null_idx = self.add_constant(Constant::Null);
-                            self.emit_opcode(Opcode::LoadConst);
-                            self.emit_u16(null_idx);
-                            self.emit_opcode(Opcode::Ne);
-
-                            // If got value, jump to this arm's body
-                            self.emit_opcode(Opcode::JumpIfTrue);
-                            arm_jumps.push((i, self.current_offset()));
-                            self.emit_i16(0);
-
-                            // Pop the null value if we didn't jump
-                            self.emit_opcode(Opcode::Pop);
                         }
                         SelectArmKind::Send { channel, value } => {
-                            // For send, we need a try_send that returns bool
-                            // Currently we don't have that, so we'll use blocking send
-                            // wrapped in a fiber check - for now, treat as always ready
                             self.generate_expression(channel);
                             self.generate_expression(value);
-                            // We'll need to add a TrySend opcode, for now always jump to body
-                            // Push true to indicate success
-                            let true_idx = self.add_constant(Constant::Bool(true));
-                            self.emit_opcode(Opcode::LoadConst);
-                            self.emit_u16(true_idx);
-                            self.emit_opcode(Opcode::JumpIfTrue);
-                            arm_jumps.push((i, self.current_offset()));
-                            self.emit_i16(0);
                         }
-                        SelectArmKind::Default => {
-                            // Default is handled after all channel ops fail
-                            // Just record this arm index for later
-                        }
+                        SelectArmKind::Default => {}
                     }
                 }
 
-                // If no channel ready and has default, execute default
-                // If no default, this would block (not handled here yet)
-                if has_default {
-                    for (i, arm) in arms.iter().enumerate() {
-                        if matches!(arm.kind, SelectArmKind::Default) {
-                            arm_jumps.push((i, 0)); // 0 means fall through (no jump needed)
-                            break;
-                        }
-                    }
+                // 2. Emit the Select opcode + arm count + tag table.
+                self.emit_opcode(Opcode::Select);
+                self.emit_u8(arms.len() as u8);
+                for arm in arms.iter() {
+                    let tag = match &arm.kind {
+                        SelectArmKind::Recv { .. } => 0u8,
+                        SelectArmKind::Send { .. } => 1u8,
+                        SelectArmKind::Default => 2u8,
+                    };
+                    self.emit_u8(tag);
                 }
 
-                // Generate arm bodies
+                // 3. Emit the body-offset table (placeholders, patched later).
+                let mut table_offsets = Vec::with_capacity(arms.len());
+                for _ in arms.iter() {
+                    table_offsets.push(self.current_offset());
+                    self.emit_i16(0);
+                }
+
+                // 4. Emit each arm body in order, recording its offset.
                 let mut body_offsets = vec![0usize; arms.len()];
+                let mut end_jumps = Vec::new();
                 for (i, arm) in arms.iter().enumerate() {
                     body_offsets[i] = self.current_offset();
 
-                    // If recv arm, store value to variable
+                    // For a recv arm binding a variable, the VM pushed the
+                    // received value; store it into the bound local.
                     if let SelectArmKind::Recv {
                         variable: Some(var),
                         ..
                     } = &arm.kind
                     {
                         let slot = self.define_local(var);
-                        // Value is already on stack from ChanTryRecv
                         self.emit_opcode(Opcode::StoreLocal);
                         self.emit_u16(slot);
+                    } else if let SelectArmKind::Recv { variable: None, .. } = &arm.kind {
+                        // Recv with no binding still leaves the value on the
+                        // stack; discard it.
+                        self.emit_opcode(Opcode::Pop);
                     }
 
                     self.generate_expression(&arm.body);
 
-                    // Jump to end after body
+                    // Jump to end after body.
                     self.emit_opcode(Opcode::Jump);
                     end_jumps.push(self.current_offset());
                     self.emit_i16(0);
                 }
 
-                // Patch arm jumps to their bodies
-                for (arm_idx, jump_offset) in arm_jumps {
-                    if jump_offset > 0 {
-                        self.patch_jump(jump_offset, body_offsets[arm_idx]);
-                    }
+                // 5. Patch the body-offset table entries.
+                for (i, table_offset) in table_offsets.into_iter().enumerate() {
+                    self.patch_jump(table_offset, body_offsets[i]);
                 }
 
-                // Patch end jumps
+                // Patch end jumps.
                 let end = self.current_offset();
                 for jump in end_jumps {
                     self.patch_jump(jump, end);

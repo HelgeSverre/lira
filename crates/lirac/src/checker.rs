@@ -2687,12 +2687,23 @@ impl TypeChecker {
             }
 
             ExpressionKind::Select(arms) => {
-                // Check each arm's channel and body
+                // Check each arm's channel and body. A recv arm may bind a
+                // variable (`v = <-ch`) that must be in scope inside the arm
+                // body; give each arm its own scope so the binding does not leak.
                 let mut result_type = Type::Void;
                 for arm in arms {
+                    self.env.push_scope();
                     match &arm.kind {
-                        SelectArmKind::Recv { channel, .. } => {
+                        SelectArmKind::Recv { channel, variable } => {
                             self.check_expression(channel);
+                            if let Some(name) = variable {
+                                self.env.define(Symbol {
+                                    name: name.clone(),
+                                    ty: Type::Any,
+                                    mutable: false,
+                                    kind: SymbolKind::Variable,
+                                });
+                            }
                         }
                         SelectArmKind::Send { channel, value } => {
                             self.check_expression(channel);
@@ -2701,6 +2712,7 @@ impl TypeChecker {
                         SelectArmKind::Default => {}
                     }
                     result_type = self.check_expression(&arm.body);
+                    self.env.pop_scope();
                 }
                 result_type
             }

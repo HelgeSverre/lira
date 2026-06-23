@@ -11,10 +11,7 @@ use std::sync::mpsc::Sender;
 #[derive(Debug, Clone)]
 pub enum FiberEvent {
     /// A new fiber was spawned
-    FiberSpawned {
-        fiber_id: FiberId,
-        ip: usize,
-    },
+    FiberSpawned { fiber_id: FiberId, ip: usize },
     /// A fiber's state changed
     FiberStateChanged {
         fiber_id: FiberId,
@@ -33,9 +30,7 @@ pub enum FiberEvent {
         value: String,
     },
     /// A channel was closed
-    ChannelClosed {
-        channel_id: ChannelId,
-    },
+    ChannelClosed { channel_id: ChannelId },
 }
 
 /// Fiber state
@@ -59,6 +54,22 @@ pub enum FiberState {
     Failed(String),
 }
 
+/// Resolution of a parked `select` recorded by a waker.
+///
+/// When a fiber parks on a `select` (no ready arm), it registers as a waiter on
+/// its channels. A waker (`channel_send`/`channel_receive`/`close_channel`) that
+/// commits a parked select arm records the outcome here so the woken fiber's
+/// re-run of the `Select` opcode commits to that exact arm instead of
+/// re-polling (which would otherwise risk double send/recv).
+#[derive(Debug, Clone)]
+pub struct SelectResolution {
+    /// The select channel id whose arm was committed.
+    pub channel_id: ChannelId,
+    /// For a committed recv arm, the value (and ok flag) received.
+    /// `None` for a committed send arm.
+    pub recv: Option<(Value, bool)>,
+}
+
 /// A fiber (green thread)
 #[derive(Debug)]
 pub struct Fiber {
@@ -78,6 +89,8 @@ pub struct Fiber {
     pub fiber_locals: HashMap<String, Value>,
     /// Result value when finished
     pub result: Option<Value>,
+    /// Resolution recorded by a waker for a parked `select` (consumed on resume).
+    pub select_resolution: Option<SelectResolution>,
 }
 
 /// Call frame within a fiber
@@ -99,6 +112,7 @@ impl Fiber {
             call_stack: Vec::with_capacity(16),
             fiber_locals: HashMap::new(),
             result: None,
+            select_resolution: None,
         }
     }
 
@@ -435,9 +449,28 @@ impl Scheduler {
             return Err("Cannot send on closed channel".to_string());
         }
 
-        // Check if there's a waiting receiver
-        if let Some(receiver_id) = channel.receivers.pop_front() {
-            // Direct handoff to receiver
+        // Check if there's a waiting receiver. Select-waiters (BlockedSelect)
+        // must NOT receive the value directly onto their stack: they re-run the
+        // `Select` opcode on wake and pull the value via `try_select`. So we
+        // pick the first *blocking* receiver to hand off to, while waking any
+        // select-waiters we skip past so they re-evaluate against this send.
+        let mut woken_selectors: Vec<FiberId> = Vec::new();
+        let mut direct_receiver: Option<FiberId> = None;
+        while let Some(receiver_id) = channel.receivers.pop_front() {
+            let is_select = matches!(
+                self.fibers.get(&receiver_id).map(|f| &f.state),
+                Some(FiberState::BlockedSelect)
+            );
+            if is_select {
+                woken_selectors.push(receiver_id);
+            } else {
+                direct_receiver = Some(receiver_id);
+                break;
+            }
+        }
+
+        if let Some(receiver_id) = direct_receiver {
+            // Direct handoff to a blocking receiver.
             if let Some(receiver) = self.fibers.get_mut(&receiver_id) {
                 receiver.stack.push(value);
                 receiver.stack.push(Value::Bool(true)); // ok = true
@@ -455,7 +488,45 @@ impl Scheduler {
                 operation: "send".to_string(),
                 value: value_str,
             });
+            // Re-queue any select-waiters we skipped so they stay registered.
+            if let Some(channel) = self.channels.get_mut(&channel_id) {
+                for id in woken_selectors {
+                    channel.receivers.push_front(id);
+                }
+            }
             return Ok(true);
+        }
+
+        // No blocking receiver: if a select-waiter is parked here, park this
+        // send in `senders` and wake the select-waiters so they re-evaluate and
+        // pull the value via `try_select`.
+        if !woken_selectors.is_empty() {
+            if let Some(fiber) = self.fibers.get_mut(&current_id) {
+                let old_state = Self::format_state(&fiber.state);
+                fiber.state = FiberState::BlockedSend(channel_id);
+                self.emit_event(FiberEvent::FiberStateChanged {
+                    fiber_id: current_id,
+                    old_state,
+                    new_state: format!("BlockedSend({})", channel_id),
+                });
+            }
+            if let Some(channel) = self.channels.get_mut(&channel_id) {
+                channel.senders.push_back((current_id, value));
+            }
+            for receiver_id in woken_selectors {
+                if let Some(receiver) = self.fibers.get_mut(&receiver_id) {
+                    let old_state = Self::format_state(&receiver.state);
+                    receiver.state = FiberState::Ready;
+                    self.emit_event(FiberEvent::FiberStateChanged {
+                        fiber_id: receiver_id,
+                        old_state,
+                        new_state: "Ready".to_string(),
+                    });
+                    self.ready_queue.push_back(receiver_id);
+                }
+            }
+            self.current = None;
+            return Ok(false);
         }
 
         // Check if we can buffer
@@ -508,6 +579,12 @@ impl Scheduler {
             if let Some((sender_id, sender_value)) = channel.senders.pop_front() {
                 channel.buffer.push_back(sender_value);
                 if let Some(sender) = self.fibers.get_mut(&sender_id) {
+                    if matches!(sender.state, FiberState::BlockedSelect) {
+                        sender.select_resolution = Some(SelectResolution {
+                            channel_id,
+                            recv: None,
+                        });
+                    }
                     let old_state = Self::format_state(&sender.state);
                     sender.state = FiberState::Ready;
                     self.emit_event(FiberEvent::FiberStateChanged {
@@ -530,6 +607,15 @@ impl Scheduler {
         if let Some((sender_id, value)) = channel.senders.pop_front() {
             let value_str = format!("{:?}", value);
             if let Some(sender) = self.fibers.get_mut(&sender_id) {
+                // If the sender is a select-waiter, record that its send arm on
+                // this channel was committed so its `Select` re-run does NOT
+                // send again.
+                if matches!(sender.state, FiberState::BlockedSelect) {
+                    sender.select_resolution = Some(SelectResolution {
+                        channel_id,
+                        recv: None,
+                    });
+                }
                 let old_state = Self::format_state(&sender.state);
                 sender.state = FiberState::Ready;
                 self.emit_event(FiberEvent::FiberStateChanged {
@@ -597,11 +683,15 @@ impl Scheduler {
         // Emit channel closed event
         self.emit_event(FiberEvent::ChannelClosed { channel_id });
 
-        // Wake all blocked receivers with (null, false)
+        // Wake all blocked receivers with (null, false). Select-waiters
+        // (BlockedSelect) must NOT get the pair pushed onto their stack: they
+        // re-run `Select`, and `try_select` reports the closed channel as ready.
         for receiver_id in receiver_ids {
             if let Some(receiver) = self.fibers.get_mut(&receiver_id) {
-                receiver.stack.push(Value::Null);
-                receiver.stack.push(Value::Bool(false)); // ok = false
+                if !matches!(receiver.state, FiberState::BlockedSelect) {
+                    receiver.stack.push(Value::Null);
+                    receiver.stack.push(Value::Bool(false)); // ok = false
+                }
                 let old_state = Self::format_state(&receiver.state);
                 receiver.state = FiberState::Ready;
                 self.emit_event(FiberEvent::FiberStateChanged {
@@ -629,25 +719,150 @@ impl Scheduler {
         Ok(())
     }
 
-    /// Try to receive from any of the given channels (select)
-    pub fn try_select(&mut self, channel_ids: &[ChannelId]) -> Option<(usize, Value)> {
+    /// Try to receive from any of the given channels (select).
+    ///
+    /// Returns `Some((index, value, ok))` for the first ready channel, where
+    /// `index` is the position in `channel_ids`. A closed channel is treated as
+    /// immediately ready and yields `(index, Null, false)`, matching Go's
+    /// semantics where a recv on a closed channel does not block. A waiting
+    /// unbuffered sender is woken on handoff.
+    pub fn try_select(&mut self, channel_ids: &[ChannelId]) -> Option<(usize, Value, bool)> {
         for (index, &channel_id) in channel_ids.iter().enumerate() {
             if let Some(channel) = self.channels.get_mut(&channel_id) {
                 // Check buffer
                 if let Some(value) = channel.buffer.pop_front() {
-                    return Some((index, value));
+                    return Some((index, value, true));
                 }
-                // Check waiting senders
+                // Check waiting senders (unbuffered handoff).
                 if let Some((sender_id, value)) = channel.senders.pop_front() {
                     if let Some(sender) = self.fibers.get_mut(&sender_id) {
+                        // A select send-waiter must record that its send arm on
+                        // this channel committed, so its `Select` re-run does not
+                        // send the value again.
+                        if matches!(sender.state, FiberState::BlockedSelect) {
+                            sender.select_resolution = Some(SelectResolution {
+                                channel_id,
+                                recv: None,
+                            });
+                        }
                         sender.state = FiberState::Ready;
                         self.ready_queue.push_back(sender_id);
                     }
-                    return Some((index, value));
+                    return Some((index, value, true));
+                }
+                // A closed channel makes its recv arm immediately ready.
+                if channel.closed {
+                    return Some((index, Value::Null, false));
                 }
             }
         }
         None
+    }
+
+    /// Try to send a value on a channel without blocking (select send arm).
+    ///
+    /// Returns `true` if the value was handed to a waiting receiver or buffered,
+    /// `false` if the send would block (no receiver, full/unbuffered). Never
+    /// parks the current fiber.
+    pub fn try_select_send(&mut self, channel_id: ChannelId, value: Value) -> bool {
+        let channel = match self.channels.get_mut(&channel_id) {
+            Some(ch) => ch,
+            None => return false,
+        };
+
+        if channel.closed {
+            return false;
+        }
+
+        // Direct handoff to a waiting receiver.
+        if let Some(receiver_id) = channel.receivers.pop_front() {
+            let value_str = format!("{:?}", value);
+            let is_select = matches!(
+                self.fibers.get(&receiver_id).map(|f| &f.state),
+                Some(FiberState::BlockedSelect)
+            );
+            if let Some(receiver) = self.fibers.get_mut(&receiver_id) {
+                if is_select {
+                    // A select recv-waiter: record the committed recv arm so its
+                    // `Select` re-run picks up this value instead of re-polling.
+                    receiver.select_resolution = Some(SelectResolution {
+                        channel_id,
+                        recv: Some((value, true)),
+                    });
+                } else {
+                    receiver.stack.push(value);
+                    receiver.stack.push(Value::Bool(true)); // ok = true
+                }
+                let old_state = Self::format_state(&receiver.state);
+                receiver.state = FiberState::Ready;
+                self.emit_event(FiberEvent::FiberStateChanged {
+                    fiber_id: receiver_id,
+                    old_state,
+                    new_state: "Ready".to_string(),
+                });
+                self.ready_queue.push_back(receiver_id);
+            }
+            self.emit_event(FiberEvent::ChannelMessage {
+                channel_id,
+                operation: "send".to_string(),
+                value: value_str,
+            });
+            return true;
+        }
+
+        // Buffer if there is room.
+        if channel.capacity > 0 && channel.buffer.len() < channel.capacity {
+            let value_str = format!("{:?}", value);
+            channel.buffer.push_back(value);
+            self.emit_event(FiberEvent::ChannelMessage {
+                channel_id,
+                operation: "send".to_string(),
+                value: value_str,
+            });
+            return true;
+        }
+
+        false
+    }
+
+    /// Park the current fiber on a `select` with no ready arm.
+    ///
+    /// The fiber is registered as a waiter on every recv channel's `receivers`
+    /// queue and every send channel's `senders` queue (with the send value), so
+    /// the existing channel wake paths (`channel_send`/`channel_receive`/
+    /// `close_channel`/`try_select`) move it back to `Ready`. On resume it
+    /// re-executes the `Select` opcode and re-evaluates its arms; because that
+    /// re-evaluation re-checks readiness, a spurious wake simply re-parks. The
+    /// fiber is marked `BlockedSelect` (treated as blocked by deadlock
+    /// detection) and `current` is cleared so the run loop reschedules.
+    pub fn park_select(&mut self, recv_ids: &[ChannelId], send_specs: &[(ChannelId, Value)]) {
+        let current_id = match self.current {
+            Some(id) => id,
+            None => return,
+        };
+
+        if let Some(fiber) = self.fibers.get_mut(&current_id) {
+            let old_state = Self::format_state(&fiber.state);
+            fiber.state = FiberState::BlockedSelect;
+            self.emit_event(FiberEvent::FiberStateChanged {
+                fiber_id: current_id,
+                old_state,
+                new_state: "BlockedSelect".to_string(),
+            });
+        }
+
+        for &channel_id in recv_ids {
+            if let Some(channel) = self.channels.get_mut(&channel_id) {
+                channel.receivers.push_back(current_id);
+            }
+        }
+        for (channel_id, value) in send_specs {
+            if let Some(channel) = self.channels.get_mut(channel_id) {
+                channel.senders.push_back((current_id, value.clone()));
+            }
+        }
+
+        self.current = None;
     }
 }
 

@@ -1607,12 +1607,185 @@ impl VM {
             }
 
             Opcode::Select => {
-                // Select is handled through codegen with ChanTryRecv
-                // This opcode exists for future optimization but isn't used currently
+                return self.execute_select();
             }
 
             _ => unreachable!("execute_fiber_channel called with non-fiber/channel opcode"),
         }
+        Ok(None)
+    }
+
+    /// Execute a `Select` opcode.
+    ///
+    /// Encoding (operands follow the opcode byte; `self.ip` is positioned just
+    /// past the opcode when this is called):
+    /// ```text
+    /// Select(0xA5) u8:arm_count  [arm_count × u8:tag]  [arm_count × i16:body_rel]
+    /// ```
+    /// Tags: 0 = recv, 1 = send, 2 = default. Each `body_rel` is relative to the
+    /// byte just after that i16 (same convention as `patch_jump`). The per-arm
+    /// operands are pushed onto the stack by codegen *before* the opcode, in arm
+    /// order: recv pushes the channel; send pushes channel then value; default
+    /// pushes nothing.
+    ///
+    /// Semantics (Go-like): poll all recv/send arms; the first ready one wins. A
+    /// recv arm pushes the received value for the body to bind. If none is ready
+    /// and a `default` arm exists, run it (non-blocking poll). Otherwise park the
+    /// fiber until any arm becomes ready, then re-run this opcode and commit.
+    fn execute_select(&mut self) -> Result<Option<i32>, String> {
+        // The opcode byte was already consumed; remember its offset so a parked
+        // select resumes by re-executing this very opcode.
+        let select_ip = self.ip - 1;
+
+        let arm_count = self.read_u8()? as usize;
+
+        let mut tags = Vec::with_capacity(arm_count);
+        for _ in 0..arm_count {
+            tags.push(self.read_u8()?);
+        }
+
+        let mut body_targets = Vec::with_capacity(arm_count);
+        for _ in 0..arm_count {
+            let rel = self.read_i16()?;
+            // Target is relative to the byte after this i16 field.
+            let target = (self.ip as isize + rel as isize) as usize;
+            body_targets.push(target);
+        }
+
+        // Pop per-arm operands in reverse arm order. Each arm records the channel
+        // and (for send) the value, plus whether it is the default.
+        enum Arm {
+            Recv { channel: ChannelId },
+            Send { channel: ChannelId, value: Value },
+            Default,
+        }
+
+        let mut arms: Vec<Arm> = Vec::with_capacity(arm_count);
+        // Build in reverse, then reverse to restore arm order.
+        for tag in tags.iter().rev() {
+            let arm = match tag {
+                0 => {
+                    let channel = match self.pop()? {
+                        Value::Channel(id) => id,
+                        _ => return Err("select recv arm requires a channel".to_string()),
+                    };
+                    Arm::Recv { channel }
+                }
+                1 => {
+                    let value = self.pop()?;
+                    let channel = match self.pop()? {
+                        Value::Channel(id) => id,
+                        _ => return Err("select send arm requires a channel".to_string()),
+                    };
+                    Arm::Send { channel, value }
+                }
+                2 => Arm::Default,
+                _ => return Err("invalid select arm tag".to_string()),
+            };
+            arms.push(arm);
+        }
+        arms.reverse();
+
+        // If a waker already resolved this select while it was parked, commit to
+        // the recorded arm.
+        let resolution = self
+            .scheduler
+            .current_fiber_mut()
+            .and_then(|f| f.select_resolution.take());
+        if let Some(res) = resolution {
+            for (i, arm) in arms.iter().enumerate() {
+                let matches = match arm {
+                    Arm::Recv { channel } => res.recv.is_some() && *channel == res.channel_id,
+                    Arm::Send { channel, .. } => res.recv.is_none() && *channel == res.channel_id,
+                    Arm::Default => false,
+                };
+                if matches {
+                    if let Some((value, _ok)) = res.recv {
+                        self.stack.push(value);
+                    }
+                    self.ip = body_targets[i];
+                    return Ok(None);
+                }
+            }
+            // Resolution did not match any arm (spurious); fall through to a
+            // fresh poll below.
+        }
+
+        // Poll recv arms first.
+        let recv_ids: Vec<ChannelId> = arms
+            .iter()
+            .filter_map(|a| match a {
+                Arm::Recv { channel } => Some(*channel),
+                _ => None,
+            })
+            .collect();
+        if !recv_ids.is_empty() {
+            if let Some((local_idx, value, _ok)) = self.scheduler.try_select(&recv_ids) {
+                // Map the recv-local index back to the arm index.
+                let arm_idx = arms
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, a)| matches!(a, Arm::Recv { .. }))
+                    .nth(local_idx)
+                    .map(|(i, _)| i)
+                    .expect("recv index out of range");
+                self.stack.push(value);
+                self.ip = body_targets[arm_idx];
+                return Ok(None);
+            }
+        }
+
+        // Poll send arms.
+        for (i, arm) in arms.iter().enumerate() {
+            if let Arm::Send { channel, value } = arm {
+                if self.scheduler.try_select_send(*channel, value.clone()) {
+                    self.ip = body_targets[i];
+                    return Ok(None);
+                }
+            }
+        }
+
+        // No arm ready. If a default exists, run it (non-blocking poll).
+        if let Some((i, _)) = arms
+            .iter()
+            .enumerate()
+            .find(|(_, a)| matches!(a, Arm::Default))
+        {
+            self.ip = body_targets[i];
+            return Ok(None);
+        }
+
+        // No default: park until an arm becomes ready, then re-run this opcode.
+        if !self.fiber_mode {
+            return Err("select requires fiber mode".to_string());
+        }
+
+        let send_specs: Vec<(ChannelId, Value)> = arms
+            .iter()
+            .filter_map(|a| match a {
+                Arm::Send { channel, value } => Some((*channel, value.clone())),
+                _ => None,
+            })
+            .collect();
+
+        // Re-push the per-arm operands so that when this fiber wakes and
+        // re-executes the Select opcode (ip rewound below), they are on the
+        // stack exactly as codegen left them before the opcode.
+        for arm in arms.iter() {
+            match arm {
+                Arm::Recv { channel } => self.stack.push(Value::Channel(*channel)),
+                Arm::Send { channel, value } => {
+                    self.stack.push(Value::Channel(*channel));
+                    self.stack.push(value.clone());
+                }
+                Arm::Default => {}
+            }
+        }
+
+        // Resume by re-executing this Select opcode.
+        self.ip = select_ip;
+        self.save_fiber_state();
+        self.scheduler.park_select(&recv_ids, &send_specs);
         Ok(None)
     }
 
