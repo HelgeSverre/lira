@@ -21,21 +21,24 @@ Findings from a deep code review comparing Lira to Sema. Items to address before
 - This is acceptable for correctness (the tagged runtime dispatches on value tags). Monomorphization is a future **performance** task, not a correctness blocker.
 - Fix (optional, perf): implement monomorphization / specialization by consuming `sema.generic_instantiations` in codegen.
 
-### Fiber/Channel System Is Dead Code
-- A substantial implementation exists (714-line scheduler in `fiber.rs`, 9 VM opcodes, full compiler pipeline support) but **cannot run**
-- `vm.rs:164`: `fiber_mode: false` (default) — the setter `set_fiber_mode(true)` exists but **nobody calls it**
-- `Yield` is a no-op when `fiber_mode` is false; `ChanSend`/`ChanRecv` always return errors
-- Spawn creates fibers in the ready queue but no scheduler loop ever drives them
-- `Select` opcode is an explicit no-op (`vm.rs:1381`)
-- `async`/`await` are lexer tokens only (`lexer.rs:363-364`) — not parsed, not type-checked, not compiled; no async state machine generation
-- `std.sync.*` (Mutex, RwLock, WaitGroup) documented in `docs/04-concurrency.md` but no stdlib modules exist
-- Test samples in `tests/samples/` (worker-pool, ping-pong, parallel-sum) are rich but only test syntax parsing
-- **Playground integration missing**: `handlers.rs` (`run()`, `step()`, `DebugSession::load()`) never enable fiber mode; WebSocket `VmThreadHandle` has no API to enable it
-- **No scheduler loop in VM execution**: `run()` (lines 576-638) and `step_instruction()` execute single fiber sequentially; when fiber ops block, they call `schedule()` but no outer loop keeps running while fibers are runnable
-- ~~**`select { ... }` syntax doesn't parse**~~ **CORRECTED (2026-06-23): FALSE.** `select { ... }` *does* parse — see `parser.rs::select_expression` (~lines 1804–1906), producing `ExpressionKind::Select(arms)`. Covered by passing unit tests (`test_select_with_send_variable`, `test_select_with_recv_variable`, `test_select_default_case`, `test_select_mixed_arms`). The real gap is **runtime**: the `Select` opcode is a no-op in the VM (see below), so parsing succeeds but execution does not drive channels.
-- **Protocol defines fiber/channel events but never emitted**: `protocol.rs:102-119` defines `FiberSpawned`, `FiberStateChanged`, `ChannelCreated`, `ChannelMessage` — but VM never runs with `fiber_mode=true`
-- **Debug session has no fiber/channel inspection**: `get_snapshot()` returns only locals/stack/call_stack — no fiber/channel state
-- Fix: Enable `fiber_mode`, wire the scheduler loop into VM execution, implement `Select`
+### Fiber/Channel System — DONE (concurrency now executes)
+- **DONE (2026-06-23):** Concurrency is **live**. The VM drives the fiber scheduler; fibers run cooperatively and share the object heap (`Rc<RefCell<...>>`), so a struct field mutated between yield/block points is safe across fibers.
+- **DONE — working primitives:**
+  - `spawn func(args)` — creates a fiber with args bound as locals; the scheduler runs it.
+  - `chan(n)` (buffered) / `chan()` (unbuffered) — channel construction.
+  - `send(ch, v)` — real blocking send; `recv(ch)` — real blocking recv; `close(ch)`.
+  - `select { v = <-ch => ...,  val -> ch => ...,  _ => ... }` — blocking + polling, real send/recv arms, default arm. The `Select` opcode is implemented (no longer a VM no-op).
+  - `fiber_yield()` / `fiber_id()` builtins.
+  - **Deadlock detection** when all fibers are blocked.
+- **DONE — `std.sync` core** (`stdlib/sync.li`, `import std.sync`): `IntMutex` / `StringMutex` (capacity-1 channel; `lock`/`unlock`/`with`), `WaitGroup` (`done`/`wait(n)`), `Semaphore` (`acquire`/`release`). VM-honest, zero compiler changes. Proven by `examples/sync_mutex_waitgroup.li`, `examples/sync_semaphore.li`, `examples/sync_with_closure.li`, wired into the integration harness. Docs reconciled in `docs/04-concurrency.md` §5.
+- **DONE — concurrency now tested at runtime:** the `test_sync_*` integration tests execute real fibers/channels (not just parse). The `tests/samples/` programs (worker-pool, ping-pong, parallel-sum) parse, and the live model is covered by the executing example tests.
+- ~~`select { ... }` syntax doesn't parse~~ — was already corrected; **now also executes** at runtime.
+- **Remaining gaps (honest):**
+  - **RAII-guard Mutex** (auto-unlock on scope exit), **RwLock**, **Condvar** — *not implementable*: Lira has no Drop/RAII. `std.sync` uses explicit `lock`/`unlock` + the `with()` closure idiom instead (documented deviation).
+  - **`async`/`await`** — still lexer tokens only (`lexer.rs:363-364`); not parsed, type-checked, or compiled, and **not the recommended model**. Fibers + channels + `select` are the concurrency model. Documented as not-implemented in `docs/04-concurrency.md` §6.
+  - **Atomics** (`AtomicInt`, memory orderings) — *meaningless* on a cooperative single-threaded shared-heap VM; intentionally omitted. Use `IntMutex` for mutual exclusion across blocking points.
+  - **`try_lock()` / generic `Mutex<T>`** — deferred (need an `Option`/sentinel return and a checker `type_params` patch respectively).
+  - **Playground/LSP fiber inspection** — VM execution drives fibers, but the playground/debug-protocol fiber & channel inspection (`get_snapshot`, `VmStateJson.fibers`/`channels`) is still not populated; no fiber-mode toggle in the playground API/UI. (See Playground Backend below.)
 
 ### Memory Management Module Is Dead Code
 - `memory.rs` defines ARC + cycle detection GC (`ObjectRef`, `GcStats`, `Object`, `ObjectKind`) but the VM **never imports or uses it**
@@ -58,7 +61,7 @@ Findings from a deep code review comparing Lira to Sema. Items to address before
 - ~~`cargo test` fails on `examples/char_literals.li`~~ **FIXED (2026-06-23).** The failure was a **malformed example**, not a lexer bug — the lexer handles `\n`/`\t`/`\'`/`\\` char escapes fine. The corrected `examples/char_literals.li` compiles, runs, and matches its `@expect` directives. The full example suite is green (85/85 examples; `cargo test --workspace` all pass).
 - **Test count corrected:** ~~1,077~~ → **~675** `#[test]` functions across `crates/` (count is approximate and drifts; verify with `grep -rc '#\[test\]' crates/`). The old 1,077 figure was stale.
 - No cross-verification between compiler phases (still true — nice-to-have)
-- **Concurrency samples not tested**: `tests/samples/` has 5 rich concurrency tests (ping-pong, worker-pool, parallel-sum, producer-consumer, fibers-basic) — none run in integration tests. (Note: these parse, including `select`; they don't *execute* concurrently because `fiber_mode` is never enabled and `Select` is a VM no-op.)
+- **Concurrency now executes in tests (was: not tested):** the `test_sync_*` integration tests run real fibers/channels/`select` end-to-end (`examples/sync_*.li`). The `tests/samples/` programs (ping-pong, worker-pool, parallel-sum, producer-consumer, fibers-basic) are still not individually wired into the harness, but `fiber_mode` is now enabled and `Select` executes, so the runtime they exercise is live and covered by the example tests.
 - Fix: add substantially more tests, especially cross-phase and concurrency runtime tests
 
 ### Error Handling: compile-time DONE; VM runtime errors still basic

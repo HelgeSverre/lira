@@ -427,231 +427,265 @@ let result = select {
 
 ---
 
-## 5. Synchronization Primitives
+## 5. Synchronization Primitives (`std.sync`)
 
-### 5.1 Mutex
+The `std.sync` module ships **VM-honest** synchronization primitives built on
+top of the fiber/channel runtime. Import it with:
 
 ```li
-import std.sync.Mutex
+import std.sync
+```
 
-let counter = Mutex<int>.new(0)
+> **Why these APIs look different from Go/Rust:** Lira has **no user-level
+> Drop/RAII**. The conventional "lock guard that auto-unlocks when it goes out
+> of scope" cannot be expressed. Every primitive in `std.sync` is therefore
+> built on channels and uses an **explicit** API (or a bracketed closure
+> helper). See [§5.5 Not Yet Implemented](#55-not-yet-implemented--planned) for
+> the primitives that were intentionally left out because they require Drop or
+> have no meaning on a cooperative single-threaded VM.
 
-spawn {
-    // Lock and access
-    let guard = counter.lock()
-    guard.value += 1
-    // Automatically unlocks when guard goes out of scope
+All primitives are implemented in `stdlib/sync.li` as ordinary Lira structs over
+channels — there are no special compiler intrinsics involved.
+
+### 5.1 Mutex (`IntMutex` / `StringMutex`)
+
+A mutex is backed by a **capacity-1 channel** seeded with the protected value.
+The value sitting in the channel means *unlocked*; taking it out (`lock`) means
+*locked*. Because only one value fits, only one fiber can hold it at a time, so
+there are no lost updates.
+
+Because there is no RAII, **`unlock` is explicit** — the caller is responsible
+for putting a value back:
+
+```li
+import std.sync
+
+let m = new_int_mutex(0)
+
+// Explicit lock / unlock: take the value out, put a new value back.
+let v = m.lock()       // blocks until the value is available
+m.unlock(v + 1)        // releases the lock, storing the new value
+```
+
+The recommended idiom is the bracketed **`with`** form, which guarantees the
+lock is released:
+
+```li
+// lock, apply the closure to the current value, unlock the result
+m.with(|x: int| x + 1)
+```
+
+A `StringMutex` works identically over a `string` value:
+
+```li
+let name = new_string_mutex("")
+name.with(|s: string| s + "!")
+```
+
+| Constructor                 | Methods                                          |
+| --------------------------- | ------------------------------------------------ |
+| `new_int_mutex(initial)`    | `lock() -> int`, `unlock(int)`, `with(fn)`       |
+| `new_string_mutex(initial)` | `lock() -> string`, `unlock(string)`, `with(fn)` |
+
+> **Note:** `try_lock()` and a generic `Mutex<T>` are not yet implemented — see
+> [§5.5](#55-not-yet-implemented--planned). Concrete `IntMutex` / `StringMutex`
+> are provided instead of a generic `Mutex<T>`.
+
+### 5.2 WaitGroup
+
+A `WaitGroup` is a **done-token channel**: each worker sends one token when it
+finishes, and the coordinator calls `wait(n)` to receive exactly `n` tokens.
+This is simpler and more deterministic than a hidden shared counter (which would
+itself need a mutex).
+
+Because there is no hidden counter, the coordinator **passes the expected worker
+count explicitly** to `wait`:
+
+```li
+import std.sync
+
+fn worker(wg: WaitGroup, i: int) {
+    do_work(i)
+    wg.done()          // each worker signals exactly once on exit
 }
 
-// Or with explicit scope
-{
-    let guard = counter.lock()
-    guard.value += 1
-}
+fn main() {
+    let wg = new_wait_group()
+    let n = 10
 
-// Try lock (non-blocking)
-if let guard = counter.try_lock() {
-    guard.value += 1
+    var i = 0
+    while i < n {
+        spawn worker(wg, i)
+        i = i + 1
+    }
+
+    wg.wait(n)         // blocks until n workers have signalled done
+    println("All work completed")
 }
 ```
 
-### 5.2 RwLock (Read-Write Lock)
+| Constructor        | Methods                          |
+| ------------------ | -------------------------------- |
+| `new_wait_group()` | `done()`, `wait(n)` (blocks)     |
 
-```li
-import std.sync.RwLock
-
-let data = RwLock<Config>.new(config)
-
-// Multiple readers allowed
-spawn {
-    let guard = data.read()
-    print(guard.value.setting)
-}
-
-// Only one writer, excludes readers
-spawn {
-    let guard = data.write()
-    guard.value.setting = "new value"
-}
-```
+> **Deviation from Go:** there is no separate `add()` — you do not increment a
+> counter ahead of time. Instead you tell `wait` how many `done()` signals to
+> expect. The backing channel is buffered (capacity 64), so pick a worker count
+> below that, or drain the group as you go.
 
 ### 5.3 Semaphore
 
+A `Semaphore` is a channel **pre-seeded with `n` permits**. `acquire` removes a
+permit (blocking when none remain); `release` returns one. This bounds the
+number of fibers in a critical section to `n`, while still allowing real overlap
+up to that bound.
+
 ```li
-import std.sync.Semaphore
+import std.sync
 
-let sem = Semaphore.new(3)  // Allow 3 concurrent accesses
+let sem = new_semaphore(3)  // allow 3 concurrent fibers
 
-spawn {
-    sem.acquire()  // Wait for permit
-    // Do work (max 3 concurrent)
-    sem.release()
-}
-
-// With timeout
-if sem.try_acquire_timeout(Duration.seconds(1)) {
-    // Got permit
-    sem.release()
+fn worker(sem: Semaphore) {
+    sem.acquire()           // blocks until a permit is free
+    // ... at most 3 fibers run this section concurrently ...
+    sem.release()           // return the permit
 }
 ```
 
-### 5.4 WaitGroup
+| Constructor         | Methods                  |
+| ------------------- | ------------------------ |
+| `new_semaphore(n)`  | `acquire()`, `release()` |
+
+> **Note:** there is no `try_acquire` / `try_acquire_timeout` yet.
+
+### 5.4 Worked Example
+
+This program (from `examples/sync_mutex_waitgroup.li`) proves real mutual
+exclusion and that `wait` blocks — two fibers each increment a shared
+`IntMutex` 1000 times and the total is exactly 2000:
 
 ```li
-import std.sync.WaitGroup
+import std.sync
 
-let wg = WaitGroup.new()
-
-for i in 0..10 {
-    wg.add(1)
-    spawn {
-        do_work(i)
-        wg.done()
+fn worker(m: IntMutex, wg: WaitGroup, iters: int) {
+    var i = 0
+    while i < iters {
+        let v = m.lock()
+        m.unlock(v + 1)
+        i = i + 1
     }
+    wg.done()
 }
 
-wg.wait()  // Block until all done
-print("All work completed")
-```
+fn main() {
+    let m = new_int_mutex(0)
+    let wg = new_wait_group()
+    let iters = 1000
 
-### 5.5 Once
+    spawn worker(m, wg, iters)
+    spawn worker(m, wg, iters)
 
-```li
-import std.sync.Once
+    wg.wait(2)
 
-let init_once = Once.new()
-var config: Config? = null
-
-fn get_config() -> Config {
-    init_once.run(|| {
-        config = load_config()
-    })
-    return config!
+    let total = m.lock()
+    m.unlock(total)
+    println("total: " + total)        // total: 2000
+    println("expected: " + (2 * iters))
 }
 ```
 
-### 5.6 Condition Variable
+### 5.5 Not Yet Implemented / Planned
 
-```li
-import std.sync.{Mutex, Condvar}
+The following primitives appeared in earlier drafts of this spec but are **not
+implemented**. They are listed here honestly so nobody depends on APIs that do
+not exist. Do not treat any of the following as working:
 
-let mutex = Mutex<Queue<int>>.new(Queue.new())
-let not_empty = Condvar.new()
+| Primitive                          | Status                | Reason                                                                                 |
+| ---------------------------------- | --------------------- | -------------------------------------------------------------------------------------- |
+| **RAII guard Mutex** (auto-unlock) | Not implementable     | Lira has no Drop/RAII; a guard cannot run code on scope exit. Use `with()` / `unlock`. |
+| **`try_lock()`**                   | Planned               | Needs an `Option`/sentinel return to be ergonomic.                                     |
+| **Generic `Mutex<T>`**             | Planned               | Needs a checker `type_params` patch + generic-constructor fix. Use `IntMutex` etc.     |
+| **`RwLock<T>`** (read/write)       | Not implementable yet | Read/write guards have the same Drop problem as the Mutex guard.                        |
+| **`Condvar`** (`wait(guard)`)      | Not implementable yet | Depends on the nonexistent lock guard.                                                  |
+| **`Once`** (run-once closure)      | Not needed yet        | Trivial under cooperative scheduling; not provided.                                    |
+| **Atomics** (`AtomicInt`, …)       | Not meaningful        | A cooperative, single-threaded, shared-heap VM has no data races to guard against — a plain field read/modify/write between yield points is already atomic. Use an `IntMutex` if you need mutual exclusion across blocking points. |
 
-// Producer
-spawn {
-    let guard = mutex.lock()
-    guard.value.push(item)
-    not_empty.notify_one()
-}
-
-// Consumer
-spawn {
-    let guard = mutex.lock()
-    while guard.value.is_empty() {
-        guard = not_empty.wait(guard)
-    }
-    let item = guard.value.pop()
-}
-```
-
-### 5.6 Atomic Types
-
-```li
-import std.sync.atomic.{AtomicInt, AtomicBool, AtomicRef}
-
-let counter = AtomicInt.new(0)
-counter.fetch_add(1)
-counter.fetch_sub(1)
-let value = counter.load()
-counter.store(10)
-counter.compare_exchange(10, 20)
-
-let flag = AtomicBool.new(false)
-flag.store(true)
-
-let shared = AtomicRef<Data>.new(data)
-let current = shared.load()
-shared.store(new_data)
-```
+If you reach for one of these, the idiomatic replacement is almost always
+**channels + fibers + `select`** directly, or an `IntMutex` / `Semaphore`.
 
 ---
 
-## 6. Async/Await
+## 6. Async/Await — Not Implemented (use fibers + channels)
 
-### 6.1 Async Functions
+> **Lira does not have `async`/`await`, and it is not the recommended
+> concurrency model.** Lira's concurrency is **green-threaded (Go-style)**:
+> you express concurrency with `spawn`, channels (`chan` / `send` / `recv`),
+> and `select`. Fibers block on I/O and channel operations transparently and
+> cooperatively yield to the scheduler, so there is no "function colour"
+> (sync vs async) split and no separate `Future` type to await.
 
-For I/O-bound operations, Lira supports async/await:
+### 6.1 Status
+
+The `async` and `await` keywords are reserved as lexer tokens only. They are
+**not parsed, type-checked, compiled, or executed.** Likewise the following are
+**not implemented** and should not be treated as working APIs:
+
+- `async fn` / `async { ... }` blocks
+- `await` expressions
+- `Future<T>` values
+- concurrent-await tuple syntax (`await (a, b, c)`)
+- `race(...)`, `all([...])`
+- `await for item in stream` async iteration
+
+There is no async state machine generation; nothing in the compiler lowers these
+forms.
+
+### 6.2 Do This Instead
+
+Anything you would reach for `async`/`await` to do is expressed directly with
+fibers and channels. The fiber blocks while it waits; other fibers keep running.
+
+Instead of awaiting a single async call:
 
 ```li
-async fn fetch_url(url: string) -> Result<string, Error> {
-    let response = await http.get(url)
-    return response.body
-}
+// NOT: let content = await fetch_url(url)
+// Spawn the work and receive the result over a channel.
+let result = chan(1)
+spawn fetch_into(url, result)   // worker calls send(result, body)
+let content = recv(result)      // blocks this fiber until the body arrives
+```
 
-async fn main() {
-    let content = await fetch_url("https://example.com")
-    print(content)
+Instead of `race(primary, backup)` (first to complete wins):
+
+```li
+let a = chan(1)
+let b = chan(1)
+spawn fetch_into(primary, a)
+spawn fetch_into(backup, b)
+
+let first = select {
+    v = <-a => v,
+    v = <-b => v,
 }
 ```
 
-### 6.2 Awaiting Futures
+Instead of `all([t1, t2, t3])` (wait for all), use a `WaitGroup` or collect each
+result from a channel — see [§5.2 WaitGroup](#52-waitgroup) and the worker-pool
+pattern in [§7.1](#71-worker-pool).
+
+Instead of `await for item in stream`, range over a channel until it closes:
 
 ```li
-// Single await
-let result = await async_operation()
-
-// Concurrent await (parallel execution)
-let (a, b, c) = await (
-    fetch("url1"),
-    fetch("url2"),
-    fetch("url3"),
-)
-
-// Race (first to complete)
-let first = await race(
-    fetch("primary"),
-    fetch("backup"),
-)
-
-// All (wait for all, fail if any fails)
-let results = await all([
-    task1(),
-    task2(),
-    task3(),
-])
-```
-
-### 6.3 Async and Fibers
-
-Async functions run within fibers:
-
-```li
-spawn async {
-    let data = await fetch_data()
-    process(data)
-}
-
-// Mixing sync and async
-fn main() {
-    let fiber = spawn async {
-        await do_async_work()
-    }
-    fiber.join()
-}
-```
-
-### 6.4 Async Iteration
-
-```li
-async fn process_stream() {
-    let stream = await open_stream()
-
-    await for item in stream {
-        process(item)
+loop {
+    match recv(stream) {
+        Some(item) => process(item),
+        None => break,        // channel closed
     }
 }
 ```
+
+> **Summary:** treat the fiber + channel + `select` model as the only
+> concurrency model. There is no async runtime to opt into.
 
 ---
 
@@ -953,21 +987,17 @@ fn broadcast<T>(source: Channel<T>, count: int) -> List<Channel<T>>
 ## Appendix B: Concurrency Types
 
 ```li
-// From std.sync
-Mutex<T>
-RwLock<T>
-Semaphore
-WaitGroup
-Once
-Condvar
+// From std.sync (IMPLEMENTED — see §5)
+IntMutex          // new_int_mutex(initial)
+StringMutex       // new_string_mutex(initial)
+WaitGroup         // new_wait_group()
+Semaphore         // new_semaphore(n)
 
-// From std.sync.atomic
-AtomicBool
-AtomicInt
-AtomicUint
-AtomicRef<T>
+// Planned / not implemented (see §5.5) — do NOT depend on these:
+//   Mutex<T> (generic), RwLock<T>, Once, Condvar,
+//   AtomicBool, AtomicInt, AtomicUint, AtomicRef<T>
 
-// From std.channel
+// Channels are a built-in, created with chan(n) / chan():
 Channel<T>
 
 // Duration
