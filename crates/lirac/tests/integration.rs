@@ -302,6 +302,11 @@ example_test!(test_uuid_module, "test_uuid.li");
 example_test!(test_http_module, "test_http.li");
 example_test!(test_regex_module, "test_regex.li");
 
+// std.sync concurrency primitives (Mutex, WaitGroup, Semaphore)
+example_test!(test_sync_mutex_waitgroup, "sync_mutex_waitgroup.li");
+example_test!(test_sync_semaphore, "sync_semaphore.li");
+example_test!(test_sync_with_closure, "sync_with_closure.li");
+
 // =============================================================================
 // Aggregate test that runs all examples
 // =============================================================================

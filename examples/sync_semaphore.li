@@ -1,0 +1,59 @@
+// std.sync: Semaphore bounds concurrency.
+//
+// 8 workers share a Semaphore(2). Each worker, inside the critical section,
+// bumps a shared "active" counter, records the running maximum, then yields
+// twice (so overlap is actually possible) before leaving. The observed max
+// concurrency MUST equal the limit (2): never 3+ (bounded) yet more than 1
+// (real overlap, not accidentally serialized).
+//
+// @expect: limit: 2
+// @expect: max concurrent: 2
+// @expect: BOUNDED: ok
+
+import std.sync
+
+fn worker(sem: Semaphore, active: IntMutex, maxseen: IntMutex, wg: WaitGroup) {
+    sem.acquire()
+    let a = active.lock()
+    let now = a + 1
+    active.unlock(now)
+    let mx = maxseen.lock()
+    if now > mx {
+        maxseen.unlock(now)
+    } else {
+        maxseen.unlock(mx)
+    }
+    fiber_yield()
+    fiber_yield()
+    let a2 = active.lock()
+    active.unlock(a2 - 1)
+    sem.release()
+    wg.done()
+}
+
+fn main() {
+    let limit = 2
+    let num_workers = 8
+    let sem = new_semaphore(limit)
+    let active = new_int_mutex(0)
+    let maxseen = new_int_mutex(0)
+    let wg = new_wait_group()
+
+    var i = 0
+    while i < num_workers {
+        spawn worker(sem, active, maxseen, wg)
+        i = i + 1
+    }
+
+    wg.wait(num_workers)
+
+    let mx = maxseen.lock()
+    maxseen.unlock(mx)
+    println("limit: " + limit)
+    println("max concurrent: " + mx)
+    if mx <= limit {
+        println("BOUNDED: ok")
+    } else {
+        println("BOUNDED: VIOLATED")
+    }
+}

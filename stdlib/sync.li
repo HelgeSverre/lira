@@ -1,0 +1,188 @@
+// Lira Standard Library - Sync Module
+//
+// VM-honest synchronization primitives built on the fiber/channel runtime.
+//
+// IMPORTANT DEVIATION FROM CONVENTIONAL APIs:
+//   Lira has NO user-level Drop/RAII, so the usual "lock guard that
+//   auto-unlocks when it goes out of scope" cannot be expressed. The honest
+//   API here is therefore EXPLICIT:
+//       let v = m.lock()       // take the value out of the channel
+//       m.unlock(v + 1)        // put a (possibly new) value back
+//   or the recommended bracketed closure form:
+//       m.with(|x: int| x + 1) // locks, applies f, unlocks the result
+//
+//   Likewise WaitGroup uses a done-token channel and an explicit
+//   `wait(n)` (caller passes the expected worker count) instead of a hidden
+//   Go-style counter, because a counter would itself need a Mutex.
+//
+// Primitives provided (all proven by the spike on the real VM):
+//   - IntMutex / StringMutex : mutual exclusion over a single value
+//   - WaitGroup              : block until N workers signal done
+//   - Semaphore              : bound concurrency to N permits
+//
+// Deliberately OMITTED (not faked) because they require Drop/RAII or have no
+// meaningful semantics on a cooperative single-threaded VM:
+//   - RAII guard Mutex (auto-unlock on scope exit) -- no Drop in Lira
+//   - RwLock read/write guards                     -- same Drop problem
+//   - Condvar wait(guard)                          -- depends on the guard
+//   - Atomics with memory orderings                -- meaningless cooperatively
+//   - Once with closure                            -- trivial cooperatively
+//
+// Usage:
+//   import std.sync
+//
+//   let m = new_int_mutex(0)
+//   spawn worker(m)
+//   let v = m.lock()
+//   m.unlock(v + 1)
+
+// ============================================================================
+// Mutex (over an int value)
+// ============================================================================
+//
+// Backed by a capacity-1 channel seeded with the protected value. The value
+// being "in the channel" means UNLOCKED; taking it out (lock) means LOCKED.
+// Because only one value fits, only one fiber can hold it at a time.
+
+struct IntMutex {
+    ch: Channel<int>
+}
+
+/// Create a mutex protecting an int, initialized to `initial`.
+fn new_int_mutex(initial: int) -> IntMutex {
+    let c = chan(1)
+    select { initial -> c => {} }
+    return IntMutex { ch: c }
+}
+
+impl IntMutex {
+    /// Acquire the lock, returning the current protected value. Blocks until
+    /// the value is available. The caller MUST call `unlock` to release.
+    fn lock(self) -> int {
+        select { v = <-self.ch => { return v } }
+        return 0
+    }
+
+    /// Release the lock, storing `value` as the new protected value.
+    fn unlock(self, value: int) {
+        select { value -> self.ch => {} }
+    }
+
+    /// Bracketed critical section: lock, apply `f` to the current value, and
+    /// unlock with the result. This is the recommended idiom -- it guarantees
+    /// the lock is released even though Lira has no RAII.
+    fn with(self, f: fn(int) -> int) {
+        let v = self.lock()
+        self.unlock(f(v))
+    }
+}
+
+// ============================================================================
+// Mutex (over a string value)
+// ============================================================================
+
+struct StringMutex {
+    ch: Channel<string>
+}
+
+/// Create a mutex protecting a string, initialized to `initial`.
+fn new_string_mutex(initial: string) -> StringMutex {
+    let c = chan(1)
+    select { initial -> c => {} }
+    return StringMutex { ch: c }
+}
+
+impl StringMutex {
+    /// Acquire the lock, returning the current protected value. Blocks until
+    /// the value is available.
+    fn lock(self) -> string {
+        select { v = <-self.ch => { return v } }
+        return ""
+    }
+
+    /// Release the lock, storing `value` as the new protected value.
+    fn unlock(self, value: string) {
+        select { value -> self.ch => {} }
+    }
+
+    /// Bracketed critical section: lock, apply `f`, unlock the result.
+    fn with(self, f: fn(string) -> string) {
+        let v = self.lock()
+        self.unlock(f(v))
+    }
+}
+
+// ============================================================================
+// WaitGroup
+// ============================================================================
+//
+// A done-token channel: each worker sends one token when it finishes, and the
+// coordinator calls `wait(n)` to receive exactly `n` tokens. Simpler and more
+// deterministic than a shared counter (which would itself need a Mutex).
+//
+// Field is named `tokens` (not `done`) deliberately: a method named the same
+// as a field is shadowed by the field in method-call resolution.
+
+struct WaitGroup {
+    tokens: Channel<int>
+}
+
+/// Create a WaitGroup. The buffer (64) bounds how many workers may signal
+/// `done` before the coordinator drains; pick a capacity >= your worker count.
+fn new_wait_group() -> WaitGroup {
+    return WaitGroup { tokens: chan(64) }
+}
+
+impl WaitGroup {
+    /// A worker calls this exactly once when it finishes.
+    fn done(self) {
+        select { 1 -> self.tokens => {} }
+    }
+
+    /// Block until `n` workers have each called `done`.
+    fn wait(self, n: int) {
+        var got = 0
+        while got < n {
+            select {
+                <-self.tokens => { got = got + 1 }
+                _ => fiber_yield()
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Semaphore
+// ============================================================================
+//
+// A channel pre-seeded with `n` permits. `acquire` removes one permit
+// (blocking when none remain); `release` returns a permit. This bounds the
+// number of fibers in a critical section to `n`, while still allowing real
+// overlap up to that bound.
+
+struct Semaphore {
+    permits: Channel<int>
+}
+
+/// Create a semaphore with `n` available permits.
+fn new_semaphore(n: int) -> Semaphore {
+    let c = chan(n)
+    var i = 0
+    while i < n {
+        select { 1 -> c => {} }
+        i = i + 1
+    }
+    return Semaphore { permits: c }
+}
+
+impl Semaphore {
+    /// Take one permit, blocking until one is available.
+    fn acquire(self) {
+        select { v = <-self.permits => {} }
+    }
+
+    /// Return one permit.
+    fn release(self) {
+        select { 1 -> self.permits => {} }
+    }
+}

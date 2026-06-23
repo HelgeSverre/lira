@@ -1,0 +1,16 @@
+// std.sync: Mutex.with() bracketed closure form.
+//
+// The recommended idiom since Lira has no RAII: `with` locks, applies the
+// closure to the current value, and unlocks the result -- 5 + 37 = 42.
+//
+// @expect: with result: 42
+
+import std.sync
+
+fn main() {
+    let m = new_int_mutex(5)
+    m.with(|x: int| x + 37)
+    let v = m.lock()
+    m.unlock(v)
+    println("with result: " + v)
+}
