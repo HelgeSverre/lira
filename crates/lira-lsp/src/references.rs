@@ -24,18 +24,30 @@ pub fn find_references(
         Err(_) => return vec![],
     };
 
-    let sym_id = match sema_refs::resolve_symbol_at(&analysis, content, position) {
-        Some(id) => id,
-        None => return vec![],
-    };
+    // First try a variable/param/fn-name binding (resolved to a `SymbolId`).
+    if let Some(sym_id) = sema_refs::resolve_symbol_at(&analysis, content, position) {
+        return sema_refs::collect_symbol_ranges(&analysis, content, sym_id, include_declaration)
+            .into_iter()
+            .map(|range| Location {
+                uri: uri.clone(),
+                range,
+            })
+            .collect();
+    }
 
-    sema_refs::collect_symbol_ranges(&analysis, content, sym_id, include_declaration)
-        .into_iter()
-        .map(|range| Location {
-            uri: uri.clone(),
-            range,
-        })
-        .collect()
+    // Otherwise the cursor may be on a struct field or method (scoped by owner
+    // type), which is not a `SymbolId` but a `(owner_type, member_name)` pair.
+    if let Some(key) = sema_refs::resolve_member_at(&analysis, content, position) {
+        return sema_refs::collect_member_ranges(&analysis, content, &key, include_declaration)
+            .into_iter()
+            .map(|range| Location {
+                uri: uri.clone(),
+                range,
+            })
+            .collect();
+    }
+
+    vec![]
 }
 
 #[cfg(test)]
@@ -139,6 +151,67 @@ mod tests {
         // At least the one use is found (decl range support for `for` is
         // best-effort; uses must always resolve).
         assert!(refs.iter().any(|loc| loc.range.start.line == 2));
+    }
+
+    // ---- Struct fields & methods (scope-aware by owner type) ----
+
+    #[test]
+    fn test_find_field_references_includes_decl_and_accesses() {
+        // (a) find-references on `p.x` (Point.x) returns all Point.x accesses
+        // plus the field declaration.
+        let content = "struct Point { x: int, y: int }\nfn main() {\n    let p = Point { x: 1, y: 2 }\n    let a = p.x\n    let b = p.x\n}\n";
+        // Cursor on `p.x` field name (line 3: `    let a = p.x`), `x` at col 14.
+        let refs = find_references(&uri(), content, pos(3, 14), true);
+        // Field decl (line 0) + two accesses (lines 3, 4) = 3.
+        assert_eq!(refs.len(), 3, "got {:?}", refs);
+        assert!(
+            refs.iter().any(|l| l.range.start.line == 0),
+            "decl included"
+        );
+        assert!(refs.iter().any(|l| l.range.start.line == 3));
+        assert!(refs.iter().any(|l| l.range.start.line == 4));
+    }
+
+    #[test]
+    fn test_find_field_references_isolated_from_same_named_field_on_other_type() {
+        // (d) `x` on Point must NOT be conflated with `x` on Box.
+        let content = "struct Point { x: int }\nstruct Box { x: int }\nfn main() {\n    let p = Point { x: 1 }\n    let q = Box { x: 9 }\n    let a = p.x\n    let b = q.x\n}\n";
+        // Cursor on `p.x` (line 5: `    let a = p.x`), `x` at col 14.
+        let refs = find_references(&uri(), content, pos(5, 14), true);
+        // Point.x decl (line 0) + the single Point access (line 5) = 2.
+        assert_eq!(refs.len(), 2, "got {:?}", refs);
+        // Never the Box.x decl (line 1) or the Box access (line 6).
+        assert!(refs.iter().all(|l| l.range.start.line != 1));
+        assert!(refs.iter().all(|l| l.range.start.line != 6));
+    }
+
+    #[test]
+    fn test_find_method_references_includes_impl_decl_and_call_sites() {
+        // (c-as-references) find-references on a method call returns the impl
+        // decl plus every call site on that type.
+        let content = "struct Point { x: int }\nimpl Point {\n    fn get(self) -> int { self.x }\n}\nfn main() {\n    let p = Point { x: 1 }\n    let a = p.get()\n    let b = p.get()\n}\n";
+        // Cursor on `p.get()` (line 6: `    let a = p.get()`), `get` at col 14.
+        let refs = find_references(&uri(), content, pos(6, 14), true);
+        // impl method decl (line 2) + two call sites (lines 6, 7) = 3.
+        assert_eq!(refs.len(), 3, "got {:?}", refs);
+        assert!(refs.iter().any(|l| l.range.start.line == 2), "impl decl");
+        assert!(refs.iter().any(|l| l.range.start.line == 6));
+        assert!(refs.iter().any(|l| l.range.start.line == 7));
+    }
+
+    #[test]
+    fn test_field_references_from_inside_method_body() {
+        // A `self.x` access inside a method body counts as a reference to the
+        // field, scoped to the owner type.
+        let content = "struct Point { x: int }\nimpl Point {\n    fn get(self) -> int { self.x }\n}\nfn main() {\n    let p = Point { x: 1 }\n    let a = p.x\n}\n";
+        // Cursor on the field decl `x` (line 0, col 15).
+        let refs = find_references(&uri(), content, pos(0, 15), true);
+        // decl (line 0) + self.x (line 2) + p.x (line 6) = 3.
+        assert_eq!(refs.len(), 3, "got {:?}", refs);
+        assert!(
+            refs.iter().any(|l| l.range.start.line == 2),
+            "self.x access"
+        );
     }
 
     #[test]

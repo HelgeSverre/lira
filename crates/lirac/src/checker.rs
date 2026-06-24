@@ -1133,6 +1133,11 @@ impl TypeChecker {
             self.check_statement(stmt);
         }
 
+        // Sixth pass: record `self.member` resolutions inside method bodies.
+        for stmt in &program.statements {
+            self.record_self_members(stmt);
+        }
+
         if self.env.has_errors() {
             let all_errors: Vec<String> = self
                 .env
@@ -1197,6 +1202,11 @@ impl TypeChecker {
         // Fifth pass: check all statements
         for stmt in &program.statements {
             self.check_statement(stmt);
+        }
+
+        // Sixth pass: record `self.member` resolutions inside method bodies.
+        for stmt in &program.statements {
+            self.record_self_members(stmt);
         }
 
         // Mirror generic instantiations (UNUSED INFRA, kept consistent).
@@ -2194,6 +2204,225 @@ impl TypeChecker {
         for stmt in &block.statements {
             self.check_statement(stmt);
         }
+    }
+
+    /// Record [`FieldResolution`](crate::sema::FieldResolution) entries for
+    /// `self.member` accesses inside the bodies of `impl`/`struct`/`class`
+    /// methods.
+    ///
+    /// The fifth pass does not descend into method bodies (their
+    /// previously-unchecked expressions could surface stale type errors), so
+    /// `self.field` / `self.method()` accesses are otherwise absent from
+    /// `field_resolution`. This pass walks those bodies *purely to record* the
+    /// owner-type/member-name link the LSP needs for find-references and rename;
+    /// it emits no diagnostics and changes no types.
+    fn record_self_members(&mut self, stmt: &Statement) {
+        let (type_name, methods) = match &stmt.kind {
+            StatementKind::ImplDecl {
+                type_name, methods, ..
+            } => (type_name.as_str(), methods),
+            StatementKind::StructDecl { name, methods, .. }
+            | StatementKind::ClassDecl { name, methods, .. } => (name.as_str(), methods),
+            _ => return,
+        };
+
+        let self_type = match self.env.lookup_type(type_name).map(|td| &td.kind) {
+            Some(TypeDefKind::Class { .. }) => Type::Class(type_name.to_string()),
+            _ => Type::Struct(type_name.to_string()),
+        };
+
+        for method in methods {
+            if let StatementKind::FnDecl { body, .. } = &method.kind {
+                self.record_self_members_in_block(body, &self_type);
+            }
+        }
+    }
+
+    fn record_self_members_in_block(&mut self, block: &Block, self_type: &Type) {
+        for stmt in &block.statements {
+            self.record_self_members_in_stmt(stmt, self_type);
+        }
+    }
+
+    fn record_self_members_in_stmt(&mut self, stmt: &Statement, self_type: &Type) {
+        match &stmt.kind {
+            StatementKind::VarDecl {
+                initializer: Some(init),
+                ..
+            } => {
+                self.record_self_members_in_expr(init, self_type);
+            }
+            StatementKind::ConstDecl { initializer, .. } => {
+                self.record_self_members_in_expr(initializer, self_type);
+            }
+            StatementKind::Expression(e) => self.record_self_members_in_expr(e, self_type),
+            StatementKind::Return(Some(e)) | StatementKind::Break(Some(e)) => {
+                self.record_self_members_in_expr(e, self_type)
+            }
+            StatementKind::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                self.record_self_members_in_expr(condition, self_type);
+                self.record_self_members_in_block(then_branch, self_type);
+                if let Some(b) = else_branch {
+                    self.record_self_members_in_block(b, self_type);
+                }
+            }
+            StatementKind::While { condition, body } => {
+                self.record_self_members_in_expr(condition, self_type);
+                self.record_self_members_in_block(body, self_type);
+            }
+            StatementKind::For { iterable, body, .. } => {
+                self.record_self_members_in_expr(iterable, self_type);
+                self.record_self_members_in_block(body, self_type);
+            }
+            StatementKind::Loop { body } => self.record_self_members_in_block(body, self_type),
+            StatementKind::Block(b) => self.record_self_members_in_block(b, self_type),
+            _ => {}
+        }
+    }
+
+    fn record_self_members_in_expr(&mut self, expr: &Expression, self_type: &Type) {
+        // Record a resolution when the receiver is the `self` identifier.
+        if let ExpressionKind::FieldAccess { object, field } = &expr.kind {
+            if matches!(&object.kind, ExpressionKind::Identifier(n) if n == "self")
+                && !self.sema.field_resolution.contains_key(&expr.id)
+            {
+                let resolved_type = self
+                    .member_type_on(self_type, field)
+                    .unwrap_or(Type::Unknown);
+                self.sema.field_resolution.insert(
+                    expr.id,
+                    crate::sema::FieldResolution {
+                        owner_type: self_type.clone(),
+                        field_name: field.clone(),
+                        is_method: matches!(&resolved_type, Type::Function { .. }),
+                        resolved_type,
+                    },
+                );
+            }
+        }
+
+        // Recurse into sub-expressions (mirrors the structure used elsewhere).
+        match &expr.kind {
+            ExpressionKind::Binary { left, right, .. } => {
+                self.record_self_members_in_expr(left, self_type);
+                self.record_self_members_in_expr(right, self_type);
+            }
+            ExpressionKind::Unary { operand, .. } => {
+                self.record_self_members_in_expr(operand, self_type)
+            }
+            ExpressionKind::Call { callee, args, .. } => {
+                self.record_self_members_in_expr(callee, self_type);
+                for a in args {
+                    self.record_self_members_in_expr(&a.value, self_type);
+                }
+            }
+            ExpressionKind::MethodCall { receiver, args, .. } => {
+                self.record_self_members_in_expr(receiver, self_type);
+                for a in args {
+                    self.record_self_members_in_expr(&a.value, self_type);
+                }
+            }
+            ExpressionKind::FieldAccess { object, .. }
+            | ExpressionKind::OptionalAccess { object, .. } => {
+                self.record_self_members_in_expr(object, self_type)
+            }
+            ExpressionKind::Index { object, index } => {
+                self.record_self_members_in_expr(object, self_type);
+                self.record_self_members_in_expr(index, self_type);
+            }
+            ExpressionKind::Array(items) | ExpressionKind::Tuple(items) => {
+                for e in items {
+                    self.record_self_members_in_expr(e, self_type);
+                }
+            }
+            ExpressionKind::Map(pairs) => {
+                for (k, v) in pairs {
+                    self.record_self_members_in_expr(k, self_type);
+                    self.record_self_members_in_expr(v, self_type);
+                }
+            }
+            ExpressionKind::StructLiteral { fields, .. } => {
+                for (_, e) in fields {
+                    self.record_self_members_in_expr(e, self_type);
+                }
+            }
+            ExpressionKind::Lambda { body, .. } => {
+                self.record_self_members_in_expr(body, self_type)
+            }
+            ExpressionKind::IfExpr {
+                condition,
+                then_expr,
+                else_expr,
+            } => {
+                self.record_self_members_in_expr(condition, self_type);
+                self.record_self_members_in_expr(then_expr, self_type);
+                self.record_self_members_in_expr(else_expr, self_type);
+            }
+            ExpressionKind::Match { subject, arms } => {
+                self.record_self_members_in_expr(subject, self_type);
+                for arm in arms {
+                    if let Some(g) = &arm.guard {
+                        self.record_self_members_in_expr(g, self_type);
+                    }
+                    self.record_self_members_in_expr(&arm.body, self_type);
+                }
+            }
+            ExpressionKind::Range { start, end, .. } => {
+                if let Some(s) = start {
+                    self.record_self_members_in_expr(s, self_type);
+                }
+                if let Some(e) = end {
+                    self.record_self_members_in_expr(e, self_type);
+                }
+            }
+            ExpressionKind::Cast { expr, .. } | ExpressionKind::TypeCheck { expr, .. } => {
+                self.record_self_members_in_expr(expr, self_type)
+            }
+            ExpressionKind::Assign { target, value }
+            | ExpressionKind::CompoundAssign { target, value, .. } => {
+                self.record_self_members_in_expr(target, self_type);
+                self.record_self_members_in_expr(value, self_type);
+            }
+            ExpressionKind::Block(b) => self.record_self_members_in_block(b, self_type),
+            ExpressionKind::Spawn(e) | ExpressionKind::Try(e) => {
+                self.record_self_members_in_expr(e, self_type)
+            }
+            _ => {}
+        }
+    }
+
+    /// Look up the declared type of a member (`field` or method) on `owner` by
+    /// consulting the already-collected type definitions and impl methods. Pure:
+    /// emits no diagnostics. Returns `None` for unknown members.
+    fn member_type_on(&self, owner: &Type, member: &str) -> Option<Type> {
+        let name = match owner {
+            Type::Struct(n) | Type::Class(n) => n.as_str(),
+            _ => return None,
+        };
+        if let Some(type_def) = self.env.lookup_type(name) {
+            let (fields, methods) = match &type_def.kind {
+                TypeDefKind::Struct { fields, methods } => (fields, methods),
+                TypeDefKind::Class {
+                    fields, methods, ..
+                } => (fields, methods),
+                _ => return None,
+            };
+            for (fname, fty, _) in fields {
+                if fname == member {
+                    return Some(fty.clone());
+                }
+            }
+            for (mname, mty, _) in methods {
+                if mname == member {
+                    return Some(mty.clone());
+                }
+            }
+        }
+        self.impl_method_to_function(name, member)
     }
 
     /// Resolve named call arguments against a function's declared parameter
@@ -7330,6 +7559,70 @@ mod tests {
                 assert!(!resolution.is_method, "Should not be a method");
             }
         }
+    }
+
+    #[test]
+    fn test_sema_self_member_resolution_recorded() {
+        // `self.field` and `self.method()` inside a method body must be recorded
+        // in `field_resolution`, scoped to the implementing type, so the LSP can
+        // find references/rename members from inside method bodies.
+        let source = r#"
+            struct Point {
+                x: int
+                y: int
+            }
+
+            impl Point {
+                fn dist(self) -> int { self.x + self.y }
+                fn twice(self) -> int { self.dist() + self.dist() }
+            }
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let ast = parse(&tokens).unwrap();
+        let checked = check(&ast).unwrap();
+
+        let resolutions: Vec<_> = checked.sema.field_resolution.values().collect();
+
+        // Every self-member is owned by Point (never any other type).
+        assert!(resolutions
+            .iter()
+            .all(|r| r.owner_type == Type::Struct("Point".to_string())));
+
+        let by = |name: &str| {
+            resolutions
+                .iter()
+                .find(|r| r.field_name == name)
+                .unwrap_or_else(|| panic!("missing resolution for `{name}`"))
+        };
+        assert!(!by("x").is_method, "x is a field");
+        assert!(!by("y").is_method, "y is a field");
+        assert!(by("dist").is_method, "dist is a method");
+    }
+
+    #[test]
+    fn test_sema_self_member_scoped_per_type() {
+        // Two structs each declare a field `x`. The `self.x` access in each
+        // method must be scoped to its own owner type.
+        let source = r#"
+            struct Point { x: int }
+            struct Box { x: int }
+
+            impl Point { fn get(self) -> int { self.x } }
+            impl Box { fn get(self) -> int { self.x } }
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let ast = parse(&tokens).unwrap();
+        let checked = check(&ast).unwrap();
+
+        let owners: Vec<_> = checked
+            .sema
+            .field_resolution
+            .values()
+            .filter(|r| r.field_name == "x")
+            .map(|r| r.owner_type.clone())
+            .collect();
+        assert!(owners.contains(&Type::Struct("Point".to_string())));
+        assert!(owners.contains(&Type::Struct("Box".to_string())));
     }
 
     // ========================================================================

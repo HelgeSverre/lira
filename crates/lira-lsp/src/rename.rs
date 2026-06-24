@@ -56,9 +56,17 @@ pub fn rename(
     }
 
     let analysis = lirac::analyze(content).ok()?;
-    let sym_id = sema_refs::resolve_symbol_at(&analysis, content, position)?;
 
-    let ranges = sema_refs::collect_symbol_ranges(&analysis, content, sym_id, true);
+    // Resolve the target as either a variable/param/fn-name binding (a
+    // `SymbolId`) or a struct field/method (scoped by owner type).
+    let ranges = if let Some(sym_id) = sema_refs::resolve_symbol_at(&analysis, content, position) {
+        sema_refs::collect_symbol_ranges(&analysis, content, sym_id, true)
+    } else if let Some(key) = sema_refs::resolve_member_at(&analysis, content, position) {
+        sema_refs::collect_member_ranges(&analysis, content, &key, true)
+    } else {
+        return None;
+    };
+
     if ranges.is_empty() {
         return None;
     }
@@ -226,6 +234,68 @@ mod tests {
             character: 0,
         }; // on `let`
         assert!(rename(&uri, content, pos, "y").is_none());
+    }
+
+    // ---- Struct fields & methods (scope-aware by owner type) ----
+
+    #[test]
+    fn test_rename_struct_field_updates_decl_and_accesses_only_on_that_type() {
+        // (b) renaming a struct field updates the declaration + all accesses on
+        // that type only.
+        let content = "struct Point { x: int }\nstruct Box { x: int }\nfn main() {\n    let p = Point { x: 1 }\n    let q = Box { x: 9 }\n    let a = p.x\n    let b = q.x\n}\n";
+        let uri = Url::parse("file:///test.li").unwrap();
+        // On `p.x` (line 5, col 14).
+        let pos = Position {
+            line: 5,
+            character: 14,
+        };
+        let edit = rename(&uri, content, pos, "px").expect("rename produces an edit");
+        let edits = edits_for(&uri, &edit);
+        // Point.x decl (line 0) + Point access (line 5) = 2.
+        assert_eq!(edits.len(), 2, "got {:?}", edits);
+        assert!(edits.iter().all(|e| e.new_text == "px"));
+        // Box.x decl (line 1) and Box access (line 6) untouched.
+        assert!(edits.iter().all(|e| e.range.start.line != 1));
+        assert!(edits.iter().all(|e| e.range.start.line != 6));
+    }
+
+    #[test]
+    fn test_rename_method_updates_impl_decl_and_call_sites_only_on_that_type() {
+        // (c) renaming a method updates its impl decl + all call sites on that
+        // type. A same-named method on another type is left alone.
+        let content = "struct Point { x: int }\nstruct Box { x: int }\nimpl Point {\n    fn get(self) -> int { self.x }\n}\nimpl Box {\n    fn get(self) -> int { self.x }\n}\nfn main() {\n    let p = Point { x: 1 }\n    let q = Box { x: 9 }\n    let a = p.get()\n    let b = q.get()\n}\n";
+        let uri = Url::parse("file:///test.li").unwrap();
+        // On `p.get()` (line 11, col 14).
+        let pos = Position {
+            line: 11,
+            character: 14,
+        };
+        let edit = rename(&uri, content, pos, "value").expect("rename produces an edit");
+        let edits = edits_for(&uri, &edit);
+        // Point::get impl decl (line 3) + the Point call site (line 11) = 2.
+        assert_eq!(edits.len(), 2, "got {:?}", edits);
+        assert!(edits.iter().all(|e| e.new_text == "value"));
+        // Box::get decl (line 6) and the Box call site (line 12) untouched.
+        assert!(edits.iter().all(|e| e.range.start.line != 6));
+        assert!(edits.iter().all(|e| e.range.start.line != 12));
+    }
+
+    #[test]
+    fn test_rename_field_from_declaration_site() {
+        // Renaming initiated from the field declaration updates the decl + every
+        // access on the owner type (including `self.x` inside methods).
+        let content = "struct Point { x: int }\nimpl Point {\n    fn get(self) -> int { self.x }\n}\nfn main() {\n    let p = Point { x: 1 }\n    let a = p.x\n}\n";
+        let uri = Url::parse("file:///test.li").unwrap();
+        // On the field decl `x` (line 0, col 15).
+        let pos = Position {
+            line: 0,
+            character: 15,
+        };
+        let edit = rename(&uri, content, pos, "coord").expect("rename produces an edit");
+        let edits = edits_for(&uri, &edit);
+        // decl (line 0) + self.x (line 2) + p.x (line 6) = 3.
+        assert_eq!(edits.len(), 3, "got {:?}", edits);
+        assert!(edits.iter().all(|e| e.new_text == "coord"));
     }
 
     #[test]
