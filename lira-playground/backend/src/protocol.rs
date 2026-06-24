@@ -265,7 +265,9 @@ pub enum FiberStateValue {
     BlockedSelect,
     Yielded,
     Finished,
-    Failed { error: String },
+    Failed {
+        error: String,
+    },
 }
 
 /// Call frame in JSON format
@@ -303,12 +305,24 @@ pub struct SenderJson {
 #[serde(tag = "type")]
 pub enum ValueJson {
     Null,
-    Bool { value: bool },
-    Int { value: i64 },
-    Float { value: f64 },
-    String { value: String },
-    Array { elements: Vec<ValueJson> },
-    Object { fields: std::collections::HashMap<String, ValueJson> },
+    Bool {
+        value: bool,
+    },
+    Int {
+        value: i64,
+    },
+    Float {
+        value: f64,
+    },
+    String {
+        value: String,
+    },
+    Array {
+        elements: Vec<ValueJson>,
+    },
+    Object {
+        fields: std::collections::HashMap<String, ValueJson>,
+    },
     Function {
         #[serde(rename = "codeOffset")]
         code_offset: usize,
@@ -318,8 +332,12 @@ pub enum ValueJson {
         code_offset: usize,
         captures: Vec<ValueJson>,
     },
-    Fiber { id: u64 },
-    Channel { id: u64 },
+    Fiber {
+        id: u64,
+    },
+    Channel {
+        id: u64,
+    },
 }
 
 impl ValueJson {
@@ -334,11 +352,7 @@ impl ValueJson {
                 value: (**s).clone(),
             },
             Value::Array(arr) => {
-                let elements = arr
-                    .borrow()
-                    .iter()
-                    .map(ValueJson::from_value)
-                    .collect();
+                let elements = arr.borrow().iter().map(ValueJson::from_value).collect();
                 ValueJson::Array { elements }
             }
             Value::Object(obj) => {

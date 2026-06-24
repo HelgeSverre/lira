@@ -53,7 +53,11 @@ fn run_compare(spec_path: &str, grammar_path: &str) -> Result<bool, String> {
     // Summary stats
     println!("{}", "-".repeat(60));
     println!("EBNF productions:     {}", ebnf.len());
-    println!("Tree-sitter rules:    {} ({} hidden)", ts.len(), ts.rules.values().filter(|r| r.is_hidden).count());
+    println!(
+        "Tree-sitter rules:    {} ({} hidden)",
+        ts.len(),
+        ts.rules.values().filter(|r| r.is_hidden).count()
+    );
     println!("EBNF keywords:        {}", ebnf.keywords.len());
     println!("Tree-sitter keywords: {}", ts.keywords.len());
     println!("{}", "-".repeat(60));

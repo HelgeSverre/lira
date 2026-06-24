@@ -102,9 +102,7 @@ impl EbnfGrammar {
         // Extract from code blocks
         for caps in code_block_re.captures_iter(content) {
             let block = caps.get(1).unwrap().as_str();
-            let block_line = content[..caps.get(0).unwrap().start()]
-                .lines()
-                .count();
+            let block_line = content[..caps.get(0).unwrap().start()].lines().count();
 
             for (i, line) in block.lines().enumerate() {
                 let trimmed = line.trim();
@@ -339,7 +337,9 @@ impl EbnfGrammar {
 
     /// Iterate over all productions in definition order
     pub fn iter(&self) -> impl Iterator<Item = &Production> {
-        self.order.iter().filter_map(|name| self.productions.get(name))
+        self.order
+            .iter()
+            .filter_map(|name| self.productions.get(name))
     }
 
     /// Count of productions

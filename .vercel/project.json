@@ -1,0 +1,16 @@
+{
+  "projectId": "prj_i3Y8FwStXkdIZkeidYdZcpbpESNM",
+  "orgId": "team_PAnD0WJSPR6gdyAYYUOzP9hm",
+  "projectName": "lira",
+  "settings": {
+    "createdAt": 1767264501468,
+    "framework": null,
+    "devCommand": null,
+    "installCommand": null,
+    "buildCommand": null,
+    "outputDirectory": null,
+    "rootDirectory": null,
+    "directoryListing": false,
+    "nodeVersion": "24.x"
+  }
+}

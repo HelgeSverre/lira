@@ -108,7 +108,13 @@ mod tests {
     println(x)
     let y = x + 1
 }"#;
-        let highlights = get_document_highlights(content, Position { line: 1, character: 8 });
+        let highlights = get_document_highlights(
+            content,
+            Position {
+                line: 1,
+                character: 8,
+            },
+        );
 
         assert_eq!(highlights.len(), 3);
         // Definition should be WRITE
@@ -128,7 +134,13 @@ fn main() {
     add(1, 2)
     add(3, 4)
 }"#;
-        let highlights = get_document_highlights(content, Position { line: 5, character: 4 });
+        let highlights = get_document_highlights(
+            content,
+            Position {
+                line: 5,
+                character: 4,
+            },
+        );
 
         assert_eq!(highlights.len(), 3);
         // Definition
@@ -145,7 +157,13 @@ fn main() {
     x = 5
     println(x)
 }"#;
-        let highlights = get_document_highlights(content, Position { line: 1, character: 8 });
+        let highlights = get_document_highlights(
+            content,
+            Position {
+                line: 1,
+                character: 8,
+            },
+        );
 
         assert_eq!(highlights.len(), 3);
         // Definition - WRITE
@@ -162,7 +180,13 @@ fn main() {
     let foo = "foo"
     println(foo)
 }"#;
-        let highlights = get_document_highlights(content, Position { line: 1, character: 8 });
+        let highlights = get_document_highlights(
+            content,
+            Position {
+                line: 1,
+                character: 8,
+            },
+        );
 
         // Should find 2: definition and println usage, not the string content
         assert_eq!(highlights.len(), 2);
@@ -174,7 +198,13 @@ fn main() {
     let 变量 = 5
     println(变量)
 }"#;
-        let highlights = get_document_highlights(content, Position { line: 1, character: 8 });
+        let highlights = get_document_highlights(
+            content,
+            Position {
+                line: 1,
+                character: 8,
+            },
+        );
 
         assert_eq!(highlights.len(), 2);
     }

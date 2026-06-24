@@ -251,7 +251,9 @@ fn main() {
 }"#;
         let ranges = get_folding_ranges(content);
         // Should have import group fold and function fold
-        let import_fold = ranges.iter().find(|r| r.kind == Some(FoldingRangeKind::Imports));
+        let import_fold = ranges
+            .iter()
+            .find(|r| r.kind == Some(FoldingRangeKind::Imports));
         assert!(import_fold.is_some());
         let import_fold = import_fold.unwrap();
         assert_eq!(import_fold.start_line, 0);
@@ -267,7 +269,9 @@ fn main() {
 fn main() {
 }"#;
         let ranges = get_folding_ranges(content);
-        let comment_fold = ranges.iter().find(|r| r.kind == Some(FoldingRangeKind::Comment));
+        let comment_fold = ranges
+            .iter()
+            .find(|r| r.kind == Some(FoldingRangeKind::Comment));
         assert!(comment_fold.is_some());
         let comment_fold = comment_fold.unwrap();
         assert_eq!(comment_fold.start_line, 0);

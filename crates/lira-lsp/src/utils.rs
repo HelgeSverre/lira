@@ -198,10 +198,7 @@ pub fn is_in_string_or_comment(line: &str, pos: usize) -> bool {
 /// Convert a character column to a byte offset in a string.
 /// Handles UTF-8 correctly.
 pub fn char_col_to_byte_offset(line: &str, char_col: usize) -> usize {
-    line.chars()
-        .take(char_col)
-        .map(|c| c.len_utf8())
-        .sum()
+    line.chars().take(char_col).map(|c| c.len_utf8()).sum()
 }
 
 /// Convert a byte offset to a character column.
@@ -235,11 +232,10 @@ pub fn is_valid_identifier(s: &str) -> bool {
 
 /// Lira keywords that cannot be used as identifiers
 pub const KEYWORDS: &[&str] = &[
-    "fn", "let", "var", "const", "if", "else", "while", "for", "loop", "match",
-    "return", "break", "continue", "struct", "enum", "trait", "impl", "class",
-    "type", "import", "use", "pub", "priv", "mut", "ref", "self", "Self",
-    "true", "false", "null", "spawn", "select", "chan", "send", "recv",
-    "try", "catch", "throw", "async", "await", "yield", "in", "as", "is",
+    "fn", "let", "var", "const", "if", "else", "while", "for", "loop", "match", "return", "break",
+    "continue", "struct", "enum", "trait", "impl", "class", "type", "import", "use", "pub", "priv",
+    "mut", "ref", "self", "Self", "true", "false", "null", "spawn", "select", "chan", "send",
+    "recv", "try", "catch", "throw", "async", "await", "yield", "in", "as", "is",
 ];
 
 /// Check if a string is a Lira keyword
@@ -249,10 +245,8 @@ pub fn is_keyword(s: &str) -> bool {
 
 /// Lira builtin types
 pub const BUILTIN_TYPES: &[&str] = &[
-    "int", "int8", "int16", "int32", "int64",
-    "uint", "uint8", "uint16", "uint32", "uint64",
-    "float", "float32", "float64", "bool", "string", "char",
-    "void", "any", "never",
+    "int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64",
+    "float", "float32", "float64", "bool", "string", "char", "void", "any", "never",
 ];
 
 /// Check if a string is a builtin type
@@ -262,13 +256,54 @@ pub fn is_builtin_type(s: &str) -> bool {
 
 /// Lira builtin functions
 pub const BUILTIN_FUNCTIONS: &[&str] = &[
-    "print", "println", "len", "push", "pop", "append", "insert", "remove",
-    "contains", "keys", "values", "clear", "clone", "to_string", "parse",
-    "abs", "min", "max", "sqrt", "pow", "floor", "ceil", "round",
-    "sin", "cos", "tan", "log", "exp", "random",
-    "open", "read", "write", "close", "exists", "mkdir", "remove_file",
-    "sleep", "now", "spawn", "send", "recv", "select", "chan",
-    "type_of", "size_of", "assert", "panic", "error",
+    "print",
+    "println",
+    "len",
+    "push",
+    "pop",
+    "append",
+    "insert",
+    "remove",
+    "contains",
+    "keys",
+    "values",
+    "clear",
+    "clone",
+    "to_string",
+    "parse",
+    "abs",
+    "min",
+    "max",
+    "sqrt",
+    "pow",
+    "floor",
+    "ceil",
+    "round",
+    "sin",
+    "cos",
+    "tan",
+    "log",
+    "exp",
+    "random",
+    "open",
+    "read",
+    "write",
+    "close",
+    "exists",
+    "mkdir",
+    "remove_file",
+    "sleep",
+    "now",
+    "spawn",
+    "send",
+    "recv",
+    "select",
+    "chan",
+    "type_of",
+    "size_of",
+    "assert",
+    "panic",
+    "error",
 ];
 
 /// Check if a string is a builtin function
@@ -382,10 +417,7 @@ mod tests {
 
     #[test]
     fn test_context_char_literal() {
-        assert_eq!(
-            get_context_at_position("let x = 'a'", 9),
-            TextContext::Char
-        );
+        assert_eq!(get_context_at_position("let x = 'a'", 9), TextContext::Char);
     }
 
     #[test]

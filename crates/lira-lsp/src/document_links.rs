@@ -45,7 +45,8 @@ fn parse_import_statement(
     stdlib_dir: Option<&Path>,
 ) -> Option<DocumentLink> {
     // Match: import std.fs or import std.io.{File, Dir}
-    let re = Regex::new(r"^\s*import\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)").ok()?;
+    let re =
+        Regex::new(r"^\s*import\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)").ok()?;
 
     let caps = re.captures(line)?;
     let path_match = caps.get(1)?;
@@ -223,8 +224,8 @@ mod tests {
 
     #[test]
     fn test_parse_import_path() {
-        let re =
-            Regex::new(r"^\s*import\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)").unwrap();
+        let re = Regex::new(r"^\s*import\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)")
+            .unwrap();
 
         let line = "import std.fs";
         let caps = re.captures(line).unwrap();

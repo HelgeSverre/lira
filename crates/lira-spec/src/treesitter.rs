@@ -107,7 +107,9 @@ impl TreeSitterGrammar {
                 // Find the definition - look for the next rule or end
                 let def_start = caps.get(0).unwrap().end();
                 let def_end = Self::find_rule_end(&rules_block[def_start..]);
-                let definition = rules_block[def_start..def_start + def_end].trim().to_string();
+                let definition = rules_block[def_start..def_start + def_end]
+                    .trim()
+                    .to_string();
 
                 // Extract keywords (strings in quotes)
                 let kw_re = Regex::new(r"'([a-zA-Z_][a-zA-Z0-9_]*)'").unwrap();
@@ -295,9 +297,8 @@ impl GrammarComparison {
 
     /// Get sync percentage (matched / total unique rules)
     pub fn sync_percentage(&self) -> f64 {
-        let total = self.matched.len()
-            + self.missing_in_treesitter.len()
-            + self.missing_in_ebnf.len();
+        let total =
+            self.matched.len() + self.missing_in_treesitter.len() + self.missing_in_ebnf.len();
         if total == 0 {
             100.0
         } else {
@@ -352,7 +353,8 @@ pub fn compare_grammars(ebnf: &EbnfGrammar, ts: &TreeSitterGrammar) -> GrammarCo
     let ts_keywords: HashSet<_> = ts.keywords.iter().cloned().collect();
 
     let missing_keywords_in_ts: Vec<_> = ebnf_keywords.difference(&ts_keywords).cloned().collect();
-    let missing_keywords_in_ebnf: Vec<_> = ts_keywords.difference(&ebnf_keywords).cloned().collect();
+    let missing_keywords_in_ebnf: Vec<_> =
+        ts_keywords.difference(&ebnf_keywords).cloned().collect();
 
     // Compare operators
     let ebnf_operators: HashSet<_> = ebnf.operators.iter().cloned().collect();
@@ -566,7 +568,9 @@ module.exports = grammar({
         };
 
         let comparison = compare_grammars(&ebnf, &ts);
-        assert!(comparison.missing_in_treesitter.contains(&"statement".to_string()));
+        assert!(comparison
+            .missing_in_treesitter
+            .contains(&"statement".to_string()));
         assert!(comparison.missing_in_ebnf.contains(&"block".to_string()));
         assert!(comparison.matched.contains(&"expression".to_string()));
     }

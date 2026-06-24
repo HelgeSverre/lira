@@ -23,7 +23,12 @@ pub fn get_inlay_hints(content: &str, range: Range) -> Vec<InlayHint> {
         let line = lines[line_idx];
 
         // Find variable declarations without type annotations
-        hints.extend(find_variable_hints(line, line_idx as u32, content, &function_types));
+        hints.extend(find_variable_hints(
+            line,
+            line_idx as u32,
+            content,
+            &function_types,
+        ));
 
         // Find function parameter hints at call sites
         hints.extend(find_parameter_hints(line, line_idx as u32, content));
@@ -37,7 +42,9 @@ fn extract_function_return_types(content: &str) -> Vec<(String, String)> {
     let mut types = Vec::new();
 
     // Pattern: fn name(...) -> Type
-    let fn_re = match get_regex(r"fn\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:<[^>]*>)?\s*\([^)]*\)\s*->\s*([a-zA-Z_][a-zA-Z0-9_<>\[\],\s]*)") {
+    let fn_re = match get_regex(
+        r"fn\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:<[^>]*>)?\s*\([^)]*\)\s*->\s*([a-zA-Z_][a-zA-Z0-9_<>\[\],\s]*)",
+    ) {
         Some(r) => r,
         None => return types,
     };
@@ -466,7 +473,10 @@ mod tests {
     #[test]
     fn test_infer_int() {
         let ft = empty_fn_types();
-        assert_eq!(infer_type_from_value("42", "", &ft), Some("int".to_string()));
+        assert_eq!(
+            infer_type_from_value("42", "", &ft),
+            Some("int".to_string())
+        );
         assert_eq!(
             infer_type_from_value("-100", "", &ft),
             Some("int".to_string())

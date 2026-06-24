@@ -274,7 +274,13 @@ mod tests {
         let content = r#"fn main() {
     let x = 42
 }"#;
-        let ranges = get_selection_ranges(content, &[Position { line: 1, character: 8 }]);
+        let ranges = get_selection_ranges(
+            content,
+            &[Position {
+                line: 1,
+                character: 8,
+            }],
+        );
 
         assert_eq!(ranges.len(), 1);
         let range = &ranges[0];
@@ -294,7 +300,13 @@ mod tests {
         let x = 1
     }
 }"#;
-        let ranges = get_selection_ranges(content, &[Position { line: 2, character: 12 }]);
+        let ranges = get_selection_ranges(
+            content,
+            &[Position {
+                line: 2,
+                character: 12,
+            }],
+        );
 
         assert_eq!(ranges.len(), 1);
         // Should have multiple nesting levels
@@ -330,7 +342,13 @@ mod tests {
     #[test]
     fn test_empty_content() {
         let content = "";
-        let ranges = get_selection_ranges(content, &[Position { line: 0, character: 0 }]);
+        let ranges = get_selection_ranges(
+            content,
+            &[Position {
+                line: 0,
+                character: 0,
+            }],
+        );
 
         assert_eq!(ranges.len(), 1);
     }

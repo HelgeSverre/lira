@@ -182,7 +182,10 @@ impl Specification {
 
         let total_tests: usize = grammar_results.iter().map(|r| r.tests_run).sum::<usize>()
             + type_results.iter().map(|r| r.tests_run).sum::<usize>();
-        let passed_tests: usize = grammar_results.iter().map(|r| r.tests_passed).sum::<usize>()
+        let passed_tests: usize = grammar_results
+            .iter()
+            .map(|r| r.tests_passed)
+            .sum::<usize>()
             + type_results.iter().map(|r| r.tests_passed).sum::<usize>();
 
         ValidationReport {
@@ -217,17 +220,18 @@ impl Specification {
         println!("║ Spec Version: {:<47} ║", report.spec_version);
         println!(
             "║ Overall:      {:<47} ║",
-            if report.all_passed { "✓ PASSED" } else { "✗ FAILED" }
+            if report.all_passed {
+                "✓ PASSED"
+            } else {
+                "✗ FAILED"
+            }
         );
         println!("╠══════════════════════════════════════════════════════════════╣");
         println!(
             "║ Grammar Productions: {:<40} ║",
             report.summary.grammar_productions
         );
-        println!(
-            "║ Type Rules:          {:<40} ║",
-            report.summary.type_rules
-        );
+        println!("║ Type Rules:          {:<40} ║", report.summary.type_rules);
         println!("╠══════════════════════════════════════════════════════════════╣");
         println!(
             "║ Checks: {}/{} passed                                      ║",

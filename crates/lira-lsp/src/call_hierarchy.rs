@@ -55,7 +55,9 @@ pub fn prepare_call_hierarchy(
             },
             end: Position {
                 line: func.body_end_line,
-                character: lines.get(func.body_end_line as usize).map_or(0, |l| l.chars().count() as u32),
+                character: lines
+                    .get(func.body_end_line as usize)
+                    .map_or(0, |l| l.chars().count() as u32),
             },
         },
         selection_range: Range {
@@ -141,7 +143,9 @@ pub fn incoming_calls(
                         },
                         end: Position {
                             line: func.body_end_line,
-                            character: lines.get(func.body_end_line as usize).map_or(0, |l| l.chars().count() as u32),
+                            character: lines
+                                .get(func.body_end_line as usize)
+                                .map_or(0, |l| l.chars().count() as u32),
                         },
                     },
                     selection_range: Range {
@@ -236,7 +240,9 @@ pub fn outgoing_calls(
                         },
                         end: Position {
                             line: target.body_end_line,
-                            character: lines.get(target.body_end_line as usize).map_or(0, |l| l.chars().count() as u32),
+                            character: lines
+                                .get(target.body_end_line as usize)
+                                .map_or(0, |l| l.chars().count() as u32),
                         },
                     },
                     selection_range: Range {
@@ -387,7 +393,14 @@ fn main() {
 "#;
         let uri = Url::parse("file:///test.li").unwrap();
         // Position on "helper" in the function definition
-        let result = prepare_call_hierarchy(&uri, content, Position { line: 1, character: 4 });
+        let result = prepare_call_hierarchy(
+            &uri,
+            content,
+            Position {
+                line: 1,
+                character: 4,
+            },
+        );
         assert!(result.is_some());
         let items = result.unwrap();
         assert_eq!(items.len(), 1);

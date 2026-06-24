@@ -234,10 +234,7 @@ fn find_container(lines: &[&str], current_line: usize) -> Option<String> {
 /// Filter symbols by query string (fuzzy match)
 pub fn filter_symbols(symbols: &[ExtractedSymbol], query: &str) -> Vec<SymbolInformation> {
     if query.is_empty() {
-        return symbols
-            .iter()
-            .map(|s| to_symbol_information(s))
-            .collect();
+        return symbols.iter().map(|s| to_symbol_information(s)).collect();
     }
 
     let query_lower = query.to_lowercase();
@@ -329,9 +326,15 @@ trait Display {
         let uri = Url::parse("file:///test.li").unwrap();
         let symbols = extract_symbols(&uri, content);
 
-        assert!(symbols.iter().any(|s| s.name == "Point" && s.kind == SymbolKind::STRUCT));
-        assert!(symbols.iter().any(|s| s.name == "Color" && s.kind == SymbolKind::ENUM));
-        assert!(symbols.iter().any(|s| s.name == "Display" && s.kind == SymbolKind::INTERFACE));
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "Point" && s.kind == SymbolKind::STRUCT));
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "Color" && s.kind == SymbolKind::ENUM));
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "Display" && s.kind == SymbolKind::INTERFACE));
     }
 
     #[test]

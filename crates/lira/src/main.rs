@@ -159,14 +159,14 @@ fn disassemble(bytecode: &[u8]) -> Result<String, String> {
     };
 
     let read_u16 = |pos: &mut usize| -> Result<u16, String> {
-        let lo = bytecode.get(*pos).ok_or("Unexpected end")? ;
+        let lo = bytecode.get(*pos).ok_or("Unexpected end")?;
         let hi = bytecode.get(*pos + 1).ok_or("Unexpected end")?;
         *pos += 2;
         Ok((*lo as u16) | ((*hi as u16) << 8))
     };
 
     let read_u32 = |pos: &mut usize| -> Result<u32, String> {
-        let b0 = bytecode.get(*pos).ok_or("Unexpected end")? ;
+        let b0 = bytecode.get(*pos).ok_or("Unexpected end")?;
         let b1 = bytecode.get(*pos + 1).ok_or("Unexpected end")?;
         let b2 = bytecode.get(*pos + 2).ok_or("Unexpected end")?;
         let b3 = bytecode.get(*pos + 3).ok_or("Unexpected end")?;
@@ -403,8 +403,15 @@ fn disassemble(bytecode: &[u8]) -> Result<String, String> {
         };
 
         // Mark entry point
-        let marker = if offset as u32 == entry_point { " <- entry" } else { "" };
-        output.push_str(&format!("  {:5}: {}{}{}\n", offset, op_name, operands, marker));
+        let marker = if offset as u32 == entry_point {
+            " <- entry"
+        } else {
+            ""
+        };
+        output.push_str(&format!(
+            "  {:5}: {}{}{}\n",
+            offset, op_name, operands, marker
+        ));
     }
 
     Ok(output)

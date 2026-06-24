@@ -764,16 +764,17 @@ async fn test_signature_help_builtin() {
     client.initialize().await;
 
     let uri = "file:///test.li";
-    client
-        .did_open(uri, "fn main() {\n    println(\n}")
-        .await;
+    client.did_open(uri, "fn main() {\n    println(\n}").await;
 
     // Request signature help inside println(
     let sig_help = client.signature_help(uri, 1, 12).await;
 
     assert!(sig_help.is_some(), "Should have signature help for println");
     let sig_help = sig_help.unwrap();
-    assert!(!sig_help.signatures.is_empty(), "Should have at least one signature");
+    assert!(
+        !sig_help.signatures.is_empty(),
+        "Should have at least one signature"
+    );
     assert!(
         sig_help.signatures[0].label.contains("println"),
         "Signature should mention println"
@@ -1006,8 +1007,14 @@ async fn test_inlay_hint_variable_type() {
     let hints = client
         .inlay_hint(
             uri,
-            Position { line: 0, character: 0 },
-            Position { line: 5, character: 0 },
+            Position {
+                line: 0,
+                character: 0,
+            },
+            Position {
+                line: 5,
+                character: 0,
+            },
         )
         .await;
 
@@ -1057,14 +1064,8 @@ async fn test_initialize_new_capabilities() {
         caps.document_link_provider.is_some(),
         "Should have document link"
     );
-    assert!(
-        caps.inlay_hint_provider.is_some(),
-        "Should have inlay hint"
-    );
-    assert!(
-        caps.rename_provider.is_some(),
-        "Should have rename"
-    );
+    assert!(caps.inlay_hint_provider.is_some(), "Should have inlay hint");
+    assert!(caps.rename_provider.is_some(), "Should have rename");
 }
 
 #[tokio::test]
@@ -1126,7 +1127,9 @@ async fn test_rename_variable() {
 
     let edit = result.unwrap();
     let changes = edit.changes.expect("Should have changes");
-    let edits = changes.get(&Url::parse(uri).unwrap()).expect("Should have edits for URI");
+    let edits = changes
+        .get(&Url::parse(uri).unwrap())
+        .expect("Should have edits for URI");
 
     // Should rename all occurrences (declaration + 2 usages)
     assert!(edits.len() >= 2, "Should have at least 2 edits");
@@ -1163,7 +1166,9 @@ fn main() {
 
     let edit = result.unwrap();
     let changes = edit.changes.expect("Should have changes");
-    let edits = changes.get(&Url::parse(uri).unwrap()).expect("Should have edits for URI");
+    let edits = changes
+        .get(&Url::parse(uri).unwrap())
+        .expect("Should have edits for URI");
 
     // Should rename definition and call site
     assert_eq!(edits.len(), 2, "Should have 2 edits (definition + call)");
@@ -1506,7 +1511,13 @@ async fn test_selection_range_basic() {
 
     // Get selection range for position on "x"
     let ranges = client
-        .selection_range(uri, vec![Position { line: 1, character: 8 }])
+        .selection_range(
+            uri,
+            vec![Position {
+                line: 1,
+                character: 8,
+            }],
+        )
         .await;
 
     assert_eq!(ranges.len(), 1, "Should have one selection range");
@@ -1536,7 +1547,13 @@ async fn test_selection_range_nested() {
 
     // Get selection range inside the if block
     let ranges = client
-        .selection_range(uri, vec![Position { line: 2, character: 12 }])
+        .selection_range(
+            uri,
+            vec![Position {
+                line: 2,
+                character: 12,
+            }],
+        )
         .await;
 
     assert_eq!(ranges.len(), 1);
@@ -1550,7 +1567,11 @@ async fn test_selection_range_nested() {
     }
 
     // Should have multiple nesting levels (word -> line -> if block -> fn block -> doc)
-    assert!(depth >= 4, "Should have nested selection ranges, got depth {}", depth);
+    assert!(
+        depth >= 4,
+        "Should have nested selection ranges, got depth {}",
+        depth
+    );
 }
 
 // ============================================================================
@@ -1596,11 +1617,21 @@ fn createUser(name: string) -> User {
     // Search for "User" - should find across both files
     let symbols = client.workspace_symbol("User").await;
 
-    assert!(symbols.len() >= 2, "Should find symbols matching 'User', got {}", symbols.len());
+    assert!(
+        symbols.len() >= 2,
+        "Should find symbols matching 'User', got {}",
+        symbols.len()
+    );
 
     let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
-    assert!(names.iter().any(|n| *n == "User"), "Should find User struct");
-    assert!(names.iter().any(|n| n.contains("User")), "Should find getUser function");
+    assert!(
+        names.iter().any(|n| *n == "User"),
+        "Should find User struct"
+    );
+    assert!(
+        names.iter().any(|n| n.contains("User")),
+        "Should find getUser function"
+    );
 }
 
 #[tokio::test]
@@ -1661,7 +1692,10 @@ fn main() {
 
     assert!(location.is_some(), "Should find type definition");
     let loc = location.unwrap();
-    assert_eq!(loc.range.start.line, 0, "Should jump to Point struct definition");
+    assert_eq!(
+        loc.range.start.line, 0,
+        "Should jump to Point struct definition"
+    );
 }
 
 #[tokio::test]
@@ -1685,7 +1719,10 @@ async fn test_type_definition_builtin_returns_none() {
     let location = client.goto_type_definition(uri, 2, 12).await;
 
     // int is a builtin type, should return None
-    assert!(location.is_none(), "Should not return location for builtin type");
+    assert!(
+        location.is_none(),
+        "Should not return location for builtin type"
+    );
 }
 
 // ============================================================================

@@ -100,14 +100,12 @@ impl TypeValidator {
             TypeRule {
                 name: "literal_string".to_string(),
                 description: "String literals have type string".to_string(),
-                test_cases: vec![
-                    TypeTestCase {
-                        source: "let x = \"hello\"".to_string(),
-                        expected_type: Some("string".to_string()),
-                        should_succeed: true,
-                        expected_error: None,
-                    },
-                ],
+                test_cases: vec![TypeTestCase {
+                    source: "let x = \"hello\"".to_string(),
+                    expected_type: Some("string".to_string()),
+                    should_succeed: true,
+                    expected_error: None,
+                }],
             },
             TypeRule {
                 name: "literal_bool".to_string(),
@@ -127,7 +125,6 @@ impl TypeValidator {
                     },
                 ],
             },
-
             // Type annotation
             TypeRule {
                 name: "type_annotation".to_string(),
@@ -147,7 +144,6 @@ impl TypeValidator {
                     },
                 ],
             },
-
             // Type mismatch errors
             TypeRule {
                 name: "type_mismatch".to_string(),
@@ -167,7 +163,6 @@ impl TypeValidator {
                     },
                 ],
             },
-
             // Binary operations
             TypeRule {
                 name: "binary_arithmetic".to_string(),
@@ -229,7 +224,6 @@ impl TypeValidator {
                     },
                 ],
             },
-
             // Optional types
             TypeRule {
                 name: "optional_promotion".to_string(),
@@ -249,7 +243,6 @@ impl TypeValidator {
                     },
                 ],
             },
-
             // Array types
             TypeRule {
                 name: "array_inference".to_string(),
@@ -269,68 +262,59 @@ impl TypeValidator {
                     },
                 ],
             },
-
             // Tuple types
             TypeRule {
                 name: "tuple_inference".to_string(),
                 description: "Tuple type inferred from elements".to_string(),
-                test_cases: vec![
-                    TypeTestCase {
-                        source: "let x = (1, \"two\", true)".to_string(),
-                        expected_type: Some("(int, string, bool)".to_string()),
-                        should_succeed: true,
-                        expected_error: None,
-                    },
-                ],
+                test_cases: vec![TypeTestCase {
+                    source: "let x = (1, \"two\", true)".to_string(),
+                    expected_type: Some("(int, string, bool)".to_string()),
+                    should_succeed: true,
+                    expected_error: None,
+                }],
             },
-
             // Function return type inference
             TypeRule {
                 name: "function_return_inference".to_string(),
                 description: "Function return type inferred from body".to_string(),
-                test_cases: vec![
-                    TypeTestCase {
-                        source: "fn add(a: int, b: int) { a + b }".to_string(),
-                        expected_type: None, // Checking the function, not a let binding
-                        should_succeed: true,
-                        expected_error: None,
-                    },
-                ],
+                test_cases: vec![TypeTestCase {
+                    source: "fn add(a: int, b: int) { a + b }".to_string(),
+                    expected_type: None, // Checking the function, not a let binding
+                    should_succeed: true,
+                    expected_error: None,
+                }],
             },
-
             // Undefined variable errors
             TypeRule {
                 name: "undefined_variable".to_string(),
                 description: "Undefined variables produce errors".to_string(),
-                test_cases: vec![
-                    TypeTestCase {
-                        source: "let x = undefined_var".to_string(),
-                        expected_type: None,
-                        should_succeed: false,
-                        expected_error: Some("undefined".to_string().to_lowercase()),
-                    },
-                ],
+                test_cases: vec![TypeTestCase {
+                    source: "let x = undefined_var".to_string(),
+                    expected_type: None,
+                    should_succeed: false,
+                    expected_error: Some("undefined".to_string().to_lowercase()),
+                }],
             },
-
             // Immutability
             TypeRule {
                 name: "immutability".to_string(),
                 description: "Cannot assign to immutable bindings".to_string(),
-                test_cases: vec![
-                    TypeTestCase {
-                        source: "let x = 1\nx = 2".to_string(),
-                        expected_type: None,
-                        should_succeed: false,
-                        expected_error: Some("immutable".to_string()),
-                    },
-                ],
+                test_cases: vec![TypeTestCase {
+                    source: "let x = 1\nx = 2".to_string(),
+                    expected_type: None,
+                    should_succeed: false,
+                    expected_error: Some("immutable".to_string()),
+                }],
             },
         ]
     }
 
     /// Validate all type rules
     pub fn validate_all(&self) -> Vec<TypeRuleValidation> {
-        self.rules.iter().map(|rule| self.validate_rule(rule)).collect()
+        self.rules
+            .iter()
+            .map(|rule| self.validate_rule(rule))
+            .collect()
     }
 
     /// Validate a single type rule
@@ -348,7 +332,9 @@ impl TypeValidator {
                 match &result {
                     Err(errors) => {
                         if let Some(expected) = &case.expected_error {
-                            errors.iter().any(|e| e.to_lowercase().contains(&expected.to_lowercase()))
+                            errors
+                                .iter()
+                                .any(|e| e.to_lowercase().contains(&expected.to_lowercase()))
                         } else {
                             true
                         }

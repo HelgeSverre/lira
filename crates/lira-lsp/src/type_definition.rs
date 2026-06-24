@@ -133,11 +133,11 @@ fn find_type_location(uri: &Url, content: &str, type_name: &str) -> Option<Locat
                     }
 
                     // Find the type name within the match
-                    if let Some(name_re) =
-                        get_regex(&format!(r"\b{}\b", regex::escape(type_name)))
+                    if let Some(name_re) = get_regex(&format!(r"\b{}\b", regex::escape(type_name)))
                     {
                         if let Some(name_match) = name_re.find(line) {
-                            let char_start = utils::byte_offset_to_char_col(line, name_match.start());
+                            let char_start =
+                                utils::byte_offset_to_char_col(line, name_match.start());
                             let char_end = utils::byte_offset_to_char_col(line, name_match.end());
 
                             return Some(Location {
@@ -182,7 +182,14 @@ fn main() {
 "#;
         let uri = Url::parse("file:///test.li").unwrap();
         // Position on "p" in println(p)
-        let loc = find_type_definition(&uri, content, Position { line: 8, character: 12 });
+        let loc = find_type_definition(
+            &uri,
+            content,
+            Position {
+                line: 8,
+                character: 12,
+            },
+        );
 
         assert!(loc.is_some());
         let loc = loc.unwrap();
@@ -203,7 +210,14 @@ fn main() {
 }
 "#;
         let uri = Url::parse("file:///test.li").unwrap();
-        let loc = find_type_definition(&uri, content, Position { line: 8, character: 12 });
+        let loc = find_type_definition(
+            &uri,
+            content,
+            Position {
+                line: 8,
+                character: 12,
+            },
+        );
 
         assert!(loc.is_some());
         let loc = loc.unwrap();
@@ -224,7 +238,14 @@ fn print_point(p: Point) {
 "#;
         let uri = Url::parse("file:///test.li").unwrap();
         // Position on "p" in println(p.x)
-        let loc = find_type_definition(&uri, content, Position { line: 7, character: 12 });
+        let loc = find_type_definition(
+            &uri,
+            content,
+            Position {
+                line: 7,
+                character: 12,
+            },
+        );
 
         assert!(loc.is_some());
         let loc = loc.unwrap();
@@ -240,7 +261,14 @@ fn main() {
 }
 "#;
         let uri = Url::parse("file:///test.li").unwrap();
-        let loc = find_type_definition(&uri, content, Position { line: 3, character: 12 });
+        let loc = find_type_definition(
+            &uri,
+            content,
+            Position {
+                line: 3,
+                character: 12,
+            },
+        );
 
         // int is a builtin, should return None
         assert!(loc.is_none());
@@ -259,7 +287,14 @@ fn main() {
 }
 "#;
         let uri = Url::parse("file:///test.li").unwrap();
-        let loc = find_type_definition(&uri, content, Position { line: 7, character: 12 });
+        let loc = find_type_definition(
+            &uri,
+            content,
+            Position {
+                line: 7,
+                character: 12,
+            },
+        );
 
         assert!(loc.is_some());
         let loc = loc.unwrap();

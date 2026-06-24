@@ -213,7 +213,10 @@ fn test_ast_serialization_hello_world() {
     let json = serde_json::to_value(&ast);
     assert!(json.is_ok(), "AST serialization failed: {:?}", json.err());
     let json = json.unwrap();
-    assert!(json.get("statements").is_some(), "AST should have statements");
+    assert!(
+        json.get("statements").is_some(),
+        "AST should have statements"
+    );
 }
 
 #[test]
@@ -326,7 +329,10 @@ if true {
 // ===== Breakpoint/Stepping Tests =====
 
 /// Helper to run with breakpoints and return the breakpoint hit (if any)
-fn run_with_breakpoints(source: &str, breakpoints: Vec<u32>) -> Result<(Option<u32>, Vec<String>), String> {
+fn run_with_breakpoints(
+    source: &str,
+    breakpoints: Vec<u32>,
+) -> Result<(Option<u32>, Vec<String>), String> {
     let bytecode = compile(source)?;
     let mut vm = liravm::create_vm(&bytecode).map_err(|e| e.to_string())?;
     vm.set_capture_output(true);

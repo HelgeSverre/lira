@@ -252,7 +252,10 @@ fn builtin_signature(name: &str) -> Option<SignatureInformation> {
         ),
         "todo" => (
             "todo(message: string) -> never",
-            vec![param("message: string", "Description of unimplemented code")],
+            vec![param(
+                "message: string",
+                "Description of unimplemented code",
+            )],
         ),
         "unreachable" => ("unreachable() -> never", vec![]),
         "type_of" => (
@@ -317,10 +320,7 @@ mod tests {
 
     #[test]
     fn test_extract_identifier_before() {
-        assert_eq!(
-            extract_identifier_before("  foo"),
-            Some("foo".to_string())
-        );
+        assert_eq!(extract_identifier_before("  foo"), Some("foo".to_string()));
         assert_eq!(
             extract_identifier_before("bar.baz"),
             Some("baz".to_string())

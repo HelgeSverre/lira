@@ -98,7 +98,11 @@ fn test_function_declarations() {
     let validator = GrammarValidator::new(grammar);
 
     // Basic function
-    assert!(validator.parse("fn add(a: int, b: int) -> int { a + b }").success);
+    assert!(
+        validator
+            .parse("fn add(a: int, b: int) -> int { a + b }")
+            .success
+    );
 
     // Void function
     assert!(validator.parse("fn greet() { println(\"hello\") }").success);
@@ -125,7 +129,11 @@ fn test_struct_declarations() {
 
     assert!(validator.parse("struct Point { x: int, y: int }").success);
     assert!(validator.parse("struct Empty {}").success);
-    assert!(validator.parse("struct Pair<T, U> { first: T, second: U }").success);
+    assert!(
+        validator
+            .parse("struct Pair<T, U> { first: T, second: U }")
+            .success
+    );
 }
 
 #[test]
@@ -139,7 +147,11 @@ fn test_class_declarations() {
     let validator = GrammarValidator::new(grammar);
 
     assert!(validator.parse("class Animal { name: string }").success);
-    assert!(validator.parse("class Dog extends Animal { breed: string }").success);
+    assert!(
+        validator
+            .parse("class Dog extends Animal { breed: string }")
+            .success
+    );
 }
 
 #[test]
@@ -177,7 +189,11 @@ fn test_control_flow() {
     assert!(validator.parse("for i in items { print(i) }").success);
 
     // Match expressions
-    assert!(validator.parse("match x { 1 => \"one\", _ => \"other\" }").success);
+    assert!(
+        validator
+            .parse("match x { 1 => \"one\", _ => \"other\" }")
+            .success
+    );
 }
 
 #[test]
@@ -305,7 +321,11 @@ fn test_full_spec_validation() {
     println!("Version: {}", report.spec_version);
     println!(
         "Status: {}",
-        if report.all_passed { "PASSED" } else { "FAILED" }
+        if report.all_passed {
+            "PASSED"
+        } else {
+            "FAILED"
+        }
     );
     println!("{}", "-".repeat(60));
     println!(
@@ -484,7 +504,11 @@ mod regression {
             operators: Vec::new(),
         };
         let validator = GrammarValidator::new(grammar);
-        assert!(validator.parse("trait Eq { fn eq(self, other: Self) -> bool }").success);
+        assert!(
+            validator
+                .parse("trait Eq { fn eq(self, other: Self) -> bool }")
+                .success
+        );
     }
 
     #[test]
@@ -496,6 +520,10 @@ mod regression {
             operators: Vec::new(),
         };
         let validator = GrammarValidator::new(grammar);
-        assert!(validator.parse("impl Point { fn new() -> Self { Point { x: 0, y: 0 } } }").success);
+        assert!(
+            validator
+                .parse("impl Point { fn new() -> Self { Point { x: 0, y: 0 } } }")
+                .success
+        );
     }
 }

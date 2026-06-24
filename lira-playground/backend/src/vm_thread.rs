@@ -155,35 +155,34 @@ fn vm_thread_main(mut command_rx: mpsc::Receiver<VmCommand>) {
                     response_tx,
                 } => {
                     // Handle the message with panic recovery
-                    let response =
-                        match std::panic::catch_unwind(AssertUnwindSafe(|| {
-                            handle_client_message(&mut session, message)
-                        })) {
-                            Ok(response) => response,
-                            Err(panic_info) => {
-                                // Extract panic message
-                                let panic_msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
-                                    s.to_string()
-                                } else if let Some(s) = panic_info.downcast_ref::<String>() {
-                                    s.clone()
-                                } else {
-                                    "Unknown panic".to_string()
-                                };
+                    let response = match std::panic::catch_unwind(AssertUnwindSafe(|| {
+                        handle_client_message(&mut session, message)
+                    })) {
+                        Ok(response) => response,
+                        Err(panic_info) => {
+                            // Extract panic message
+                            let panic_msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
+                                s.to_string()
+                            } else if let Some(s) = panic_info.downcast_ref::<String>() {
+                                s.clone()
+                            } else {
+                                "Unknown panic".to_string()
+                            };
 
-                                tracing::error!("VM panic: {}", panic_msg);
+                            tracing::error!("VM panic: {}", panic_msg);
 
-                                // Reset session after panic
-                                session = DebugSession::new();
+                            // Reset session after panic
+                            session = DebugSession::new();
 
-                                VmResponse {
-                                    messages: vec![ServerMessage::RuntimeError {
-                                        message: format!("Internal VM error: {}", panic_msg),
-                                        location: None,
-                                    }],
-                                    terminate: false,
-                                }
+                            VmResponse {
+                                messages: vec![ServerMessage::RuntimeError {
+                                    message: format!("Internal VM error: {}", panic_msg),
+                                    location: None,
+                                }],
+                                terminate: false,
                             }
-                        };
+                        }
+                    };
 
                     // Send response (ignore error if receiver dropped)
                     let _ = response_tx.send(response);
@@ -211,9 +210,10 @@ fn handle_client_message(session: &mut DebugSession, msg: ClientMessage) -> VmRe
 
         ClientMessage::Run { source } => handle_run(session, &source, false, &[]),
 
-        ClientMessage::Debug { source, breakpoints } => {
-            handle_run(session, &source, true, &breakpoints)
-        }
+        ClientMessage::Debug {
+            source,
+            breakpoints,
+        } => handle_run(session, &source, true, &breakpoints),
 
         ClientMessage::Stop => {
             session.stop();
@@ -540,7 +540,10 @@ fn handle_inspect_locals(session: &DebugSession) -> VmResponse {
                         value: l.value.display.clone(),
                     });
                 VariableInfo {
-                    name: l.name.clone().unwrap_or_else(|| format!("local_{}", l.slot)),
+                    name: l
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| format!("local_{}", l.slot)),
                     value,
                     type_name: l.value.type_name.clone(),
                 }
@@ -732,7 +735,10 @@ fn snapshot_to_vm_state(snapshot: &DebugSnapshot) -> VmState {
                         value: l.value.display.clone(),
                     });
                 VariableInfo {
-                    name: l.name.clone().unwrap_or_else(|| format!("local_{}", l.slot)),
+                    name: l
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| format!("local_{}", l.slot)),
                     value,
                     type_name: l.value.type_name.clone(),
                 }

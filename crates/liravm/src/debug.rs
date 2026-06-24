@@ -16,28 +16,17 @@ pub enum ExecutionState {
     /// Currently running
     Running,
     /// Paused at a breakpoint
-    Paused {
-        line: u32,
-        column: u32,
-        ip: usize,
-    },
+    Paused { line: u32, column: u32, ip: usize },
     /// Suspended by user pause request
-    Suspended {
-        line: u32,
-        column: u32,
-        ip: usize,
-    },
+    Suspended { line: u32, column: u32, ip: usize },
     /// Program finished normally
-    Finished {
-        exit_code: i32,
-    },
+    Finished { exit_code: i32 },
     /// Runtime error occurred
     Error {
         message: String,
         location: Option<(u32, u32)>,
     },
 }
-
 
 /// Step mode for single-stepping execution
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,31 +49,15 @@ pub enum StepOutcome {
     /// More instructions available, execution can continue
     Continue,
     /// Hit a breakpoint
-    Breakpoint {
-        line: u32,
-        column: u32,
-        ip: usize,
-    },
+    Breakpoint { line: u32, column: u32, ip: usize },
     /// Pause requested by user
-    Paused {
-        line: u32,
-        column: u32,
-        ip: usize,
-    },
+    Paused { line: u32, column: u32, ip: usize },
     /// Step operation completed (for line/into/over/out)
-    StepCompleted {
-        line: u32,
-        column: u32,
-        ip: usize,
-    },
+    StepCompleted { line: u32, column: u32, ip: usize },
     /// Program finished normally
-    Finished {
-        exit_code: i32,
-    },
+    Finished { exit_code: i32 },
     /// Runtime error occurred
-    Error {
-        message: String,
-    },
+    Error { message: String },
 }
 
 impl StepOutcome {
@@ -299,10 +272,19 @@ pub enum RichValue {
     String(String),
     Array(Vec<RichValue>),
     Object(HashMap<String, RichValue>),
-    Function { code_offset: usize },
-    Closure { code_offset: usize, captures: Vec<RichValue> },
-    Fiber { id: u64 },
-    Channel { id: u64 },
+    Function {
+        code_offset: usize,
+    },
+    Closure {
+        code_offset: usize,
+        captures: Vec<RichValue>,
+    },
+    Fiber {
+        id: u64,
+    },
+    Channel {
+        id: u64,
+    },
 }
 
 impl RichValue {
@@ -326,7 +308,9 @@ impl RichValue {
                     .collect();
                 RichValue::Object(fields)
             }
-            Value::Function(offset) => RichValue::Function { code_offset: *offset },
+            Value::Function(offset) => RichValue::Function {
+                code_offset: *offset,
+            },
             Value::Closure(c) => RichValue::Closure {
                 code_offset: c.code_offset,
                 captures: c.captures.iter().map(RichValue::from_value).collect(),

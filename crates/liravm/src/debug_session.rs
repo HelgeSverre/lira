@@ -28,7 +28,6 @@ pub enum SessionState {
     Error { message: String },
 }
 
-
 /// Debug event emitted during execution
 #[derive(Debug, Clone)]
 pub enum DebugEvent {
@@ -45,7 +44,10 @@ pub enum DebugEvent {
     /// Program finished normally
     Finished { exit_code: i32 },
     /// Runtime error occurred
-    Error { message: String, location: Option<(u32, u32)> },
+    Error {
+        message: String,
+        location: Option<(u32, u32)>,
+    },
 }
 
 /// Thread-safe debug session wrapping VM
@@ -109,10 +111,7 @@ impl DebugSession {
     /// Start or restart execution from the beginning
     pub fn start(&self) -> Result<DebugSnapshot, String> {
         let bytecode = self.bytecode.read().unwrap();
-        let bytecode = bytecode
-            .as_ref()
-            .ok_or("No program loaded")?
-            .clone();
+        let bytecode = bytecode.as_ref().ok_or("No program loaded")?.clone();
 
         // Reload the program to reset state
         let program = load(&bytecode)?;
@@ -297,21 +296,15 @@ impl DebugSession {
 
     fn outcome_to_event(&self, outcome: StepOutcome, vm: &VM) -> DebugEvent {
         match outcome {
-            StepOutcome::Continue => {
-                DebugEvent::StateChanged(vm.get_debug_snapshot())
-            }
+            StepOutcome::Continue => DebugEvent::StateChanged(vm.get_debug_snapshot()),
             StepOutcome::Breakpoint { line, column, ip } => {
                 DebugEvent::BreakpointHit { line, column, ip }
             }
-            StepOutcome::Paused { line, column, ip } => {
-                DebugEvent::Paused { line, column, ip }
-            }
+            StepOutcome::Paused { line, column, ip } => DebugEvent::Paused { line, column, ip },
             StepOutcome::StepCompleted { line, column, ip } => {
                 DebugEvent::StepCompleted { line, column, ip }
             }
-            StepOutcome::Finished { exit_code } => {
-                DebugEvent::Finished { exit_code }
-            }
+            StepOutcome::Finished { exit_code } => DebugEvent::Finished { exit_code },
             StepOutcome::Error { message } => {
                 let location = vm.get_current_location();
                 DebugEvent::Error { message, location }
@@ -326,8 +319,12 @@ impl DebugSession {
             DebugEvent::BreakpointHit { .. } => SessionState::Paused,
             DebugEvent::StepCompleted { .. } => SessionState::Paused,
             DebugEvent::Paused { .. } => SessionState::Paused,
-            DebugEvent::Finished { exit_code } => SessionState::Finished { exit_code: *exit_code },
-            DebugEvent::Error { message, .. } => SessionState::Error { message: message.clone() },
+            DebugEvent::Finished { exit_code } => SessionState::Finished {
+                exit_code: *exit_code,
+            },
+            DebugEvent::Error { message, .. } => SessionState::Error {
+                message: message.clone(),
+            },
         };
         *self.state.write().unwrap() = new_state;
     }

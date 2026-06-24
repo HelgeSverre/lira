@@ -56,7 +56,10 @@ impl GrammarValidator {
     /// Create a new grammar validator
     pub fn new(grammar: EbnfGrammar) -> Self {
         let test_cases = Self::generate_test_cases(&grammar);
-        GrammarValidator { grammar, test_cases }
+        GrammarValidator {
+            grammar,
+            test_cases,
+        }
     }
 
     /// Generate test cases for all productions
@@ -141,7 +144,11 @@ impl GrammarValidator {
 
             Symbol::Optional(inner) => {
                 let mut result = vec![String::new()]; // Empty case
-                result.extend(Self::generate_examples_with_depth(inner, grammar, depth + 1));
+                result.extend(Self::generate_examples_with_depth(
+                    inner,
+                    grammar,
+                    depth + 1,
+                ));
                 result
             }
 
@@ -420,11 +427,7 @@ impl GrammarValidator {
     }
 
     /// Validate a single production
-    pub fn validate_production(
-        &self,
-        name: &str,
-        cases: &[TestCase],
-    ) -> ProductionValidation {
+    pub fn validate_production(&self, name: &str, cases: &[TestCase]) -> ProductionValidation {
         let mut passed = 0;
         let mut failed = 0;
         let mut failures = Vec::new();
@@ -442,11 +445,21 @@ impl GrammarValidator {
                 passed += 1;
             } else {
                 failed += 1;
-                let expected = if case.should_accept { "accept" } else { "reject" };
-                let actual = if result.success { "accepted" } else { "rejected" };
+                let expected = if case.should_accept {
+                    "accept"
+                } else {
+                    "reject"
+                };
+                let actual = if result.success {
+                    "accepted"
+                } else {
+                    "rejected"
+                };
                 failures.push(format!(
                     "{}: expected to {}, but {} - {}",
-                    case.description, expected, actual,
+                    case.description,
+                    expected,
+                    actual,
                     result.error.unwrap_or_default()
                 ));
             }
