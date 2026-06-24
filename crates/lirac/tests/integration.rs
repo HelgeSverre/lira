@@ -770,3 +770,45 @@ fn test_runtime_error_structured_carries_location() {
     assert_eq!(err.line, Some(4));
     assert_eq!(err.column, Some(5));
 }
+
+/// Call frames should be labelled with the real function name from debug info.
+#[test]
+fn test_call_frame_has_function_name() {
+    let source = "\
+fn greet(name: string) -> string {
+    let msg = \"hi \" + name
+    return msg
+}
+
+fn main() {
+    let g = greet(\"world\")
+    print(g)
+}
+
+main()
+";
+    let bytecode = lirac::compile(source).expect("Compilation failed");
+
+    let session = liravm::DebugSession::new();
+    session
+        .load(source, bytecode)
+        .expect("Failed to load program");
+    session.set_breakpoints(vec![3]); // inside greet(): `return msg`
+    session.start().expect("Failed to start");
+    session
+        .continue_execution()
+        .expect("Failed to continue to breakpoint");
+
+    let snapshot = session.get_snapshot().expect("No snapshot available");
+    let names: Vec<Option<String>> = snapshot
+        .call_stack
+        .iter()
+        .map(|f| f.function_name.clone())
+        .collect();
+
+    assert!(
+        names.iter().any(|n| n.as_deref() == Some("greet")),
+        "Expected a call frame named 'greet', got: {:?}",
+        names
+    );
+}

@@ -102,6 +102,8 @@ pub struct ChannelSnapshot {
 /// Call frame for function calls
 #[derive(Debug, Clone)]
 struct CallFrame {
+    /// Bytecode offset of the called function's entry point (for debug naming)
+    func_offset: usize,
     /// Return address (instruction pointer to return to)
     return_addr: usize,
     /// Base pointer for local variables
@@ -604,12 +606,14 @@ impl VM {
         let call_stack: Vec<CallFrameInfo> = self
             .call_stack
             .iter()
-            .map(|frame| {
-                CallFrameInfo {
-                    function_name: None, // TODO: Get from debug info if available
-                    return_addr: frame.return_addr,
-                    source_location: self.program.debug_info.lookup(frame.return_addr as u32),
-                }
+            .map(|frame| CallFrameInfo {
+                function_name: self
+                    .program
+                    .debug_info
+                    .function_name_at(frame.func_offset as u32)
+                    .map(|s| s.to_string()),
+                return_addr: frame.return_addr,
+                source_location: self.program.debug_info.lookup(frame.return_addr as u32),
             })
             .collect();
 
@@ -1392,6 +1396,7 @@ impl VM {
 
                         // Save stack base AFTER popping args - this isolates the caller's stack
                         let frame = CallFrame {
+                            func_offset: code_offset,
                             return_addr: self.ip,
                             locals_base: self.locals.len(),
                             local_count: arg_count,
@@ -1418,6 +1423,7 @@ impl VM {
 
                         // Save stack base AFTER popping args - this isolates the caller's stack
                         let frame = CallFrame {
+                            func_offset: closure_data.code_offset,
                             return_addr: self.ip,
                             locals_base: self.locals.len(),
                             local_count: arg_count,

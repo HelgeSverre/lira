@@ -92,6 +92,17 @@ pub struct LocalSymbol {
     pub end_offset: u32,
 }
 
+/// Function symbol information
+/// Maps a function's entry bytecode offset to its source name, so call frames
+/// and stack traces can be labelled with the real function name.
+#[derive(Debug, Clone)]
+pub struct FunctionSymbol {
+    /// Bytecode offset of the function's entry point
+    pub code_offset: u32,
+    /// Function name in source code
+    pub name: String,
+}
+
 /// Debug information section
 #[derive(Debug, Clone, Default)]
 pub struct DebugInfo {
@@ -101,6 +112,8 @@ pub struct DebugInfo {
     pub line_table: Vec<LineInfo>,
     /// Local variable symbols
     pub local_symbols: Vec<LocalSymbol>,
+    /// Function symbols (entry offset -> name)
+    pub function_symbols: Vec<FunctionSymbol>,
 }
 
 impl DebugInfo {
@@ -129,7 +142,13 @@ impl DebugInfo {
     }
 
     /// Add a local symbol entry
-    pub fn add_local_symbol(&mut self, slot: u16, name: String, scope_depth: u16, start_offset: u32) {
+    pub fn add_local_symbol(
+        &mut self,
+        slot: u16,
+        name: String,
+        scope_depth: u16,
+        start_offset: u32,
+    ) {
         self.local_symbols.push(LocalSymbol {
             slot,
             name,
@@ -150,6 +169,20 @@ impl DebugInfo {
                     && offset >= sym.start_offset
                     && (sym.end_offset == 0 || offset < sym.end_offset)
             })
+            .map(|sym| sym.name.as_str())
+    }
+
+    /// Add a function symbol entry
+    pub fn add_function_symbol(&mut self, code_offset: u32, name: String) {
+        self.function_symbols
+            .push(FunctionSymbol { code_offset, name });
+    }
+
+    /// Look up the name of the function whose entry point is `offset`
+    pub fn function_name_at(&self, offset: u32) -> Option<&str> {
+        self.function_symbols
+            .iter()
+            .find(|sym| sym.code_offset == offset)
             .map(|sym| sym.name.as_str())
     }
 

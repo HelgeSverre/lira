@@ -426,10 +426,17 @@ fn generate_functions_section(functions: &[FunctionDoc]) -> String {
         // Parameters table (if there are any)
         if !f.params.is_empty() {
             output.push_str("**Parameters:**\n\n");
-            output.push_str("| Name | Type |\n");
-            output.push_str("|------|------|\n");
+            output.push_str("| Name | Type | Default |\n");
+            output.push_str("|------|------|---------|\n");
             for param in &f.params {
-                output.push_str(&format!("| `{}` | `{}` |\n", param.name, param.type_name));
+                let default = match &param.default_value {
+                    Some(v) => format!("`{}`", v),
+                    None => String::new(),
+                };
+                output.push_str(&format!(
+                    "| `{}` | `{}` | {} |\n",
+                    param.name, param.type_name, default
+                ));
             }
             output.push('\n');
         }

@@ -503,6 +503,16 @@ impl CodeGenerator {
             output.extend_from_slice(name_bytes);
         }
 
+        // Function symbols section (entry offset -> name)
+        // Format: symbol_count (u32), then for each: code_offset (u32), name_len (u32), name (bytes)
+        output.extend_from_slice(&(self.debug_info.function_symbols.len() as u32).to_le_bytes());
+        for sym in &self.debug_info.function_symbols {
+            output.extend_from_slice(&sym.code_offset.to_le_bytes());
+            let name_bytes = sym.name.as_bytes();
+            output.extend_from_slice(&(name_bytes.len() as u32).to_le_bytes());
+            output.extend_from_slice(name_bytes);
+        }
+
         output
     }
 
@@ -1331,7 +1341,10 @@ impl CodeGenerator {
                 self.next_local = 0;
 
                 // Record function offset
-                self.functions[func_idx].code_offset = self.current_offset();
+                let func_offset = self.current_offset();
+                self.functions[func_idx].code_offset = func_offset;
+                self.debug_info
+                    .add_function_symbol(func_offset as u32, name.clone());
 
                 // Define parameters as locals and track their types
                 for param in params {
@@ -1651,6 +1664,9 @@ impl CodeGenerator {
                             local_count: 0,
                         });
 
+                        self.debug_info
+                            .add_function_symbol(func_offset as u32, mangled_name.clone());
+
                         // Store the struct method mapping
                         self.struct_methods
                             .entry(name.clone())
@@ -1708,6 +1724,8 @@ impl CodeGenerator {
                                 panic!("Method function '{}' not found", mangled_name)
                             });
                         self.functions[func_idx].code_offset = func_offset;
+                        self.debug_info
+                            .add_function_symbol(func_offset as u32, mangled_name.clone());
 
                         // Store the struct method mapping for method dispatch
                         self.struct_methods

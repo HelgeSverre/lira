@@ -200,6 +200,19 @@ pub fn load(bytes: &[u8]) -> Result<Program, String> {
         }
     }
 
+    // Function symbols section (optional - may not be present in older bytecode)
+    if reader.pos < reader.data.len() {
+        let func_count = reader.read_u32()? as usize;
+        for _ in 0..func_count {
+            let code_offset = reader.read_u32()?;
+            let name_len = reader.read_u32()? as usize;
+            let name_bytes = reader.read_bytes(name_len)?;
+            let name = String::from_utf8(name_bytes.to_vec())
+                .map_err(|_| "Invalid UTF-8 in function symbol name")?;
+            debug_info.add_function_symbol(code_offset, name);
+        }
+    }
+
     Ok(Program {
         constants,
         code,

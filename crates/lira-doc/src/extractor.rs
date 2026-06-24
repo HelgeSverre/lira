@@ -5,8 +5,8 @@
 
 use crate::types::*;
 use lirac::ast::{
-    EnumVariant, Field, Parameter, Program, Statement, StatementKind, TraitMethod, TypeExpr,
-    TypeExprKind, TypeParam,
+    EnumVariant, Expression, ExpressionKind, Field, Parameter, Program, Statement, StatementKind,
+    TraitMethod, TypeExpr, TypeExprKind, TypeParam, UnaryOp,
 };
 use std::collections::HashMap;
 
@@ -378,7 +378,7 @@ fn build_function_doc(
         .map(|p| ParamDoc {
             name: p.name.clone(),
             type_name: format_type(&p.type_ann),
-            default_value: None, // TODO: format default expressions
+            default_value: p.default.as_ref().map(format_default_expr),
         })
         .collect();
 
@@ -639,7 +639,13 @@ fn format_function_signature(
     sig.push_str(
         &params
             .iter()
-            .map(|p| format!("{}: {}", p.name, format_type(&p.type_ann)))
+            .map(|p| {
+                let base = format!("{}: {}", p.name, format_type(&p.type_ann));
+                match &p.default {
+                    Some(default) => format!("{} = {}", base, format_default_expr(default)),
+                    None => base,
+                }
+            })
             .collect::<Vec<_>>()
             .join(", "),
     );
@@ -675,6 +681,49 @@ fn format_trait_method_signature(method: &TraitMethod) -> String {
     }
 
     sig
+}
+
+/// Render a default-value expression for documentation (e.g. `x: int = 5`).
+///
+/// Handles the literals and simple compound expressions that realistically
+/// appear as parameter defaults; anything more complex falls back to `...` so
+/// the docs never display a misleading value.
+fn format_default_expr(expr: &Expression) -> String {
+    match &expr.kind {
+        ExpressionKind::IntLiteral(n) => n.to_string(),
+        ExpressionKind::FloatLiteral(f) => f.to_string(),
+        ExpressionKind::StringLiteral(s) => format!("\"{}\"", s),
+        ExpressionKind::CharLiteral(c) => format!("'{}'", c),
+        ExpressionKind::BoolLiteral(b) => b.to_string(),
+        ExpressionKind::Null => "null".to_string(),
+        ExpressionKind::Identifier(name) => name.clone(),
+        ExpressionKind::Unary { op, operand } => {
+            let inner = format_default_expr(operand);
+            match op {
+                UnaryOp::Neg => format!("-{}", inner),
+                UnaryOp::Not => format!("!{}", inner),
+                UnaryOp::BitNot => format!("~{}", inner),
+                _ => "...".to_string(),
+            }
+        }
+        ExpressionKind::Array(elems) => {
+            let items = elems
+                .iter()
+                .map(format_default_expr)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("[{}]", items)
+        }
+        ExpressionKind::Tuple(elems) => {
+            let items = elems
+                .iter()
+                .map(format_default_expr)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("({})", items)
+        }
+        _ => "...".to_string(),
+    }
 }
 
 /// Format a type parameter
@@ -732,5 +781,62 @@ fn format_type(type_expr: &TypeExpr) -> String {
         }
         TypeExprKind::Path(segments) => segments.join("::"),
         TypeExprKind::Infer => "any".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn func_doc<'a>(module: &'a ModuleDoc, name: &str) -> &'a FunctionDoc {
+        module
+            .functions
+            .iter()
+            .find(|f| f.name == name)
+            .unwrap_or_else(|| panic!("function '{}' not found", name))
+    }
+
+    #[test]
+    fn renders_default_parameter_values() {
+        let source = "\
+pub fn connect(host: string, port: int = 8080, secure: bool = true) {
+}
+";
+        let module = extract_docs("test.li", source).expect("extraction failed");
+        let f = func_doc(&module, "connect");
+
+        // The signature should render the defaults inline.
+        assert!(
+            f.signature.contains("port: int = 8080"),
+            "signature missing int default: {}",
+            f.signature
+        );
+        assert!(
+            f.signature.contains("secure: bool = true"),
+            "signature missing bool default: {}",
+            f.signature
+        );
+
+        // The structured param docs should carry the default values.
+        let port = f.params.iter().find(|p| p.name == "port").unwrap();
+        assert_eq!(port.default_value.as_deref(), Some("8080"));
+        let secure = f.params.iter().find(|p| p.name == "secure").unwrap();
+        assert_eq!(secure.default_value.as_deref(), Some("true"));
+        let host = f.params.iter().find(|p| p.name == "host").unwrap();
+        assert_eq!(host.default_value, None);
+    }
+
+    #[test]
+    fn renders_string_and_array_defaults() {
+        let source = "\
+pub fn make(label: string = \"none\", tags: list = []) {
+}
+";
+        let module = extract_docs("test.li", source).expect("extraction failed");
+        let f = func_doc(&module, "make");
+        let label = f.params.iter().find(|p| p.name == "label").unwrap();
+        assert_eq!(label.default_value.as_deref(), Some("\"none\""));
+        let tags = f.params.iter().find(|p| p.name == "tags").unwrap();
+        assert_eq!(tags.default_value.as_deref(), Some("[]"));
     }
 }
