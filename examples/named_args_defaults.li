@@ -1,0 +1,23 @@
+// Named arguments may skip parameters that have default values, even when the
+// skipped parameter sits in the *middle* of the parameter list. Each skipped
+// defaulted slot is filled with its declared default at the call site.
+
+fn f(a: int, b: int = 99, c: int = 7) {
+    println("${a} ${b} ${c}")
+}
+
+fn main() {
+    // Skip a MIDDLE default (b) via named args: a=2, c=1, b=<default 99>.
+    f(a: 2, c: 1) // @expect: 2 99 1
+
+    // All defaults applied (only the required positional arg given).
+    f(2) // @expect: 2 99 7
+
+    // Skip a trailing default (c), named args out of order.
+    f(b: 5, a: 2) // @expect: 2 5 7
+
+    // All named, reverse order.
+    f(c: 1, b: 2, a: 3) // @expect: 3 2 1
+}
+
+main()

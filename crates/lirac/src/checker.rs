@@ -291,6 +291,11 @@ pub struct TypeEnv {
     /// Maps function names to their declared parameter names (in declaration
     /// order). Used to resolve and reorder named arguments at call sites.
     fn_param_names: HashMap<String, Vec<String>>, // fn_name -> [param_name, ...]
+    /// Maps function names to a per-parameter flag indicating whether that
+    /// parameter has a default value (parallel to `fn_param_names`). Used so
+    /// named-argument resolution can tell whether a skipped slot is allowed
+    /// (defaulted) or a genuinely missing required parameter.
+    fn_param_defaults: HashMap<String, Vec<bool>>, // fn_name -> [has_default, ...]
     next_type_var: u32,
     structured_errors: Vec<CheckerError>,
 }
@@ -333,6 +338,7 @@ impl TypeEnv {
             trait_impls: HashMap::new(),
             generic_functions: HashMap::new(),
             fn_param_names: HashMap::new(),
+            fn_param_defaults: HashMap::new(),
             next_type_var: 0,
             structured_errors: Vec::new(),
         };
@@ -842,6 +848,18 @@ impl TypeEnv {
     /// Look up the declared parameter names for a function by name.
     pub fn fn_param_names(&self, name: &str) -> Option<&Vec<String>> {
         self.fn_param_names.get(name)
+    }
+
+    /// Record, per parameter (in declaration order), whether it has a default
+    /// value. Parallel to [`register_fn_param_names`].
+    pub fn register_fn_param_defaults(&mut self, name: &str, has_defaults: Vec<bool>) {
+        self.fn_param_defaults
+            .insert(name.to_string(), has_defaults);
+    }
+
+    /// Look up the per-parameter has-default flags for a function by name.
+    pub fn fn_param_defaults(&self, name: &str) -> Option<&Vec<bool>> {
+        self.fn_param_defaults.get(name)
     }
 
     pub fn has_errors(&self) -> bool {
@@ -1812,6 +1830,12 @@ impl TypeChecker {
             let param_names: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
             self.env.register_fn_param_names(name, param_names);
 
+            // Record which parameters have defaults so named-argument resolution
+            // can distinguish a legally-skipped defaulted slot from a missing
+            // required one.
+            let param_has_default: Vec<bool> = params.iter().map(|p| p.default.is_some()).collect();
+            self.env.register_fn_param_defaults(name, param_has_default);
+
             // Register generic function type parameters for monomorphization
             if !type_params.is_empty() {
                 let type_param_names: Vec<String> =
@@ -2118,12 +2142,21 @@ impl TypeChecker {
     /// returned so callers can fall back to source order for error recovery.
     ///
     /// `param_names` already excludes the implicit `self` for method calls.
+    /// `param_has_default[i]` indicates whether `param_names[i]` has a default
+    /// value (also excluding `self`); a skipped slot is only an error when its
+    /// parameter has no default.
+    ///
+    /// Returns one slot per parameter, in declaration order: `Some(arg)` when an
+    /// argument was supplied, `None` when the slot is left to its default. This
+    /// alignment lets the caller type-check each supplied argument against its
+    /// matched parameter, and lets codegen fill defaulted gaps.
     fn reorder_named_args<'a>(
         &mut self,
         args: &'a [crate::ast::Argument],
         param_names: &[String],
+        param_has_default: &[bool],
         span: &Span,
-    ) -> Option<Vec<&'a crate::ast::Argument>> {
+    ) -> Option<Vec<Option<&'a crate::ast::Argument>>> {
         // slots[i] holds the argument bound to param_names[i], if any.
         let mut slots: Vec<Option<&'a crate::ast::Argument>> = vec![None; param_names.len()];
         let mut ok = true;
@@ -2159,15 +2192,15 @@ impl TypeChecker {
             }
         }
 
-        // Every parameter that received an argument must form a contiguous
-        // prefix once reordered; a gap means a required parameter was skipped.
-        // Default-valued / optional params are allowed to remain unfilled and
-        // are handled by the existing arg-count check, so we only flag a gap
-        // that sits *before* a filled slot.
+        // A slot left empty is only an error when its parameter has no default;
+        // defaulted slots are filled by codegen (even in the middle of the list).
+        // Trailing empties beyond the last filled slot are likewise fine when
+        // defaulted, and otherwise caught by the arg-count check.
         let last_filled = slots.iter().rposition(|s| s.is_some());
         if let Some(last) = last_filled {
             for (idx, slot) in slots.iter().enumerate().take(last + 1) {
-                if slot.is_none() {
+                let has_default = param_has_default.get(idx).copied().unwrap_or(false);
+                if slot.is_none() && !has_default {
                     self.env.error(
                         span,
                         format!("Missing value for parameter '{}'", param_names[idx]),
@@ -2181,7 +2214,10 @@ impl TypeChecker {
             return None;
         }
 
-        Some(slots.into_iter().flatten().collect())
+        // Preserve full slot alignment (one entry per parameter) so the caller
+        // can match each supplied argument to its parameter and codegen can fill
+        // the defaulted gaps.
+        Some(slots)
     }
 
     fn check_expression(&mut self, expr: &Expression) -> Type {
@@ -2594,19 +2630,39 @@ impl TypeChecker {
                                 })
                             });
 
-                        // Reorder named arguments to positional order. Positional
-                        // args keep their slot; named args are matched by name.
-                        // Validation (unknown / duplicate / missing) is reported as
+                        // Per-parameter has-default flags, aligned with
+                        // `param_names` (self dropped for method calls).
+                        let param_has_default: Option<Vec<bool>> =
+                            function_name.as_ref().and_then(|fn_name| {
+                                self.env.fn_param_defaults(fn_name).map(|flags| {
+                                    if is_method_call && !flags.is_empty() {
+                                        flags[1..].to_vec()
+                                    } else {
+                                        flags.clone()
+                                    }
+                                })
+                            });
+
+                        // Reorder named arguments into declaration order. Each
+                        // entry is the argument bound to that parameter (or `None`
+                        // when the slot falls back to its default). Validation
+                        // (unknown / duplicate / missing-required) is reported as
                         // errors and we fall back to source order for recovery.
-                        let ordered_args: Vec<&crate::ast::Argument> = match &param_names {
-                            Some(names) if args.iter().any(|a| a.name.is_some()) => self
-                                .reorder_named_args(args, names, &expr.span)
-                                .unwrap_or_else(|| args.iter().collect()),
-                            _ => args.iter().collect(),
-                        };
+                        let ordered_slots: Vec<Option<&crate::ast::Argument>> =
+                            match (&param_names, &param_has_default) {
+                                (Some(names), Some(defaults))
+                                    if args.iter().any(|a| a.name.is_some()) =>
+                                {
+                                    self.reorder_named_args(args, names, defaults, &expr.span)
+                                        .unwrap_or_else(|| args.iter().map(Some).collect())
+                                }
+                                _ => args.iter().map(Some).collect(),
+                            };
 
                         let mut inferred_types = Vec::new();
-                        for (arg, param_type) in ordered_args.iter().zip(params_to_check.iter()) {
+                        for (slot, param_type) in ordered_slots.iter().zip(params_to_check.iter()) {
+                            // Defaulted (skipped) slots have no argument to check.
+                            let Some(arg) = slot else { continue };
                             let arg_type = self.check_expression(&arg.value);
                             if !arg_type.is_compatible_with(param_type) {
                                 self.env.record_error(CheckerError::TypeMismatchContext {

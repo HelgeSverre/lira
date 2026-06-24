@@ -634,14 +634,25 @@ impl CodeGenerator {
     }
 
     /// Rearrange call arguments into the callee's declared parameter order so
-    /// named arguments bind to the correct slots at runtime. Positional args
-    /// keep their index; named args are placed by matching the parameter name.
-    /// The type checker has already validated the names, so on any mismatch we
-    /// conservatively fall back to source order.
-    fn order_call_args<'a>(&self, callee: &Expression, args: &'a [Argument]) -> Vec<&'a Argument> {
-        // Nothing to do when there are no named arguments.
+    /// named arguments bind to the correct slots at runtime.
+    ///
+    /// Returns one slot per declared parameter: `Some(arg)` for a supplied
+    /// argument, `None` for a slot the caller skipped (which the caller fills
+    /// with that parameter's default — possibly in the *middle* of the list).
+    /// When there are no named args the result is simply the positional args in
+    /// source order, so trailing-default handling stays unchanged.
+    ///
+    /// The type checker has already validated names and required params, so on
+    /// any structural mismatch we conservatively fall back to source order.
+    fn order_call_args<'a>(
+        &self,
+        callee: &Expression,
+        args: &'a [Argument],
+    ) -> Vec<Option<&'a Argument>> {
+        // Nothing to reorder when there are no named arguments: keep source
+        // order and let trailing-default appending handle the rest.
         if !args.iter().any(|a| a.name.is_some()) {
-            return args.iter().collect();
+            return args.iter().map(Some).collect();
         }
 
         let param_names = match &callee.kind {
@@ -649,23 +660,32 @@ impl CodeGenerator {
             _ => None,
         };
 
+        let fallback = || args.iter().map(Some).collect::<Vec<_>>();
+
         let Some(param_names) = param_names else {
-            return args.iter().collect();
+            return fallback();
         };
 
         let mut slots: Vec<Option<&'a Argument>> = vec![None; param_names.len()];
         for (pos, arg) in args.iter().enumerate() {
             match &arg.name {
                 None if pos < slots.len() => slots[pos] = Some(arg),
-                None => return args.iter().collect(), // excess positional; bail
+                None => return fallback(), // excess positional; bail
                 Some(name) => match param_names.iter().position(|p| p == name) {
                     Some(idx) if slots[idx].is_none() => slots[idx] = Some(arg),
-                    _ => return args.iter().collect(), // unknown/dup; bail
+                    _ => return fallback(), // unknown/dup; bail
                 },
             }
         }
 
-        slots.into_iter().flatten().collect()
+        // Trim trailing empty (defaulted) slots so the trailing-default
+        // appending logic at the call site fills them, keeping a single code
+        // path for trailing defaults.
+        while matches!(slots.last(), Some(None)) {
+            slots.pop();
+        }
+
+        slots
     }
 
     fn define_local_type(&mut self, name: &str, type_name: &str) {
@@ -2436,15 +2456,41 @@ impl CodeGenerator {
                     // Reorder named arguments into positional (declaration) order
                     // so they bind to the correct parameter slots at runtime. The
                     // checker has already validated names; here we only rearrange.
-                    let ordered_args: Vec<&Argument> = self.order_call_args(callee, args);
+                    // `None` slots are parameters the caller skipped that have a
+                    // default (possibly in the middle of the list).
+                    let ordered_slots: Vec<Option<&Argument>> = self.order_call_args(callee, args);
 
-                    // Push arguments first
-                    for arg in &ordered_args {
-                        self.generate_expression(&arg.value);
+                    // Defaults for this callee, keyed by parameter index, used to
+                    // fill skipped middle slots and (below) trailing slots.
+                    let defaults: Option<Vec<(usize, Expression)>> = match &callee.kind {
+                        ExpressionKind::Identifier(fn_name) => {
+                            self.function_defaults.get(fn_name).cloned()
+                        }
+                        _ => None,
+                    };
+
+                    // Push arguments in parameter order, filling each skipped
+                    // (defaulted) middle slot with that parameter's default.
+                    for (idx, slot) in ordered_slots.iter().enumerate() {
+                        match slot {
+                            Some(arg) => self.generate_expression(&arg.value),
+                            None => {
+                                let default_expr = defaults
+                                    .as_ref()
+                                    .and_then(|ds| {
+                                        ds.iter().find(|(i, _)| *i == idx).map(|(_, e)| e.clone())
+                                    })
+                                    .expect(
+                                        "checker guarantees a skipped slot has a default value",
+                                    );
+                                self.generate_expression(&default_expr);
+                            }
+                        }
                     }
 
-                    // Check if we need to fill in default parameter values
-                    let mut total_args = ordered_args.len();
+                    // Fill in any *trailing* default parameter values that the
+                    // call omitted entirely (slots beyond `ordered_slots`).
+                    let mut total_args = ordered_slots.len();
                     if let ExpressionKind::Identifier(fn_name) = &callee.kind {
                         if let Some(defaults) = self.function_defaults.get(fn_name).cloned() {
                             // Find the expected param count
@@ -2452,7 +2498,7 @@ impl CodeGenerator {
                                 let expected_params = func.param_count as usize;
                                 // Generate code for missing default values
                                 for (param_idx, default_expr) in defaults {
-                                    if param_idx >= ordered_args.len()
+                                    if param_idx >= ordered_slots.len()
                                         && param_idx < expected_params
                                     {
                                         self.generate_expression(&default_expr);
