@@ -1,0 +1,20 @@
+// 'default' is usable as a normal identifier (not a reserved keyword).
+// @expect: 1
+// @expect: 2
+// @expect: 3
+
+fn default() -> int {
+    return 1
+}
+
+println(default())
+
+let default = 2
+println(default)
+
+struct Config {
+    default: int
+}
+
+let c = Config { default: 3 }
+println(c.default)

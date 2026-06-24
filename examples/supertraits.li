@@ -1,0 +1,16 @@
+// Supertraits: trait Ord: Eq { } parses and checks (erasure-lenient).
+// @expect: ok
+
+trait Eq {
+    fn eq(self, other: Self) -> bool
+}
+
+trait Ord: Eq {
+    fn cmp(self, other: Self) -> int
+}
+
+trait Hash: Eq + Ord {
+    fn hash(self) -> int
+}
+
+println("ok")

@@ -314,6 +314,11 @@ example_test!(test_sync_mutex_waitgroup, "sync_mutex_waitgroup.li");
 example_test!(test_sync_semaphore, "sync_semaphore.li");
 example_test!(test_sync_with_closure, "sync_with_closure.li");
 
+// Parser/lexer gaps: turbofish, free 'default' identifier, supertraits
+example_test!(test_turbofish, "turbofish.li");
+example_test!(test_default_identifier, "default_identifier.li");
+example_test!(test_supertraits, "supertraits.li");
+
 // =============================================================================
 // Aggregate test that runs all examples
 // =============================================================================

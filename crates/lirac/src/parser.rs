@@ -33,6 +33,9 @@ pub struct Parser {
     node_id: NodeIdGen,
     /// Current expression-parsing recursion depth (guards against stack overflow)
     depth: usize,
+    /// Explicit type arguments parsed from a turbofish (`foo::<int>`) that a
+    /// following call (`(...)`) should consume. Type args are erased at runtime.
+    pending_type_args: Vec<TypeExpr>,
 }
 
 impl Parser {
@@ -44,7 +47,27 @@ impl Parser {
             panic_mode: false,
             node_id: NodeIdGen::new(),
             depth: 0,
+            pending_type_args: Vec::new(),
         }
+    }
+
+    /// Parse a turbofish type-argument list `< Type (, Type)* >`.
+    /// Assumes the leading `::` has already been consumed and the current
+    /// token is `<`.
+    fn parse_turbofish_args(&mut self) -> Result<Vec<TypeExpr>, String> {
+        self.consume(&TokenKind::Lt, "Expected '<' in turbofish")?;
+        let mut args = Vec::new();
+        loop {
+            args.push(self.type_expr()?);
+            if !self.match_token(&TokenKind::Comma) {
+                break;
+            }
+        }
+        self.consume(
+            &TokenKind::Gt,
+            "Expected '>' after turbofish type arguments",
+        )?;
+        Ok(args)
     }
 
     /// Record an error and enter panic mode
@@ -866,7 +889,16 @@ impl Parser {
             Vec::new()
         };
 
-        // TODO: Parse supertraits: trait Ord: Eq { }
+        // Parse optional supertraits: trait Ord: Eq + Clone { }
+        let supertraits = if self.match_token(&TokenKind::Colon) {
+            let mut supers = vec![self.expect_type_name("Expected supertrait name")?];
+            while self.match_token(&TokenKind::Plus) {
+                supers.push(self.expect_type_name("Expected supertrait name after '+'")?);
+            }
+            supers
+        } else {
+            Vec::new()
+        };
 
         self.consume(&TokenKind::LBrace, "Expected '{' after trait name")?;
 
@@ -937,6 +969,7 @@ impl Parser {
             StatementKind::TraitDecl {
                 name,
                 type_params,
+                supertraits,
                 methods,
                 is_public,
             },
@@ -1478,8 +1511,23 @@ impl Parser {
             TokenKind::Identifier(name) => {
                 let name = name.clone();
 
-                // Check if this is an enum variant: Name::Variant
+                // Check for `::` — either a turbofish (`foo::<int>`) or an
+                // enum variant access (`Color::Red`).
                 if self.check(&TokenKind::ColonColon) {
+                    // Turbofish: `Name::<T, ...>`. The type args are erased at
+                    // runtime; we stash them so a following call can record them.
+                    if matches!(self.tokens[self.current + 1].kind, TokenKind::Lt) {
+                        self.advance(); // consume ::
+                        let type_args = self.parse_turbofish_args()?;
+                        if self.check(&TokenKind::LParen) {
+                            // Generic call: hand the type args to the infix `(`.
+                            self.pending_type_args = type_args;
+                        }
+                        // For a bare path turbofish (`Vec::<int>` with no call),
+                        // the args are simply erased.
+                        return Ok(self.expr(ExpressionKind::Identifier(name), span));
+                    }
+
                     self.advance(); // consume ::
                     let variant_name =
                         self.expect_identifier("Expected variant name after '::'")?;
@@ -1687,12 +1735,15 @@ impl Parser {
 
             // Call (with named argument support)
             TokenKind::LParen => {
+                // Pick up any turbofish type args parsed for the callee
+                // (`foo::<int>(...)`). Type args are erased at runtime.
+                let type_args = std::mem::take(&mut self.pending_type_args);
                 let args = self.parse_call_arguments()?;
                 self.consume(&TokenKind::RParen, "Expected ')' after arguments")?;
                 Ok(self.expr(
                     ExpressionKind::Call {
                         callee: Box::new(left),
-                        type_args: Vec::new(), // TODO: Parse turbofish syntax ::<T>
+                        type_args,
                         args,
                     },
                     span,
@@ -1715,6 +1766,17 @@ impl Parser {
             // Field access
             TokenKind::Dot => {
                 let field = self.expect_identifier("Expected field name")?;
+                // Method-call turbofish: `obj.method::<int>(...)`. Stash the
+                // type args for the following call to consume (erased at runtime).
+                if self.check(&TokenKind::ColonColon)
+                    && matches!(self.tokens[self.current + 1].kind, TokenKind::Lt)
+                {
+                    self.advance(); // consume ::
+                    let type_args = self.parse_turbofish_args()?;
+                    if self.check(&TokenKind::LParen) {
+                        self.pending_type_args = type_args;
+                    }
+                }
                 Ok(self.expr(
                     ExpressionKind::FieldAccess {
                         object: Box::new(left),

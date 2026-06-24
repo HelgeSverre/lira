@@ -85,7 +85,6 @@ pub enum TokenKind {
     Return,
     When,
     Case,
-    Default,
     // Type keywords
     IntType,
     FloatType,
@@ -352,7 +351,8 @@ impl<'a> Lexer<'a> {
             "return" => TokenKind::Return,
             "when" => TokenKind::When,
             "case" => TokenKind::Case,
-            "default" => TokenKind::Default,
+            // 'default' is intentionally NOT a keyword: it lexes as an
+            // identifier so `fn default()`, `let default`, `obj.default` work.
             // Type keywords
             "int" => TokenKind::IntType,
             "float" => TokenKind::FloatType,

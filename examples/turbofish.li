@@ -1,0 +1,14 @@
+// Turbofish ::<T> explicit type arguments
+// Type args are erased at runtime; this just verifies parsing + execution.
+// @expect: 5
+// @expect: hello
+
+fn identity<T>(x: T) -> T {
+    return x
+}
+
+let x = identity::<int>(5)
+println(x)
+
+let s = identity::<string>("hello")
+println(s)

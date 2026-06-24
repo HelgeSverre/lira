@@ -1484,6 +1484,7 @@ impl TypeChecker {
             StatementKind::TraitDecl {
                 name,
                 type_params: _,
+                supertraits: _,
                 methods,
                 is_public: _,
             } => {

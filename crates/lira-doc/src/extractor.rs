@@ -240,6 +240,7 @@ fn build_module_doc(
             StatementKind::TraitDecl {
                 name,
                 type_params,
+                supertraits: _,
                 methods,
                 is_public,
             } => {

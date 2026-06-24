@@ -145,6 +145,9 @@ pub enum StatementKind {
     TraitDecl {
         name: String,
         type_params: Vec<TypeParam>,
+        /// Supertraits required by this trait (e.g. `trait Ord: Eq + Clone`).
+        /// Treated leniently under runtime type erasure.
+        supertraits: Vec<String>,
         methods: Vec<TraitMethod>,
         is_public: bool,
     },
