@@ -5,7 +5,7 @@
 
 use crate::ast::*;
 use crate::errors::{CheckerError, IntContext, TypeContext};
-use crate::ids::SymbolId;
+use crate::ids::{NodeId, SymbolId};
 use crate::sema::SemanticTables;
 use std::collections::{HashMap, HashSet};
 
@@ -251,6 +251,9 @@ impl Type {
 /// Symbol table entry
 #[derive(Debug, Clone)]
 pub struct Symbol {
+    /// Stable identity for this binding, used to group references across uses
+    /// and scopes. Assigned by [`TypeEnv::define`].
+    pub id: SymbolId,
     pub name: String,
     pub ty: Type,
     pub mutable: bool,
@@ -298,6 +301,9 @@ pub struct TypeEnv {
     fn_param_defaults: HashMap<String, Vec<bool>>, // fn_name -> [has_default, ...]
     next_type_var: u32,
     structured_errors: Vec<CheckerError>,
+    /// Counter for minting unique [`SymbolId`]s for every binding defined in
+    /// this environment (including builtins).
+    next_symbol_id: u32,
 }
 
 /// Type definition for user-defined types
@@ -341,6 +347,7 @@ impl TypeEnv {
             fn_param_defaults: HashMap::new(),
             next_type_var: 0,
             structured_errors: Vec::new(),
+            next_symbol_id: 0,
         };
 
         // Add built-in types
@@ -378,6 +385,7 @@ impl TypeEnv {
 
         let mut reg = |name: &str, params: Vec<Type>, ret: Type, required: usize| {
             env.define(Symbol {
+                id: SymbolId(0), // assigned by `define`
                 name: name.to_string(),
                 ty: Type::Function {
                     params,
@@ -688,10 +696,17 @@ impl TypeEnv {
         self.scopes.pop();
     }
 
-    pub fn define(&mut self, symbol: Symbol) {
+    /// Define a binding in the innermost scope, assigning it a fresh stable
+    /// [`SymbolId`]. The assigned id is returned so callers can record a
+    /// declaration entry in the semantic tables.
+    pub fn define(&mut self, mut symbol: Symbol) -> SymbolId {
+        let id = SymbolId(self.next_symbol_id);
+        self.next_symbol_id += 1;
+        symbol.id = id;
         if let Some(scope) = self.scopes.last_mut() {
             scope.insert(symbol.name.clone(), symbol);
         }
+        id
     }
 
     pub fn lookup(&self, name: &str) -> Option<&Symbol> {
@@ -1021,8 +1036,6 @@ pub struct TypeChecker {
     pub generic_instantiations: HashSet<GenericInstantiation>,
     /// Semantic tables being built during checking
     pub sema: SemanticTables,
-    /// Counter for generating unique SymbolIds
-    next_symbol_id: u32,
 }
 
 impl TypeChecker {
@@ -1035,15 +1048,31 @@ impl TypeChecker {
             current_type_params: HashMap::new(),
             generic_instantiations: HashSet::new(),
             sema: SemanticTables::new(),
-            next_symbol_id: 0,
         }
     }
 
-    /// Generate a new unique SymbolId
-    fn next_symbol_id(&mut self) -> SymbolId {
-        let id = SymbolId(self.next_symbol_id);
-        self.next_symbol_id += 1;
-        id
+    /// Record a declaration in the semantic tables: insert the symbol entry and
+    /// link the declaration node to the binding so a cursor *on the declaration*
+    /// resolves to the same id as its uses.
+    fn record_decl(
+        &mut self,
+        id: SymbolId,
+        name: &str,
+        ty: Type,
+        kind: crate::sema::SymbolKind,
+        decl_node: NodeId,
+    ) {
+        self.sema.symbols.insert(
+            id,
+            crate::sema::SymbolEntry {
+                id,
+                name: name.to_string(),
+                ty,
+                kind,
+                decl_node,
+            },
+        );
+        self.sema.symbol_refs.insert(decl_node, id);
     }
 
     /// Get the bounds for a type parameter, if it exists
@@ -1815,16 +1844,27 @@ impl TypeChecker {
             self.current_type_params = old_type_params;
 
             // Register the function in the environment
-            self.env.define(Symbol {
+            let fn_ty = Type::Function {
+                params: param_types,
+                return_type: Box::new(ret_type),
+                required_params: required_count,
+            };
+            let sym_id = self.env.define(Symbol {
+                id: SymbolId(0),
                 name: name.clone(),
-                ty: Type::Function {
-                    params: param_types,
-                    return_type: Box::new(ret_type),
-                    required_params: required_count,
-                },
+                ty: fn_ty.clone(),
                 mutable: false,
                 kind: SymbolKind::Function,
             });
+            // Link the `fn` declaration node so a cursor on the function name
+            // resolves to this binding (rename-on-definition).
+            self.record_decl(
+                sym_id,
+                name,
+                fn_ty,
+                crate::sema::SymbolKind::Function,
+                stmt.id,
+            );
 
             // Record parameter names so call sites can resolve named arguments.
             let param_names: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
@@ -1903,12 +1943,20 @@ impl TypeChecker {
                     }
                 }
 
-                self.env.define(Symbol {
+                let sym_id = self.env.define(Symbol {
+                    id: SymbolId(0),
                     name: name.clone(),
-                    ty: init_type,
+                    ty: init_type.clone(),
                     mutable: false,
                     kind: SymbolKind::Variable,
                 });
+                self.record_decl(
+                    sym_id,
+                    name,
+                    init_type,
+                    crate::sema::SymbolKind::Constant,
+                    stmt.id,
+                );
             }
 
             StatementKind::FnDecl {
@@ -1963,12 +2011,20 @@ impl TypeChecker {
 
                 // Add parameters to scope
                 for (param, param_type) in params.iter().zip(param_types.iter()) {
-                    self.env.define(Symbol {
+                    let sym_id = self.env.define(Symbol {
+                        id: SymbolId(0),
                         name: param.name.clone(),
                         ty: param_type.clone(),
                         mutable: false,
                         kind: SymbolKind::Parameter,
                     });
+                    self.record_decl(
+                        sym_id,
+                        &param.name,
+                        param_type.clone(),
+                        crate::sema::SymbolKind::Parameter,
+                        param.id,
+                    );
                 }
 
                 let prev_return = self.current_function_return_type.take();
@@ -2067,12 +2123,20 @@ impl TypeChecker {
                 self.in_loop = true;
                 self.env.push_scope();
 
-                self.env.define(Symbol {
+                let sym_id = self.env.define(Symbol {
+                    id: SymbolId(0),
                     name: variable.clone(),
-                    ty: elem_type,
+                    ty: elem_type.clone(),
                     mutable: false,
                     kind: SymbolKind::Variable,
                 });
+                self.record_decl(
+                    sym_id,
+                    variable,
+                    elem_type,
+                    crate::sema::SymbolKind::Variable,
+                    stmt.id,
+                );
 
                 self.check_block(body);
                 self.env.pop_scope();
@@ -2262,19 +2326,13 @@ impl TypeChecker {
                 }
 
                 if let Some(symbol) = self.env.lookup(name) {
+                    // Record this identifier *use* as a reference to the
+                    // binding it resolves to. The declaration site already
+                    // inserted the `symbols` entry; here we only link the use
+                    // node to the binding's stable id so that all uses of one
+                    // binding share an id (scope-aware references/rename).
+                    let sym_id = symbol.id;
                     let sym_ty = symbol.ty.clone();
-                    // Record the symbol reference
-                    let sym_id = self.next_symbol_id();
-                    self.sema.symbols.insert(
-                        sym_id,
-                        crate::sema::SymbolEntry {
-                            id: sym_id,
-                            name: name.clone(),
-                            ty: sym_ty.clone(),
-                            kind: crate::sema::SymbolKind::Variable,
-                            decl_node: expr.id,
-                        },
-                    );
                     self.sema.symbol_refs.insert(expr.id, sym_id);
                     sym_ty
                 } else if let Some(type_def) = self.env.lookup_type(name) {
@@ -2833,12 +2891,20 @@ impl TypeChecker {
                     .iter()
                     .map(|p| {
                         let ty = self.resolve_type_expr(&p.type_ann);
-                        self.env.define(Symbol {
+                        let sym_id = self.env.define(Symbol {
+                            id: SymbolId(0),
                             name: p.name.clone(),
                             ty: ty.clone(),
                             mutable: false,
                             kind: SymbolKind::Parameter,
                         });
+                        self.record_decl(
+                            sym_id,
+                            &p.name,
+                            ty.clone(),
+                            crate::sema::SymbolKind::Parameter,
+                            p.id,
+                        );
                         ty
                     })
                     .collect();
@@ -3062,7 +3128,12 @@ impl TypeChecker {
                         SelectArmKind::Recv { channel, variable } => {
                             self.check_expression(channel);
                             if let Some(name) = variable {
+                                // The recv binder has no dedicated AST node, so
+                                // we cannot record a declaration site. Uses
+                                // inside the arm body still resolve to this id
+                                // via the identifier-use path.
                                 self.env.define(Symbol {
+                                    id: SymbolId(0),
                                     name: name.clone(),
                                     ty: Type::Any,
                                     mutable: false,
@@ -3345,12 +3416,20 @@ impl TypeChecker {
         match &pattern.kind {
             PatternKind::Variable(name) => {
                 // Bind the variable to the subject type
-                self.env.define(Symbol {
+                let sym_id = self.env.define(Symbol {
+                    id: SymbolId(0),
                     name: name.clone(),
                     ty: subject_type.clone(),
                     mutable: false,
                     kind: SymbolKind::Variable,
                 });
+                self.record_decl(
+                    sym_id,
+                    name,
+                    subject_type.clone(),
+                    crate::sema::SymbolKind::Variable,
+                    pattern.id,
+                );
             }
             PatternKind::Wildcard => {
                 // Wildcard doesn't bind any variables
@@ -3358,15 +3437,27 @@ impl TypeChecker {
             PatternKind::Literal(_) => {
                 // Literals don't bind variables
             }
-            PatternKind::Binding { name, pattern } => {
-                // Bind the name and recurse for inner pattern
-                self.env.define(Symbol {
+            PatternKind::Binding {
+                name,
+                pattern: inner,
+            } => {
+                // Bind the name and recurse for inner pattern. The outer
+                // pattern node's span starts at the bound name.
+                let sym_id = self.env.define(Symbol {
+                    id: SymbolId(0),
                     name: name.clone(),
                     ty: subject_type.clone(),
                     mutable: false,
                     kind: SymbolKind::Variable,
                 });
-                self.bind_pattern_variables(pattern, subject_type);
+                self.record_decl(
+                    sym_id,
+                    name,
+                    subject_type.clone(),
+                    crate::sema::SymbolKind::Variable,
+                    pattern.id,
+                );
+                self.bind_pattern_variables(inner, subject_type);
             }
             PatternKind::Tuple(patterns) => {
                 // For tuple patterns, each element binds to the corresponding tuple element type
@@ -3412,12 +3503,20 @@ impl TypeChecker {
     ) {
         match &pattern.kind {
             PatternKind::Variable(name) => {
-                self.env.define(Symbol {
+                let sym_id = self.env.define(Symbol {
+                    id: SymbolId(0),
                     name: name.clone(),
                     ty: subject_type.clone(),
                     mutable,
                     kind: SymbolKind::Variable,
                 });
+                self.record_decl(
+                    sym_id,
+                    name,
+                    subject_type.clone(),
+                    crate::sema::SymbolKind::Variable,
+                    pattern.id,
+                );
             }
             PatternKind::Wildcard => {
                 // Wildcard doesn't bind any variables
@@ -6976,6 +7075,126 @@ mod tests {
         assert!(
             !checked.sema.symbols.is_empty(),
             "Symbols should be recorded after checking variable references"
+        );
+    }
+
+    #[test]
+    fn test_sema_repeated_uses_share_one_symbol_id() {
+        // Multiple uses of one binding must resolve to the same SymbolId so
+        // references can be grouped.
+        let source = r#"
+            let x = 1
+            let a = x
+            let b = x
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let ast = parse(&tokens).unwrap();
+        let checked = check(&ast).unwrap();
+
+        let use_id = |stmt_idx: usize| {
+            if let StatementKind::VarDecl {
+                initializer: Some(init),
+                ..
+            } = &checked.program.statements[stmt_idx].kind
+            {
+                *checked
+                    .sema
+                    .symbol_refs
+                    .get(&init.id)
+                    .expect("use should resolve to a symbol")
+            } else {
+                panic!("expected VarDecl");
+            }
+        };
+
+        assert_eq!(use_id(1), use_id(2), "both uses of x share one SymbolId");
+    }
+
+    #[test]
+    fn test_sema_shadowing_distinct_symbol_ids() {
+        // An inner shadowing binding must get a distinct SymbolId from the
+        // outer same-named binding, and its uses must resolve to the inner one.
+        let source = r#"
+            let x = 1
+            fn f() -> int {
+                let x = 2
+                return x
+            }
+            let y = x
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let ast = parse(&tokens).unwrap();
+        let checked = check(&ast).unwrap();
+
+        // Outer use: `let y = x`
+        let outer_use = if let StatementKind::VarDecl {
+            initializer: Some(init),
+            ..
+        } = &checked.program.statements[2].kind
+        {
+            *checked.sema.symbol_refs.get(&init.id).unwrap()
+        } else {
+            panic!("expected VarDecl");
+        };
+
+        // Inner use: `return x` inside f
+        let inner_use =
+            if let StatementKind::FnDecl { body, .. } = &checked.program.statements[1].kind {
+                let ret = body.statements.last().unwrap();
+                if let StatementKind::Return(Some(e)) = &ret.kind {
+                    *checked.sema.symbol_refs.get(&e.id).unwrap()
+                } else {
+                    panic!("expected return");
+                }
+            } else {
+                panic!("expected FnDecl");
+            };
+
+        assert_ne!(
+            outer_use, inner_use,
+            "shadowed bindings must have distinct SymbolIds"
+        );
+    }
+
+    #[test]
+    fn test_sema_decl_node_points_at_declaration() {
+        // The symbol entry's decl_node must be the declaration's pattern node,
+        // and a cursor on the declaration (via symbol_refs at the decl node)
+        // must resolve to the same SymbolId as the uses.
+        let source = r#"
+            let x = 1
+            let a = x
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let ast = parse(&tokens).unwrap();
+        let checked = check(&ast).unwrap();
+
+        // decl pattern node of `let x`
+        let decl_node =
+            if let StatementKind::VarDecl { pattern, .. } = &checked.program.statements[0].kind {
+                pattern.id
+            } else {
+                panic!("expected VarDecl");
+            };
+
+        // use node in `let a = x`
+        let use_node = if let StatementKind::VarDecl {
+            initializer: Some(init),
+            ..
+        } = &checked.program.statements[1].kind
+        {
+            init.id
+        } else {
+            panic!("expected VarDecl");
+        };
+
+        let decl_sym = *checked.sema.symbol_refs.get(&decl_node).unwrap();
+        let use_sym = *checked.sema.symbol_refs.get(&use_node).unwrap();
+        assert_eq!(decl_sym, use_sym, "decl and use share one SymbolId");
+        assert_eq!(
+            checked.sema.symbols.get(&decl_sym).unwrap().decl_node,
+            decl_node,
+            "symbol entry decl_node points at the declaration pattern"
         );
     }
 

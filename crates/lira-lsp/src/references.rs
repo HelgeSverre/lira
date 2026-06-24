@@ -1,222 +1,156 @@
-//! Find references support for Lira
+//! Find references support for Lira.
 //!
-//! Finds all references to a symbol across the document.
+//! Scope-aware: resolves the binding under the cursor to a stable `SymbolId`
+//! (via the type checker's [`SemanticTables`](lirac::sema)) and returns every
+//! node bound to that same symbol. Same-named identifiers in unrelated scopes
+//! are never conflated.
 
-use crate::utils::{self, get_regex};
+use crate::sema_refs;
 use tower_lsp::lsp_types::*;
 
-/// Find all references to the symbol at the given position
+/// Find all references to the symbol at the given position.
+///
+/// Returns an empty vector when the buffer fails to parse or the cursor is not
+/// on a resolvable binding (e.g. a keyword, a struct field, or whitespace), so
+/// the editor stays responsive.
 pub fn find_references(
     uri: &Url,
     content: &str,
     position: Position,
     include_declaration: bool,
 ) -> Vec<Location> {
-    let lines: Vec<&str> = content.lines().collect();
-    let line_idx = position.line as usize;
+    let analysis = match lirac::analyze(content) {
+        Ok(a) => a,
+        Err(_) => return vec![],
+    };
 
-    if line_idx >= lines.len() {
-        return vec![];
-    }
-
-    let line = lines[line_idx];
-    let col = position.character as usize;
-
-    // Get the word at the cursor
-    let word_info = match utils::get_word_at_position(line, col) {
-        Some(w) => w,
+    let sym_id = match sema_refs::resolve_symbol_at(&analysis, content, position) {
+        Some(id) => id,
         None => return vec![],
     };
 
-    // Find all occurrences of this word as an identifier
-    find_all_references(uri, content, &word_info.text, include_declaration)
-}
-
-fn find_all_references(
-    uri: &Url,
-    content: &str,
-    symbol: &str,
-    include_declaration: bool,
-) -> Vec<Location> {
-    let mut references = Vec::new();
-
-    // Pattern to match the symbol as a whole word (identifier)
-    let pattern = format!(r"\b{}\b", regex::escape(symbol));
-    let re = match get_regex(&pattern) {
-        Some(r) => r,
-        None => return references,
-    };
-
-    // Patterns for definitions (to optionally exclude them)
-    let def_patterns = [
-        format!(r"fn\s+{}\s*[<(]", regex::escape(symbol)),
-        format!(r"struct\s+{}\s*[<{{]", regex::escape(symbol)),
-        format!(r"class\s+{}\s*[<{{]", regex::escape(symbol)),
-        format!(r"enum\s+{}\s*[<{{]", regex::escape(symbol)),
-        format!(r"trait\s+{}\s*[<{{]", regex::escape(symbol)),
-        format!(r"type\s+{}\s*[<=]", regex::escape(symbol)),
-        format!(r"(?:let|var|const)\s+{}\s*[=:]", regex::escape(symbol)),
-    ];
-
-    let def_regexes: Vec<_> = def_patterns
-        .iter()
-        .filter_map(|p| get_regex(p))
-        .collect();
-
-    for (line_idx, line) in content.lines().enumerate() {
-        // Check if this line is a definition
-        let is_definition = def_regexes.iter().any(|r| r.is_match(line));
-
-        // Skip definitions if not including them
-        if is_definition && !include_declaration {
-            continue;
-        }
-
-        // Find all matches in the line
-        for m in re.find_iter(line) {
-            // Skip if it's inside a string or comment
-            if utils::is_in_string_or_comment(line, m.start()) {
-                continue;
-            }
-
-            // Convert byte positions to character positions for UTF-8
-            let char_start = utils::byte_offset_to_char_col(line, m.start());
-            let char_end = utils::byte_offset_to_char_col(line, m.end());
-
-            references.push(Location {
-                uri: uri.clone(),
-                range: Range {
-                    start: Position {
-                        line: line_idx as u32,
-                        character: char_start as u32,
-                    },
-                    end: Position {
-                        line: line_idx as u32,
-                        character: char_end as u32,
-                    },
-                },
-            });
-        }
-    }
-
-    references
+    sema_refs::collect_symbol_ranges(&analysis, content, sym_id, include_declaration)
+        .into_iter()
+        .map(|range| Location {
+            uri: uri.clone(),
+            range,
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn uri() -> Url {
+        Url::parse("file:///test.li").unwrap()
+    }
+
+    fn pos(line: u32, character: u32) -> Position {
+        Position { line, character }
+    }
+
     #[test]
     fn test_find_function_references() {
-        let content = r#"
-fn add(a: int, b: int) -> int {
-    a + b
-}
-
-fn main() {
-    let x = add(1, 2)
-    let y = add(3, 4)
-    println(add(x, y))
-}
-"#;
-        let uri = Url::parse("file:///test.li").unwrap();
-        let refs = find_all_references(&uri, content, "add", true);
-
-        // Should find: definition + 3 usages = 4
+        let content = "fn add(a: int, b: int) -> int {\n    a + b\n}\n\nfn main() {\n    let x = add(1, 2)\n    let y = add(3, 4)\n    println(add(x, y))\n}\n";
+        // Cursor on the `add` call site at line 5 (0-indexed), col 12.
+        let refs = find_references(&uri(), content, pos(5, 12), true);
+        // Definition + 3 call sites = 4.
         assert_eq!(refs.len(), 4);
     }
 
     #[test]
     fn test_find_references_exclude_declaration() {
-        let content = r#"
-fn foo() {
-    bar()
-}
-
-fn bar() {
-    foo()
-}
-"#;
-        let uri = Url::parse("file:///test.li").unwrap();
-        let refs = find_all_references(&uri, content, "foo", false);
-
-        // Should find only the usage in bar(), not the definition
-        assert_eq!(refs.len(), 1);
-    }
-
-    #[test]
-    fn test_skip_string_content() {
-        let content = r#"
-fn test() {
-    println("test is a word")
-    test()
-}
-"#;
-        let uri = Url::parse("file:///test.li").unwrap();
-        let refs = find_all_references(&uri, content, "test", true);
-
-        // Should find definition and call, but NOT the string content
+        let content = "fn add(a: int, b: int) -> int {\n    a + b\n}\n\nfn main() {\n    let x = add(1, 2)\n    let y = add(3, 4)\n}\n";
+        let refs = find_references(&uri(), content, pos(5, 12), false);
+        // Only the two call sites, not the definition.
         assert_eq!(refs.len(), 2);
     }
 
     #[test]
-    fn test_skip_comments() {
-        let content = r#"
-fn foo() {
-    // call foo here
-    bar()
-}
-"#;
-        let uri = Url::parse("file:///test.li").unwrap();
-        let refs = find_all_references(&uri, content, "foo", true);
-
-        // Should find only definition, not the comment
-        assert_eq!(refs.len(), 1);
+    fn test_shadowed_inner_binding_excludes_outer() {
+        // Two distinct `x` bindings: an outer top-level one and an inner one
+        // inside `f`. Find-references on the inner `x` must return only the
+        // inner declaration + use, never the outer.
+        let content = "let x = 1\nfn f() -> int {\n    let x = 2\n    return x\n}\nlet y = x\n";
+        // Cursor on `return x` (line 3, col 11).
+        let inner = find_references(&uri(), content, pos(3, 11), true);
+        // Inner decl (`let x = 2`) + inner use (`return x`) = 2.
+        assert_eq!(inner.len(), 2);
+        // None of them is the outer `let x = 1` (line 0).
+        assert!(inner.iter().all(|loc| loc.range.start.line != 0));
+        assert!(inner.iter().all(|loc| loc.range.start.line != 5));
     }
 
     #[test]
-    fn test_unicode_references() {
-        let content = r#"
-fn main() {
-    let 变量 = 5
-    println(变量)
-    let x = 变量 + 1
-}
-"#;
-        let uri = Url::parse("file:///test.li").unwrap();
-        let refs = find_all_references(&uri, content, "变量", true);
+    fn test_outer_binding_excludes_inner() {
+        let content = "let x = 1\nfn f() -> int {\n    let x = 2\n    return x\n}\nlet y = x\n";
+        // Cursor on the outer use `let y = x` (line 5, col 8).
+        let outer = find_references(&uri(), content, pos(5, 8), true);
+        // Outer decl (line 0) + outer use (line 5) = 2.
+        assert_eq!(outer.len(), 2);
+        // Inner lines (2 = `let x = 2`, 3 = `return x`) are excluded.
+        assert!(outer.iter().all(|loc| loc.range.start.line != 2));
+        assert!(outer.iter().all(|loc| loc.range.start.line != 3));
+    }
 
-        // Should find: definition + 2 usages = 3
+    #[test]
+    fn test_parameter_references() {
+        let content = "fn add(a: int, b: int) -> int {\n    return a + a + b\n}\n";
+        // Cursor on parameter `a` declaration (line 0, col 7).
+        let refs = find_references(&uri(), content, pos(0, 7), true);
+        // Declaration + two uses of `a` = 3.
         assert_eq!(refs.len(), 3);
     }
 
     #[test]
-    fn test_skip_escaped_string() {
-        let content = r#"
-fn test() {
-    println("escaped \"test\" quote")
-    test()
-}
-"#;
-        let uri = Url::parse("file:///test.li").unwrap();
-        let refs = find_all_references(&uri, content, "test", true);
+    fn test_unicode_references() {
+        let content = "fn main() {\n    let 变量 = 5\n    println(变量)\n    let x = 变量 + 1\n}\n";
+        // Cursor on the declaration `let 变量` (line 1, col 8).
+        let refs = find_references(&uri(), content, pos(1, 8), true);
+        // Declaration + 2 uses = 3.
+        assert_eq!(refs.len(), 3);
+    }
 
-        // Should find definition and call, but NOT the string content
+    #[test]
+    fn test_keyword_yields_no_references() {
+        let content = "let x = 42\n";
+        // Cursor on `let`.
+        let refs = find_references(&uri(), content, pos(0, 0), true);
+        assert!(refs.is_empty());
+    }
+
+    #[test]
+    fn test_string_content_not_matched() {
+        // The word `test` appears inside a string but must not be treated as a
+        // reference to the function `test`.
+        let content = "fn test() {\n    println(\"test is a word\")\n    test()\n}\n";
+        // Cursor on the call `test()` (line 2, col 4).
+        let refs = find_references(&uri(), content, pos(2, 4), true);
+        // Definition + call = 2 (string occurrence excluded).
         assert_eq!(refs.len(), 2);
     }
 
     #[test]
-    fn test_skip_char_literal() {
-        let content = r#"
-fn main() {
-    let c = 'a'
-    let a = 5
-}
-"#;
-        let uri = Url::parse("file:///test.li").unwrap();
-        let refs = find_all_references(&uri, content, "a", true);
+    fn test_for_loop_variable_uses() {
+        let content = "fn main() {\n    for i in 0..3 {\n        println(i)\n    }\n}\n";
+        // Cursor on the use `println(i)` (line 2, col 16).
+        let refs = find_references(&uri(), content, pos(2, 16), false);
+        // At least the one use is found (decl range support for `for` is
+        // best-effort; uses must always resolve).
+        assert!(refs.iter().any(|loc| loc.range.start.line == 2));
+    }
 
-        // Should find only the variable 'a', not the char literal
-        assert_eq!(refs.len(), 1);
+    #[test]
+    fn test_lambda_parameter_scoped() {
+        // Two lambdas each bind `n`; a reference on one must not pull in the
+        // other.
+        let content = "fn main() {\n    let f = |n: int| n + 1\n    let g = |n: int| n + 2\n}\n";
+        // Cursor on `n` inside the first lambda body. Line 1:
+        // `    let f = |n: int| n + 1` — the body `n` is at col 21.
+        let refs = find_references(&uri(), content, pos(1, 21), true);
+        // Only occurrences on line 1, never line 2.
+        assert!(!refs.is_empty());
+        assert!(refs.iter().all(|loc| loc.range.start.line == 1));
     }
 }

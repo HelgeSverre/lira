@@ -2,7 +2,7 @@
 //!
 //! Provides symbol renaming across the document.
 
-use crate::references;
+use crate::sema_refs;
 use crate::utils;
 use std::collections::HashMap;
 use tower_lsp::lsp_types::*;
@@ -39,53 +39,38 @@ pub fn prepare_rename(content: &str, position: Position) -> Option<PrepareRename
     }))
 }
 
-/// Perform rename - return workspace edit with all changes
+/// Perform rename - return a workspace edit covering exactly the binding's
+/// declaration and every use, resolved scope-aware via the semantic tables.
+///
+/// Returns `None` when the new name is not a legal identifier, the buffer does
+/// not parse, or the cursor is not on a renameable binding.
 pub fn rename(
     uri: &Url,
     content: &str,
     position: Position,
     new_name: &str,
 ) -> Option<WorkspaceEdit> {
-    let lines: Vec<&str> = content.lines().collect();
-    let line_idx = position.line as usize;
-
-    if line_idx >= lines.len() {
-        return None;
-    }
-
-    let line = lines[line_idx];
-    let col = position.character as usize;
-
-    // Get the word at cursor
-    let word_info = utils::get_word_at_position(line, col)?;
-
-    // Check if this is a renameable symbol
-    if utils::is_keyword(&word_info.text) {
-        return None;
-    }
-
-    // Validate new name
+    // Validate the new name up front (legal identifier, not a keyword).
     if !is_valid_identifier(new_name) {
         return None;
     }
 
-    // Find all references to this symbol
-    let refs = references::find_references(uri, content, position, true);
+    let analysis = lirac::analyze(content).ok()?;
+    let sym_id = sema_refs::resolve_symbol_at(&analysis, content, position)?;
 
-    if refs.is_empty() {
+    let ranges = sema_refs::collect_symbol_ranges(&analysis, content, sym_id, true);
+    if ranges.is_empty() {
         return None;
     }
 
-    // Build text edits
-    let edits: Vec<TextEdit> = refs
+    let edits: Vec<TextEdit> = ranges
         .into_iter()
-        .map(|loc| TextEdit {
-            range: loc.range,
+        .map(|range| TextEdit {
+            range,
             new_text: new_name.to_string(),
         })
         .collect();
 
-    // Group edits by URI
     let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
     changes.insert(uri.clone(), edits);
 
@@ -178,48 +163,83 @@ mod tests {
         assert!(result.is_some());
     }
 
+    fn edits_for(uri: &Url, edit: &WorkspaceEdit) -> Vec<TextEdit> {
+        edit.changes.as_ref().unwrap().get(uri).unwrap().clone()
+    }
+
     #[test]
     fn test_rename() {
-        let content = r#"fn add(a: int, b: int) -> int {
-    a + b
-}
-
-fn main() {
-    let result = add(1, 2)
-    println(result)
-}
-"#;
+        let content = "fn add(a: int, b: int) -> int {\n    a + b\n}\n\nfn main() {\n    let result = add(1, 2)\n    println(result)\n}\n";
         let uri = Url::parse("file:///test.li").unwrap();
+        // On `add` in the call (line 5, col 17).
         let pos = Position {
             line: 5,
             character: 17,
-        }; // on "add" in call
+        };
 
-        let edit = rename(&uri, content, pos, "sum");
-        assert!(edit.is_some());
-
-        let edit = edit.unwrap();
-        let changes = edit.changes.unwrap();
-        let edits = changes.get(&uri).unwrap();
-
-        // Should have 2 edits: definition and call site
+        let edit = rename(&uri, content, pos, "sum").expect("rename produces an edit");
+        let edits = edits_for(&uri, &edit);
+        // Definition + call site = 2.
         assert_eq!(edits.len(), 2);
+        assert!(edits.iter().all(|e| e.new_text == "sum"));
+    }
+
+    #[test]
+    fn test_rename_only_targeted_binding() {
+        // Two distinct `x` bindings. Renaming the inner one must not touch the
+        // outer same-named binding.
+        let content = "let x = 1\nfn f() -> int {\n    let x = 2\n    return x\n}\nlet y = x\n";
+        let uri = Url::parse("file:///test.li").unwrap();
+        // On `return x` (line 3, col 11) — the inner binding.
+        let pos = Position {
+            line: 3,
+            character: 11,
+        };
+        let edit = rename(&uri, content, pos, "z").expect("rename produces an edit");
+        let edits = edits_for(&uri, &edit);
+        // Inner decl (line 2) + inner use (line 3) = 2.
+        assert_eq!(edits.len(), 2);
+        // Outer occurrences (lines 0 and 5) are untouched.
+        assert!(edits.iter().all(|e| e.range.start.line != 0));
+        assert!(edits.iter().all(|e| e.range.start.line != 5));
+    }
+
+    #[test]
+    fn test_rename_invalid_name_rejected() {
+        let content = "let foo = 42\nlet bar = foo\n";
+        let uri = Url::parse("file:///test.li").unwrap();
+        let pos = Position {
+            line: 0,
+            character: 4,
+        }; // on `foo`
+        assert!(rename(&uri, content, pos, "123abc").is_none());
+        assert!(rename(&uri, content, pos, "fn").is_none()); // keyword
+        assert!(rename(&uri, content, pos, "foo-bar").is_none());
+    }
+
+    #[test]
+    fn test_rename_keyword_position_yields_none() {
+        let content = "let x = 42\n";
+        let uri = Url::parse("file:///test.li").unwrap();
+        let pos = Position {
+            line: 0,
+            character: 0,
+        }; // on `let`
+        assert!(rename(&uri, content, pos, "y").is_none());
     }
 
     #[test]
     fn test_rename_unicode() {
-        let content = r#"fn main() {
-    let 变量 = 5
-    println(变量)
-}
-"#;
+        let content = "fn main() {\n    let 变量 = 5\n    println(变量)\n}\n";
         let uri = Url::parse("file:///test.li").unwrap();
+        // On the declaration `let 变量` (line 1, col 8).
         let pos = Position {
             line: 1,
             character: 8,
-        }; // on "变量"
-
-        let edit = rename(&uri, content, pos, "value");
-        assert!(edit.is_some());
+        };
+        let edit = rename(&uri, content, pos, "value").expect("rename produces an edit");
+        let edits = edits_for(&uri, &edit);
+        // Declaration + one use = 2.
+        assert_eq!(edits.len(), 2);
     }
 }

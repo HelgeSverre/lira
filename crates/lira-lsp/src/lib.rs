@@ -28,6 +28,7 @@ mod references;
 mod rename;
 mod selection_range;
 mod sema_index;
+mod sema_refs;
 mod semantic_tokens;
 mod signature_help;
 mod symbols;
