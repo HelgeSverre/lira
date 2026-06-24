@@ -166,7 +166,6 @@
   padding: var(--sp-2) var(--sp-3);
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
-  border-left-width: 3px;
   background: rgba(245, 245, 247, 0.02);
 }
 
@@ -174,18 +173,19 @@
   margin-bottom: 0;
 }
 
+/* The colored, uppercase micro-label carries the meaning — no accent bar. */
 .callout__label {
   display: block;
-  font-weight: 600;
-  font-size: var(--fs-small);
-  letter-spacing: 0.02em;
+  font-weight: 700;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
   margin-bottom: var(--sp-1);
 }
 
 /* Note — moss/green for neutral asides and tips. */
 .callout--note {
-  border-left-color: var(--moss);
-  background: rgba(122, 168, 116, 0.08);
+  background: rgba(122, 168, 116, 0.07);
 }
 .callout--note .callout__label {
   color: var(--moss);
@@ -193,8 +193,7 @@
 
 /* Warning / Not-yet-implemented — ember/red tint for honesty callouts. */
 .callout--warning {
-  border-left-color: var(--ember);
-  background: rgba(232, 90, 79, 0.08);
+  background: rgba(232, 90, 79, 0.07);
 }
 .callout--warning .callout__label {
   color: var(--ember);
