@@ -1,0 +1,20 @@
+// Control flow: if/else as a statement, while loops, and `match`
+// as an expression that yields a value.
+fn classify(n: int) -> string {
+    return match n {
+        0 => "zero",
+        _ => if n > 0 { "positive" } else { "negative" }
+    }
+}
+
+fn main() {
+    var i = 0
+    while i < 3 {
+        println("tick ${i}")
+        i = i + 1
+    }
+
+    println(classify(7))
+    println(classify(0))
+    println(classify(-2))
+}

@@ -1,0 +1,16 @@
+// Structs group named fields. Construct them with field: value,
+// and read fields back with dot access.
+struct Point {
+    x: int,
+    y: int,
+}
+
+fn manhattan(p: Point) -> int {
+    return abs(p.x) + abs(p.y)
+}
+
+fn main() {
+    let p = Point { x: 3, y: -4 }
+    println("x=${p.x} y=${p.y}")
+    println("distance=${manhattan(p)}")
+}

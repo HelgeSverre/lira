@@ -1,0 +1,17 @@
+// @expect-error
+// This match omits `Signal::Green` and has no wildcard, so the
+// checker rejects it at compile time — before any bytecode runs.
+enum Signal {
+    Red,
+    Amber,
+    Green
+}
+
+fn action(s: Signal) -> string {
+    return match s {
+        Signal::Red => "stop",
+        Signal::Amber => "slow"
+    }
+}
+
+println(action(Signal::Red))

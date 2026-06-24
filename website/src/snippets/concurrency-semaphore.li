@@ -1,0 +1,40 @@
+// A Semaphore bounds how many fibers run a section at once. Eight workers
+// share a Semaphore(2): each one bumps an "active" counter on entry and
+// records the running maximum, so we can prove concurrency never exceeds 2.
+import std.sync
+
+fn worker(sem: Semaphore, active: IntMutex, maxseen: IntMutex, wg: WaitGroup) {
+    sem.acquire()                 // blocks if 2 permits are already taken
+    let now = active.lock() + 1
+    active.unlock(now)
+    let mx = maxseen.lock()
+    if now > mx { maxseen.unlock(now) } else { maxseen.unlock(mx) }
+
+    fiber_yield()                 // give peers a chance to overlap
+    fiber_yield()
+
+    let a = active.lock()
+    active.unlock(a - 1)
+    sem.release()
+    wg.done()
+}
+
+fn main() {
+    let limit = 2
+    let sem = new_semaphore(limit)
+    let active = new_int_mutex(0)
+    let maxseen = new_int_mutex(0)
+    let wg = new_wait_group()
+
+    var i = 0
+    while i < 8 {
+        spawn worker(sem, active, maxseen, wg)
+        i = i + 1
+    }
+    wg.wait(8)
+
+    let mx = maxseen.lock()
+    maxseen.unlock(mx)
+    println("limit: ${limit}")
+    println("max concurrent: ${mx}")
+}

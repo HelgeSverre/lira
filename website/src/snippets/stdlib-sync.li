@@ -1,0 +1,28 @@
+import std.sync
+
+// Each worker increments the shared counter once, then signals done.
+fn worker(m: IntMutex, wg: WaitGroup) {
+    let v = m.lock()
+    m.unlock(v + 1)
+    wg.done()
+}
+
+fn main() {
+    let counter = new_int_mutex(0)
+    let wg = new_wait_group()
+
+    let n = 5
+    var i = 0
+    while i < n {
+        spawn worker(counter, wg)
+        i = i + 1
+    }
+
+    // Block until all n workers have finished.
+    wg.wait(n)
+
+    // No RAII in Lira, so locking is explicit: lock to read, unlock to release.
+    let total = counter.lock()
+    counter.unlock(total)
+    println(total)   // 5
+}

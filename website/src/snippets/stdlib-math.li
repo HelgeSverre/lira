@@ -1,0 +1,20 @@
+import std.math
+
+fn main() {
+    // Methods on int.
+    println((5).factorial())        // 120
+    println((10).fibonacci())       // 55
+    println((17).is_prime())        // true
+    println((-4).sign())            // -1
+
+    // Methods on float.
+    println((180.0).to_radians())   // 3.14159...
+
+    // Free functions for multi-argument math.
+    println(gcd(48, 36))            // 12
+    println(lcm(4, 6))              // 12
+    println(lerp(0.0, 10.0, 0.5))   // 5
+
+    // Constants are functions.
+    println(math_pi())              // 3.141592653589793
+}

@@ -1,0 +1,16 @@
+// recv(ch) BLOCKS until a value is available -- but as an EXPRESSION it
+// evaluates to an ok-bool (true while the channel is open), not the value.
+// So you cannot bind the received value this way:
+fn main() {
+    let ch = chan(1)
+    send(ch, 99)
+
+    let ok = recv(ch)          // ok is `true`, NOT 99
+    println("recv returned: ${ok}")
+
+    // To BIND the value, use a select arm -- that is the idiom.
+    send(ch, 99)
+    select {
+        v = <-ch => println("v is ${v}")
+    }
+}

@@ -1,0 +1,15 @@
+// spawn takes a function CALL and runs it on a new fiber.
+// Fibers are lightweight green threads scheduled by the VM.
+fn greet(name: string) {
+    println("hello from ${name}")
+}
+
+fn main() {
+    spawn greet("fiber A")
+    spawn greet("fiber B")
+
+    // The main fiber yields so the spawned fibers get a turn to run.
+    fiber_yield()
+    fiber_yield()
+    println("main is done")
+}

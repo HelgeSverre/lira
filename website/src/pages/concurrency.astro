@@ -1,0 +1,289 @@
+---
+import DocsLayout from "../layouts/DocsLayout.astro";
+import Code from "../components/Code.astro";
+---
+
+<DocsLayout
+  kicker="Concurrency"
+  title="Fibers, channels, and select"
+  lede="Lira's concurrency is Go-shaped: lightweight fibers that communicate over typed channels, coordinated with select. No async keywords, no callbacks — just sequential code on many fibers."
+>
+  <div class="prose">
+    <p>
+      Concurrency in Lira is built on three things you already saw on the
+      <a href="/">landing page</a>: <strong>fibers</strong> (cheap green threads
+      scheduled by the VM), <strong>channels</strong> (typed conduits that move
+      values between fibers), and <strong>select</strong> (the construct that
+      waits on several channel operations and runs whichever is ready). Put
+      together, they let you write programs that do several things at once
+      without locks-by-default or shared-memory guesswork.
+    </p>
+
+    <p>
+      Everything on this page is a real <code>.li</code> file in the repository,
+      verified to run with <code>lira run</code> before the site is built.
+    </p>
+
+    <h2>Spawning fibers</h2>
+    <p>
+      A fiber is started with <code>spawn</code>, which takes a
+      <em>function call</em> — not a block. The named function runs on a fresh
+      fiber; the spawning fiber continues immediately. The VM schedules fibers
+      cooperatively, and <code>fiber_yield()</code> hands control to other
+      runnable fibers.
+    </p>
+
+    <Code
+      file="website/src/snippets/concurrency-spawn.li"
+      filename="spawn.li"
+    />
+
+    <aside class="callout callout--note">
+      <span class="callout__label">Note</span>
+      <p>
+        <code>spawn func(args)</code> is a function <em>call</em>, evaluated on a
+        new fiber. There is no <code>spawn &#123; … &#125;</code> block form, and
+        <code>spawn</code> does not return a handle — fibers coordinate through
+        channels and <code>std.sync</code>, not return values.
+      </p>
+    </aside>
+
+    <h2>Channels</h2>
+    <p>
+      Channels carry typed values from one fiber to another. Create one with
+      <code>chan(n)</code> for a buffered channel that holds up to
+      <code>n</code> values, or <code>chan()</code> for an unbuffered channel
+      where each send rendezvous-pairs with a receive. A function that accepts a
+      channel declares its element type as <code>Channel&lt;T&gt;</code>.
+    </p>
+
+    <Code
+      file="website/src/snippets/concurrency-channels.li"
+      filename="channels.li"
+    />
+
+    <p>
+      The basic operations are free functions: <code>send(ch, v)</code> puts a
+      value in, <code>recv(ch)</code> takes one out (blocking until one is
+      available), and <code>close(ch)</code> closes the channel. For the type
+      rules behind <code>Channel&lt;T&gt;</code>, see
+      <a href="/types">Types</a>.
+    </p>
+
+    <h2>Why receiving uses select</h2>
+    <p>
+      Here is the one gotcha worth internalizing early.
+      <code>recv(ch)</code> <strong>blocks</strong> until a value arrives — but
+      as an <em>expression</em> it evaluates to an <strong>ok-bool</strong>
+      (true while the channel is open), not to the value you received. So
+      <code>let v = recv(ch)</code> binds a boolean, not your data.
+    </p>
+
+    <Code
+      file="website/src/snippets/concurrency-recv-bool.li"
+      filename="recv-bool.li"
+    />
+
+    <p>
+      To actually <em>bind</em> a received value, use a <code>select</code>
+      receive arm: <code>v = &lt;-ch =&gt; …</code>. That is the idiom — and it
+      scales naturally to waiting on more than one channel at a time.
+    </p>
+
+    <aside class="callout callout--note">
+      <span class="callout__label">Rule of thumb</span>
+      <p>
+        Use <code>recv(ch)</code> when you only need to know a value arrived
+        (or to drain a channel). Use a <code>select</code> arm whenever you need
+        the value itself.
+      </p>
+    </aside>
+
+    <h2>select</h2>
+    <p>
+      <code>select</code> waits on a set of channel operations and runs the
+      first arm that becomes ready. It supports three kinds of arm:
+    </p>
+    <ul>
+      <li>
+        <strong>Receive arm</strong> — <code>v = &lt;-ch =&gt; …</code> binds the
+        value received from <code>ch</code> to <code>v</code>.
+      </li>
+      <li>
+        <strong>Send arm</strong> — <code>x -&gt; ch =&gt; …</code> sends the
+        in-scope value <code>x</code> into <code>ch</code>.
+      </li>
+      <li>
+        <strong>Default arm</strong> — <code>_ =&gt; …</code> runs immediately if
+        no other arm is ready, making the whole <code>select</code>
+        non-blocking.
+      </li>
+    </ul>
+
+    <Code
+      file="website/src/snippets/concurrency-select.li"
+      filename="select.li"
+    />
+
+    <p>
+      Without a default arm, <code>select</code> blocks until one of its arms
+      can proceed. With one, it polls and falls through — handy for
+      "do work if there's work, otherwise move on" loops.
+    </p>
+
+    <h2>A worker pool</h2>
+    <p>
+      These pieces compose into the classic producer/consumer pattern. Below, a
+      single producer fills a <code>jobs</code> channel, three worker fibers
+      pull jobs and fan results back through a <code>results</code> channel, and
+      a <code>WaitGroup</code> lets <code>main</code> wait until every worker
+      has drained the queue. Each worker uses a default arm to retire once no
+      jobs remain.
+    </p>
+
+    <Code
+      file="website/src/snippets/concurrency-workerpool.li"
+      filename="worker-pool.li"
+    />
+
+    <p>
+      The sum of the squares of 1 through 8 is 204 — and because work is handed
+      out over a channel, you can add or remove workers without touching the
+      producer or the result-collection loop.
+    </p>
+
+    <h2>Deadlock detection</h2>
+    <p>
+      If every fiber ends up blocked with no way to make progress, the
+      scheduler detects it and stops with a located error instead of hanging
+      forever. Here a single fiber waits on an unbuffered channel that no one
+      will ever send to:
+    </p>
+
+    <Code
+      file="website/src/snippets/concurrency-deadlock.li"
+      filename="deadlock.li"
+    />
+
+    <p>Running it reports the deadlock at the offending line and column:</p>
+
+    <div
+      class="term"
+      role="img"
+      aria-label="Deadlock error output from lira run"
+    >
+      <pre><span class="term__cmd">$ lira run deadlock.li</span>
+<span class="term__err">7:5: deadlock: all fibers are blocked</span></pre>
+    </div>
+
+    <p>
+      Like the rest of Lira's diagnostics, deadlock errors carry a
+      <code>line:column</code> location — see
+      <a href="/patterns">Patterns</a> for more on how the language reports
+      problems precisely.
+    </p>
+
+    <h2>Shared state with std.sync</h2>
+    <p>
+      Channels are the preferred way to coordinate, but sometimes you genuinely
+      want shared mutable state. <code>import std.sync</code> provides a small
+      set of primitives for that. The mutexes are typed:
+      <code>IntMutex</code> and <code>StringMutex</code>, each with
+      <code>lock</code> / <code>unlock</code> / <code>with</code>.
+    </p>
+
+    <p>
+      The example below proves real mutual exclusion: two fibers each increment
+      a shared <code>IntMutex</code> a thousand times, and the total comes out
+      to exactly 2000 — no lost updates.
+    </p>
+
+    <Code
+      file="website/src/snippets/concurrency-mutex.li"
+      filename="mutex.li"
+    />
+
+    <aside class="callout callout--note">
+      <span class="callout__label">Note</span>
+      <p>
+        <code>lock()</code> returns the current value and acquires the lock;
+        <code>unlock(newValue)</code> writes a value back and releases it.
+        Because Lira has no RAII guards, always pair them. For a tidier bracket,
+        <code>m.with(|x: int| x + 1)</code> locks, applies the closure to the
+        current value, and unlocks the result in one call.
+      </p>
+    </aside>
+
+    <p>
+      <code>std.sync</code> also offers a <code>WaitGroup</code>
+      (<code>done()</code> to signal completion, <code>wait(n)</code> to block
+      until <code>n</code> signals arrive — used above to join the workers) and
+      a <code>Semaphore</code> (<code>acquire()</code> / <code>release()</code>)
+      to bound how many fibers enter a section at once. Here eight workers share
+      a <code>Semaphore(2)</code>, and the observed maximum concurrency stays at
+      2:
+    </p>
+
+    <Code
+      file="website/src/snippets/concurrency-semaphore.li"
+      filename="semaphore.li"
+    />
+
+    <h2>What is not implemented yet</h2>
+    <p>
+      Fibers, channels, and <code>select</code> — coordinated by
+      <code>std.sync</code> where you need shared state — are the whole model
+      today, and it is intentionally Go-shaped. Some things you might expect
+      from other languages are not part of Lira yet:
+    </p>
+
+    <aside class="callout callout--warning">
+      <span class="callout__label">Not yet implemented</span>
+      <p>
+        There is no <code>async</code>/<code>await</code>, no
+        <code>Future</code>, and no <code>spawn &#123; block &#125;</code> form.
+        <code>spawn</code> returns nothing, so there are no fiber handles to
+        <code>join</code>, await a <code>result</code> from, or
+        <code>cancel</code>. From <code>std.sync</code>, only the primitives
+        shown here exist: there is no RAII-guard mutex, <code>RwLock</code>,
+        <code>Condvar</code>, or atomics. Coordinate through channels and the
+        primitives above instead.
+      </p>
+    </aside>
+
+    <p>
+      Next, see how channel and generic types are checked in
+      <a href="/types">Types</a>, how results arriving over channels can be
+      destructured in <a href="/patterns">Patterns</a>, or what ships in the
+      <a href="/stdlib">standard library</a>. New to the language? Start with the
+      <a href="/guide">guide</a>.
+    </p>
+  </div>
+</DocsLayout>
+
+<style>
+  /* Terminal block for showing real CLI output (mirrors the landing page's
+     diagnostics treatment, reusing theme.css variables). */
+  .term {
+    background: var(--night);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--sp-3);
+    box-shadow: var(--elevation-1);
+    overflow-x: auto;
+    margin: var(--sp-3) 0;
+  }
+  .term pre {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: var(--fs-code);
+    line-height: 1.7;
+    color: var(--snow);
+  }
+  .term__cmd {
+    color: var(--text-muted);
+  }
+  .term__err {
+    color: var(--ember);
+  }
+</style>

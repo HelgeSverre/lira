@@ -1,0 +1,20 @@
+// No import needed — these are VM builtins, always in scope.
+
+fn main() {
+    // I/O
+    println("hello from a builtin")
+
+    // Collections: arrays are mutated in place by push/pop.
+    let xs = [1, 2, 3]
+    push(xs, 4)
+    println(len(xs))      // 4
+    println(pop(xs))      // 4
+
+    // Numbers
+    println(abs(-7))      // 7
+    println(sqrt(144.0))  // 12
+
+    // A timestamp, straight from the VM.
+    let t = time_ms()
+    println(t > 0)        // true
+}

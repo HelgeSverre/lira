@@ -1,0 +1,16 @@
+// A bare name in a pattern is a binding: it matches anything and
+// binds the value, so you can use it on the right-hand side. A guard
+// (`if cond`) refines an arm — the arm only fires when the guard holds.
+fn classify(n: int) -> string {
+    return match n {
+        0 => "zero",
+        x if x < 0 => "negative",
+        x if x % 2 == 0 => "even",
+        x => "odd: ${x}"
+    }
+}
+
+println(classify(0))
+println(classify(-7))
+println(classify(8))
+println(classify(3))

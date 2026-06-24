@@ -75,14 +75,31 @@ for (const file of files) {
     failed++;
     continue;
   }
+  // A snippet may declare `// @expect-error` to demonstrate a compile-time or
+  // runtime diagnostic (e.g. non-exhaustive match, deadlock detection). For
+  // those, the *correct* outcome is a non-zero exit; passing is the failure.
+  const expectError = /^\s*\/\/\s*@expect-error\b/m.test(readFileSync(file, "utf-8"));
   try {
-    execFileSync(bin, ["run", file], { stdio: "pipe" });
-    console.log(`  ok       ${label}`);
+    // Run from the repo root so `import std.X` resolves the same way it does
+    // for a user invoking `lira run` from their project root (the loader's
+    // cwd-relative "stdlib" fallback).
+    execFileSync(bin, ["run", file], { stdio: "pipe", cwd: repoRoot });
+    if (expectError) {
+      failed++;
+      console.error(`  FAILED   ${label}`);
+      console.error(`           expected an error (@expect-error) but it ran clean`);
+    } else {
+      console.log(`  ok       ${label}`);
+    }
   } catch (err) {
-    failed++;
-    console.error(`  FAILED   ${label}`);
-    const out = (err.stdout?.toString() ?? "") + (err.stderr?.toString() ?? "");
-    for (const line of out.trim().split("\n")) console.error(`           ${line}`);
+    if (expectError) {
+      console.log(`  ok       ${label}  (expected error)`);
+    } else {
+      failed++;
+      console.error(`  FAILED   ${label}`);
+      const out = (err.stdout?.toString() ?? "") + (err.stderr?.toString() ?? "");
+      for (const line of out.trim().split("\n")) console.error(`           ${line}`);
+    }
   }
 }
 

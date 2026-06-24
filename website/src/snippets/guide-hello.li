@@ -1,0 +1,6 @@
+// Your first Lira program. `fn main()` is the entry point;
+// `println` is a built-in, so no import is needed.
+fn main() {
+    let name = "world"
+    println("Hello, ${name}!")
+}

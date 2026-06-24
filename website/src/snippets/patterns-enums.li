@@ -1,0 +1,19 @@
+// Constructor patterns match enum variants. Qualify the variant with
+// `Enum::Variant`, and bind any payload right in the pattern.
+enum Shape {
+    Circle(int),
+    Rect(int, int),
+    Point
+}
+
+fn area(s: Shape) -> int {
+    return match s {
+        Shape::Circle(r) => 3 * r * r,
+        Shape::Rect(w, h) => w * h,
+        Shape::Point => 0
+    }
+}
+
+println(area(Shape::Circle(10)))
+println(area(Shape::Rect(3, 4)))
+println(area(Shape::Point))

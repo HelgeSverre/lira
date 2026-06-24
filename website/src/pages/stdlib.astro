@@ -1,0 +1,379 @@
+---
+import DocsLayout from "../layouts/DocsLayout.astro";
+import Code from "../components/Code.astro";
+
+// Every module below was confirmed to import via `lira run`, and every
+// signature was read straight from stdlib/*.li — nothing here is invented.
+const modules = [
+  {
+    name: "collections",
+    blurb:
+      "Array methods — sum, min, max, sort, unique, filter_even, contains, slice, concat — plus range / range_step generators.",
+    pure: true,
+  },
+  {
+    name: "core",
+    blurb:
+      "abs and clamp as methods on int; min and max as free functions.",
+    pure: true,
+  },
+  {
+    name: "math",
+    blurb:
+      "factorial, fibonacci, is_prime, sign on numbers; gcd, lcm, lerp, hypot and the math_pi / math_e constants.",
+    pure: true,
+  },
+  {
+    name: "strings",
+    blurb:
+      "Methods on the string type: to_upper, trim, split, replace, starts_with, pad_start, and more; join as a free function.",
+    pure: true,
+  },
+  {
+    name: "json",
+    blurb:
+      "Helpers (json_has, json_get, json_object) over the json_parse / json_stringify builtins.",
+    pure: true,
+  },
+  {
+    name: "sync",
+    blurb:
+      "IntMutex, StringMutex, WaitGroup, Semaphore — explicit lock/unlock and with, built honestly on channels.",
+    pure: true,
+  },
+  {
+    name: "regex",
+    blurb:
+      "is_email, is_url, extract_numbers, extract_words over the regex_* builtins.",
+    pure: true,
+  },
+  {
+    name: "random",
+    blurb:
+      "random_bool, random_range, dice_roll, coin_flip, shuffle_int_array over the random() builtin.",
+    pure: true,
+  },
+  {
+    name: "uuid",
+    blurb:
+      "uuid, time_ordered, is_nil, version — wrappers over uuid_v4 / uuid_v7 builtins.",
+    pure: true,
+  },
+  {
+    name: "url",
+    blurb:
+      "url_parse / url_build into a URL struct, plus query_parse / query_get / query_has.",
+    pure: true,
+  },
+  {
+    name: "path",
+    blurb:
+      "dirname, basename, extension, starts_with — Unix-style path string manipulation.",
+    pure: true,
+  },
+  {
+    name: "hash",
+    blurb:
+      "verify_md5 / verify_sha256, salted variants over the md5 / sha1 / sha256 / sha512 builtins.",
+    pure: true,
+  },
+  {
+    name: "time",
+    blurb:
+      "A Timestamp struct with timestamp_now, parsing, and formatting helpers.",
+    pure: true,
+  },
+  {
+    name: "env",
+    blurb:
+      "get_or, get_bool, is_ci, user, shell over the env_get / env_args builtins.",
+    pure: false,
+  },
+  {
+    name: "fs",
+    blurb:
+      "read_file, write_file, append_file, exists, size — high-level file ops.",
+    pure: false,
+  },
+  {
+    name: "os",
+    blurb: "walk, exists, home_dir, temp_dir.",
+    pure: false,
+  },
+  {
+    name: "io",
+    blurb:
+      "print_str, print_line, print_fmt, assert, plus now_ms / measure_time timing helpers.",
+    pure: false,
+  },
+  {
+    name: "log",
+    blurb:
+      "Leveled logging — debug, info, warn, error, fatal — as stateless functions.",
+    pure: false,
+  },
+  {
+    name: "http",
+    blurb:
+      "get, get_ok, post_json plus status-class predicates (is_success, is_redirect, …).",
+    pure: false,
+  },
+  {
+    name: "net",
+    blurb:
+      "TCP helpers — tcp_try_connect, tcp_write_line, tcp_read_exact, tcp_close_safe.",
+    pure: false,
+  },
+  {
+    name: "test",
+    blurb:
+      "describe, test, assert, assert_eq, summary — a tiny stateless assertion toolkit.",
+    pure: false,
+  },
+];
+---
+
+<DocsLayout
+  kicker="Reference"
+  title="Standard library"
+  lede="What ships with Lira today — the builtins always in scope, and the 21 importable std modules. Every signature here was read from the source, every example runs."
+>
+  <div class="prose">
+    <p>
+      Lira draws a clear line between two kinds of functionality. Some functions
+      are <strong>VM builtins</strong>: implemented in the runtime and always in
+      scope, no import required. Everything else lives in <strong
+        >std modules</strong
+      >, written in Lira itself under <code>stdlib/</code>, and pulled in with
+      <code>import std.X</code>.
+    </p>
+
+    <aside class="callout callout--note">
+      <span class="callout__label">Honest by construction</span>
+      <p>
+        There is no <code>std.crypto</code> and no <code>std.process</code> — if
+        you saw those elsewhere, they don't exist. The modules and signatures on
+        this page were read directly from <code>stdlib/*.li</code>, and each
+        example was run through <code>lira run</code> before publishing.
+      </p>
+    </aside>
+
+    <h2>Builtins vs. stdlib</h2>
+    <p>
+      Builtins need no <code>import</code>. They cover I/O, the core array and
+      channel operations, file handles, JSON, and a handful of numeric and time
+      primitives:
+    </p>
+    <ul>
+      <li>
+        <strong>I/O:</strong>
+        <code>println</code>, <code>eprintln</code>
+      </li>
+      <li>
+        <strong>Arrays:</strong>
+        <code>len</code>, <code>push</code>, <code>pop</code>
+      </li>
+      <li>
+        <strong>Channels &amp; fibers:</strong>
+        <code>chan</code>, <code>send</code>, <code>recv</code>,
+        <code>close</code>, <code>spawn</code>, <code>select</code>
+      </li>
+      <li>
+        <strong>Files:</strong>
+        <code>file_open</code>, <code>file_read</code>, <code>file_write</code>,
+        <code>file_close</code>
+      </li>
+      <li>
+        <strong>JSON:</strong>
+        <code>json_parse</code>, <code>json_stringify</code>
+      </li>
+      <li>
+        <strong>Numbers &amp; time:</strong>
+        <code>abs</code>, <code>sqrt</code>, <code>time_ms</code>,
+        <code>sleep</code>
+      </li>
+    </ul>
+
+    <Code file="website/src/snippets/stdlib-builtins.li" filename="builtins.li" />
+
+    <aside class="callout callout--warning">
+      <span class="callout__label">Watch out</span>
+      <p>
+        <code>min</code> and <code>max</code> are <em>not</em> builtins — they live
+        in <code>std.core</code>. <code>abs</code> and <code>sqrt</code> are the
+        genuine free-function builtins; <code>clamp</code> is a method
+        (<code>x.clamp(lo, hi)</code>). Import <code>std.core</code> when you want
+        <code>min</code>/<code>max</code>:
+      </p>
+    </aside>
+
+    <Code file="website/src/snippets/stdlib-core.li" filename="core.li" />
+
+    <h2>The 21 std modules</h2>
+    <p>
+      Every module below imports cleanly today. The <span class="tag tag--pure"
+        >pure</span
+      > ones are self-contained Lira you can read end to end; the <span
+        class="tag tag--io">I/O</span
+      > ones are thin, honest wrappers around runtime builtins (file handles, sockets,
+      the system clock, env vars).
+    </p>
+
+    <div class="modgrid">
+      {
+        modules.map((m) => (
+          <div class="modcard">
+            <div class="modcard__head">
+              <code class="modcard__name">std.{m.name}</code>
+              <span class={`tag ${m.pure ? "tag--pure" : "tag--io"}`}>
+                {m.pure ? "pure" : "I/O"}
+              </span>
+            </div>
+            <p class="modcard__blurb">{m.blurb}</p>
+          </div>
+        ))
+      }
+    </div>
+
+    <h2>Strings</h2>
+    <p>
+      <code>std.strings</code> extends the <code>string</code> type with methods,
+      so you write <code>name.to_upper()</code> rather than
+      <code>to_upper(name)</code>. <code>split</code> returns
+      <code>[string]</code>; the inverse, <code>join</code>, is a free function.
+    </p>
+
+    <Code file="website/src/snippets/stdlib-strings.li" filename="strings.li" />
+
+    <h2>Math</h2>
+    <p>
+      <code>std.math</code> hangs methods off <code>int</code> and
+      <code>float</code> for the single-argument operations, and exposes free
+      functions for the multi-argument ones. Note that many trig and rounding
+      functions (<code>sin</code>, <code>cos</code>, <code>floor</code>,
+      <code>pow</code>) are VM builtins — <code>std.math</code> adds the rest.
+    </p>
+
+    <Code file="website/src/snippets/stdlib-math.li" filename="math.li" />
+
+    <h2>Collections</h2>
+    <p>
+      <code>std.collections</code> adds methods to typed arrays —
+      <code>[int]</code>, <code>[float]</code>, and <code>[string]</code>.
+      Transformations like <code>sort</code> and <code>filter_even</code> return
+      fresh arrays; reductions like <code>sum</code> and <code>max</code> return
+      a scalar.
+    </p>
+
+    <Code
+      file="website/src/snippets/stdlib-collections.li"
+      filename="collections.li"
+    />
+
+    <h2>JSON</h2>
+    <p>
+      The heavy lifting — <code>json_parse</code> and
+      <code>json_stringify</code> — is built into the VM. <code>std.json</code> layers
+      on convenience helpers like <code>json_has</code> and
+      <code>json_get</code>. Parse a string, index into it, and round-trip it
+      back:
+    </p>
+
+    <Code file="website/src/snippets/stdlib-json.li" filename="json.li" />
+
+    <h2>Sync</h2>
+    <p>
+      <code>std.sync</code> gives you mutual exclusion and coordination built on
+      the same channels and fibers covered in the
+      <a href="/concurrency">concurrency guide</a>. Because Lira has no RAII,
+      locking is <strong>explicit</strong>: <code>lock()</code> takes the value
+      out, <code>unlock(v)</code> puts one back. The <code>with</code> closure
+      form brackets that pair for you.
+    </p>
+
+    <Code file="website/src/snippets/stdlib-sync.li" filename="sync.li" />
+
+    <aside class="callout callout--warning">
+      <span class="callout__label">Not yet implemented</span>
+      <p>
+        RAII guard mutexes, <code>RwLock</code>, <code>Condvar</code>, and
+        atomics are deliberately omitted — they need <code>Drop</code> or have no
+        meaningful semantics on a cooperative VM. <code>std.sync</code> ships
+        only what it can implement honestly: <code>IntMutex</code>,
+        <code>StringMutex</code>, <code>WaitGroup</code>, and
+        <code>Semaphore</code>.
+      </p>
+    </aside>
+
+    <h2>Where to go next</h2>
+    <p>
+      Ready to put these to work? The
+      <a href="/guide">guide</a> walks through your first program, <a
+        href="/types">types</a
+      > covers generics and optionals, <a href="/patterns">patterns</a> covers
+      matching and exhaustiveness, and <a href="/concurrency">concurrency</a> goes
+      deep on fibers, channels, and <code>select</code>.
+    </p>
+  </div>
+</DocsLayout>
+
+<style>
+  /* Module reference grid — page-unique layout, theme variables only. */
+  .modgrid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--sp-2);
+    margin: var(--sp-4) 0;
+  }
+  .modcard {
+    background: var(--dusk);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--sp-2) var(--sp-3);
+    box-shadow: var(--elevation-1);
+  }
+  .modcard__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-2);
+    margin-bottom: var(--sp-1);
+  }
+  .modcard__name {
+    color: var(--lira-gold);
+    font-family: var(--font-mono);
+    font-size: var(--fs-code);
+    font-weight: 600;
+  }
+  .modcard__blurb {
+    color: var(--text-muted);
+    font-size: var(--fs-small);
+    margin: 0;
+    line-height: 1.5;
+  }
+  .tag {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    flex: 0 0 auto;
+  }
+  .tag--pure {
+    color: var(--moss);
+    border: 1px solid color-mix(in srgb, var(--moss) 40%, transparent);
+    background: color-mix(in srgb, var(--moss) 12%, transparent);
+  }
+  .tag--io {
+    color: var(--starlight);
+    border: 1px solid color-mix(in srgb, var(--starlight) 40%, transparent);
+    background: color-mix(in srgb, var(--starlight) 12%, transparent);
+  }
+
+  @media (max-width: 640px) {
+    .modgrid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

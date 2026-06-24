@@ -1,0 +1,146 @@
+---
+import DocsLayout from "../layouts/DocsLayout.astro";
+import Code from "../components/Code.astro";
+---
+
+<DocsLayout
+  kicker="Guide"
+  title="Getting started"
+  lede="Install the CLI, write your first program, and learn the core building blocks — values, functions, structs, and control flow."
+>
+  <div class="prose">
+    <p>
+      Lira is a statically-checked language that compiles to bytecode and runs
+      on a small virtual machine. You write <code>.li</code> source, the checker
+      proves it sound, and the unified <code>lira</code> CLI runs it. Every
+      snippet on this page is a real file in the repository, verified to run
+      before this site is built.
+    </p>
+
+    <h2 id="cli">The CLI</h2>
+    <p>
+      A single binary, <code>lira</code>, drives the whole toolchain. The two
+      commands you reach for first are <code>run</code> and <code>check</code>.
+    </p>
+    <div class="diag-term" role="img" aria-label="Lira CLI commands">
+      <pre><span class="diag-cmd">$ lira run hello.li</span>     <span class="diag-note"># type-check, compile, and execute</span>
+<span class="diag-cmd">$ lira check hello.li</span>   <span class="diag-note"># type-check only, no output</span>
+<span class="diag-cmd">$ lira compile hello.li</span> <span class="diag-note"># emit bytecode (.lic)</span>
+<span class="diag-cmd">$ lira ast hello.li</span>     <span class="diag-note"># print the parsed AST</span>
+<span class="diag-cmd">$ lira disasm hello.li</span>  <span class="diag-note"># disassemble the bytecode</span></pre>
+    </div>
+
+    <h2 id="hello">Hello, Lira</h2>
+    <p>
+      Execution starts at <code>fn&nbsp;main()</code>. <code>println</code> is a
+      VM built-in — no import needed — and strings interpolate with
+      <code>${"${…}"}</code>.
+    </p>
+    <Code file="website/src/snippets/guide-hello.li" filename="hello.li" />
+    <p>Run it:</p>
+    <div class="diag-term" role="img" aria-label="Running hello.li">
+      <pre><span class="diag-cmd">$ lira run hello.li</span>
+Hello, world!</pre>
+    </div>
+
+    <h2 id="values">Values and bindings</h2>
+    <p>
+      Bind a value with <code>let</code> for an immutable binding, or
+      <code>var</code> when you need to reassign it later. Local bindings infer
+      their type from the initializer; you only annotate where there is nothing
+      to infer from — function parameters and return types.
+    </p>
+    <aside class="callout callout--note">
+      <span class="callout__label">Note</span>
+      <p>
+        <code>let</code> is immutable: reassigning it is a compile error. Reach
+        for <code>var</code> only when a value genuinely changes, like a loop
+        counter or an accumulator.
+      </p>
+    </aside>
+
+    <h2 id="functions">Functions</h2>
+    <p>
+      Functions annotate each parameter and, if they return a value, the return
+      type after <code>-&gt;</code>. A function with no <code>-&gt;&nbsp;T</code>
+      returns nothing.
+    </p>
+    <Code
+      file="website/src/snippets/guide-functions.li"
+      filename="functions.li"
+    />
+
+    <h2 id="structs">Structs</h2>
+    <p>
+      Structs group named fields. Construct one with
+      <code>{"Name { field: value }"}</code> and read fields back with dot access.
+      <code>abs</code> here is a free function; many small numeric helpers are
+      built in.
+    </p>
+    <Code file="website/src/snippets/guide-structs.li" filename="structs.li" />
+
+    <h2 id="control">Control flow</h2>
+    <p>
+      <code>if</code>/<code>else</code> and <code>while</code> work as you would
+      expect. The one worth highlighting is <code>match</code>: it is an
+      <em>expression</em>, so each arm yields a value and the whole match
+      evaluates to the arm that fits.
+    </p>
+    <Code file="website/src/snippets/guide-control.li" filename="control.li" />
+
+    <h2 id="diagnostics">When something is wrong</h2>
+    <p>
+      The checker runs before any bytecode is generated and reports errors with
+      a <code>line:column</code> location. These are the compiler's real
+      messages — for example, assigning to a <code>let</code> binding or using a
+      name that was never defined:
+    </p>
+    <div class="diag-term" role="img" aria-label="Compiler diagnostics">
+      <pre><span class="diag-cmd">$ lira check program.li</span>
+<span class="diag-err">7:5: Cannot assign to immutable variable: total</span>
+<span class="diag-err">12:13: Undefined variable: y</span></pre>
+    </div>
+
+    <h2 id="next">Where to go next</h2>
+    <p>
+      From here, the language fans out into its three signature areas:
+      <a href="/concurrency">concurrency</a> with fibers, channels, and
+      <code>select</code>; the <a href="/types">type system</a> with generics,
+      optionals, and <code>Result</code>; and
+      <a href="/patterns">pattern matching</a> with enforced exhaustiveness. The
+      <a href="/stdlib">standard library</a> covers the everyday work in
+      between.
+    </p>
+  </div>
+</DocsLayout>
+
+<style>
+  /* A compiler-output terminal block, matching the diagnostics treatment used
+     across the site. Reuses theme.css variables only. */
+  .diag-term {
+    background: var(--night);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--sp-3);
+    box-shadow: var(--elevation-1);
+    overflow-x: auto;
+    margin: var(--sp-3) 0;
+  }
+  .diag-term pre {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: var(--fs-code);
+    line-height: 1.7;
+    color: var(--snow);
+    white-space: pre-wrap;
+  }
+  .diag-cmd {
+    color: var(--text-muted);
+  }
+  .diag-note {
+    color: var(--starlight);
+  }
+  .diag-err {
+    color: var(--ember);
+  }
+</style>

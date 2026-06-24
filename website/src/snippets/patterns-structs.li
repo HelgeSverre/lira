@@ -1,0 +1,21 @@
+// Struct patterns destructure named fields in a `let` binding: pull
+// the fields you want straight out of a value into local names.
+struct Point {
+    x: int,
+    y: int
+}
+
+fn main() {
+    let p = Point { x: 3, y: 4 }
+
+    // Destructure both fields by name.
+    let { x, y } = p
+    println("x is ${x}, y is ${y}")
+
+    // Shorthand binds each field to a variable of the same name.
+    let origin = Point { x: 0, y: 0 }
+    let { x: ox, y: oy } = origin
+    println("origin: (${ox}, ${oy})")
+}
+
+main()
