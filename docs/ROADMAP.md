@@ -178,7 +178,7 @@ This roadmap tracks the implementation of Lira, a modern systems programming lan
 | ----- | ------------------ | ----------------------------- | ------ |
 | T4.20 | Object allocation  | Heap management               | [x]    |
 | T4.21 | Reference counting | Using Rc<RefCell<>>           | [x]    |
-| T4.22 | Cycle detection    | Mark-and-sweep for cycles     | [x]    |
+| T4.22 | Cycle detection    | Mark-and-sweep for cycles     | [~]    |
 | T4.23 | String interning   | Deduplicate strings           | [x]    |
 | T4.24 | Test memory        | Allocation/deallocation tests | [x]    |
 
