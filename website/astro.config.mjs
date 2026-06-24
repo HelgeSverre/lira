@@ -7,14 +7,14 @@ import { liraNightTheme } from "./src/lib/lira-night.mjs";
 // Load the real Lira TextMate grammar shipped with the VS Code extension.
 // This is the same grammar the editor uses, so highlighting on the site
 // matches the editor exactly (no "close language" fallback needed).
+//
+// The grammar is vendored into the site (src/lib/lira.tmLanguage.json) rather
+// than read from ../editors so the website builds standalone — Vercel deploys
+// only this directory, not the repo root. CI (.github/workflows/site.yml)
+// asserts this copy stays in sync with editors/vscode-lira/syntaxes.
 const liraGrammar = JSON.parse(
   readFileSync(
-    fileURLToPath(
-      new URL(
-        "../editors/vscode-lira/syntaxes/lira.tmLanguage.json",
-        import.meta.url,
-      ),
-    ),
+    fileURLToPath(new URL("./src/lib/lira.tmLanguage.json", import.meta.url)),
     "utf-8",
   ),
 );
