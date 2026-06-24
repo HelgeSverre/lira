@@ -762,8 +762,15 @@ fn test_runtime_error_message_is_location_prefixed() {
     let bytecode = lirac::compile(DIV_BY_ZERO_SOURCE).expect("Compilation failed");
     let err = liravm::run_with_capture(&bytecode)
         .expect_err("division by zero should be a runtime error");
-    // Located, readable message: "line:col: Division by zero" (NOT Debug format).
-    assert_eq!(err, "4:5: Division by zero");
+    // First line stays byte-compatible: "line:col: Division by zero" (NOT Debug
+    // format). The function-named call stack is appended below it.
+    assert_eq!(err.lines().next(), Some("4:5: Division by zero"));
+    // The failing function (`main`) is named in the appended call stack.
+    assert!(
+        err.contains("\n  at main"),
+        "expected a call stack naming `main`, got:\n{}",
+        err
+    );
 }
 
 #[test]
@@ -774,6 +781,8 @@ fn test_runtime_error_structured_carries_location() {
     assert_eq!(err.message, "Division by zero");
     assert_eq!(err.line, Some(4));
     assert_eq!(err.column, Some(5));
+    // The structured error also carries the function-named call stack.
+    assert_eq!(err.stack, vec!["main".to_string()]);
 }
 
 /// Call frames should be labelled with the real function name from debug info.
@@ -815,5 +824,48 @@ main()
         names.iter().any(|n| n.as_deref() == Some("greet")),
         "Expected a call frame named 'greet', got: {:?}",
         names
+    );
+}
+
+#[test]
+fn test_runtime_error_includes_function_named_call_stack() {
+    // A runtime error (division by zero) raised inside `inner`, called by
+    // `outer`, called from `main`. The rendered error must keep its first line
+    // (`line:col: message`) and append a function-named call stack below it.
+    let source = "\
+fn inner() -> int {
+    let z = 0
+    return 1 / z
+}
+
+fn outer() -> int {
+    return inner()
+}
+
+fn main() {
+    print(outer())
+}
+";
+
+    let bytecode = lirac::compile(source).expect("Compilation should succeed");
+    let err = liravm::run_with_capture(&bytecode)
+        .expect_err("Division by zero should produce a runtime error");
+
+    // First line is unchanged from today: `line:col: message`.
+    let first_line = err.lines().next().unwrap_or("");
+    assert!(
+        first_line.ends_with("Division by zero"),
+        "First line should still be the location-prefixed message, got: {:?}",
+        first_line
+    );
+
+    // The stack frames are named and appear innermost-first under the message.
+    let inner_pos = err.find("at inner").expect("stack should name `inner`");
+    let outer_pos = err.find("at outer").expect("stack should name `outer`");
+    let main_pos = err.find("at main").expect("stack should name `main`");
+    assert!(
+        inner_pos < outer_pos && outer_pos < main_pos,
+        "Stack should be ordered inner -> outer -> main, got:\n{}",
+        err
     );
 }

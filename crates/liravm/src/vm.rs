@@ -55,6 +55,10 @@ pub struct RuntimeError {
     pub line: Option<u32>,
     /// Source column (1-based) where the error occurred, if known.
     pub column: Option<u32>,
+    /// Function-named call stack of the active fiber, innermost first
+    /// (the failing function first, the entry point last). Empty when no
+    /// function-symbol debug info is available to resolve against.
+    pub stack: Vec<String>,
 }
 
 /// Snapshot of VM state for debugging/visualization
@@ -312,6 +316,30 @@ impl VM {
     /// Uses the debug info embedded in the bytecode
     pub fn get_current_location(&self) -> Option<(u32, u32)> {
         self.program.debug_info.lookup(self.ip as u32)
+    }
+
+    /// Build a function-named call stack for the active fiber, innermost first.
+    ///
+    /// Each entry is resolved through the same debug-info function-symbol table
+    /// used by [`VM::get_debug_snapshot`]. The currently-executing function is
+    /// listed first (the deepest `CallFrame`), followed by its callers down to
+    /// `main` (which is itself a `CallFrame`, since the synthetic top-level
+    /// driver at the entry point calls it). Frames whose name cannot be
+    /// recovered are dropped, so the synthetic driver frame (no symbol) does not
+    /// leak into the rendered stack. Returns an empty vec when there are no
+    /// resolvable frames (no/empty debug info), letting callers render just the
+    /// message as before.
+    pub(crate) fn build_call_stack_names(&self) -> Vec<String> {
+        self.call_stack
+            .iter()
+            .rev()
+            .filter_map(|frame| {
+                self.program
+                    .debug_info
+                    .function_name_at(frame.func_offset as u32)
+                    .map(|s| s.to_string())
+            })
+            .collect()
     }
 
     /// Get a snapshot of the current VM state
@@ -644,10 +672,18 @@ impl VM {
                 if msg.starts_with("Breakpoint hit at line ") {
                     return Err(msg);
                 }
-                match self.get_current_location() {
-                    Some((line, col)) => Err(format!("{}:{}: {}", line, col, msg)),
-                    None => Err(msg),
+                // First line stays byte-compatible with the historical form
+                // (`line:col: message`); the function-named call stack, when
+                // available, is appended on subsequent lines.
+                let mut rendered = match self.get_current_location() {
+                    Some((line, col)) => format!("{}:{}: {}", line, col, msg),
+                    None => msg,
+                };
+                for name in self.build_call_stack_names() {
+                    rendered.push_str("\n  at ");
+                    rendered.push_str(&name);
                 }
+                Err(rendered)
             }
         }
     }

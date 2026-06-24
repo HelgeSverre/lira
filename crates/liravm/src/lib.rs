@@ -84,6 +84,7 @@ pub fn run_with_capture_structured(
                 message,
                 line: None,
                 column: None,
+                stack: Vec::new(),
             },
         )
     })?;
@@ -99,12 +100,14 @@ pub fn run_with_capture_structured(
                 Some((line, column)) => (Some(line), Some(column)),
                 None => (None, None),
             };
+            let stack = vm.build_call_stack_names();
             Err((
                 vm.get_output().to_vec(),
                 RuntimeError {
                     message,
                     line,
                     column,
+                    stack,
                 },
             ))
         }
