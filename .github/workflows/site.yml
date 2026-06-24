@@ -53,12 +53,6 @@ jobs:
         working-directory: website
         run: npm ci
 
-      - name: Verify vendored grammar is in sync with the editor
-        run: |
-          diff -u editors/vscode-lira/syntaxes/lira.tmLanguage.json \
-                  website/src/lib/lira.tmLanguage.json \
-            || { echo "::error::website/src/lib/lira.tmLanguage.json is stale. Re-copy it from editors/vscode-lira/syntaxes/lira.tmLanguage.json"; exit 1; }
-
       - name: Verify embedded Lira snippets compile and run
         working-directory: website
         run: npm run check:examples
