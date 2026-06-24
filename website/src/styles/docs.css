@@ -72,6 +72,13 @@
   margin: 0 0 var(--sp-2);
 }
 
+/* Code specimens flow in prose with breathing room (the component resets the
+   <figure> margin to 0 for the landing's grid/card layout, so this .docs-scoped
+   rule wins on specificity and restores spacing — extra room below). */
+.docs .prose .specimen {
+  margin: var(--sp-3) 0 var(--sp-5);
+}
+
 .prose h2 {
   font-size: var(--fs-h2);
   color: var(--snow);
@@ -135,10 +142,6 @@
   border-bottom-color: var(--lira-gold);
 }
 
-/* Specimens (the <Code> component) want breathing room within prose. */
-.prose .specimen {
-  margin: var(--sp-3) 0;
-}
 
 /* Anchored heading affordance: a gold "#" link that appears on hover. */
 .prose .heading-anchor {

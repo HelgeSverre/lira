@@ -23,6 +23,9 @@ const liraGrammar = JSON.parse(
 export default defineConfig({
   site: "https://liralang.dev",
   output: "static",
+  // Keep authored whitespace — the default HTML minifier strips significant
+  // spaces between text and inline elements (e.g. "a <code>x</code>" -> "a<code>").
+  compressHTML: false,
   markdown: {
     shikiConfig: {
       theme: liraNightTheme,
