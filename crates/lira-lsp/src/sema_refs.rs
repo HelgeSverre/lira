@@ -495,9 +495,16 @@ pub fn collect_member_ranges(
     for (node, res) in &analysis.sema.field_resolution {
         let same_owner = owner_type_name(&res.owner_type).as_deref() == Some(key.owner.as_str());
         if same_owner && res.field_name == key.name {
-            if let Some(range) = access_ranges.get(node) {
+            if let Some(range) = access_ranges.by_node.get(node) {
                 ranges.push(*range);
             }
+        }
+    }
+
+    // Struct-literal field names (`Point { x: 1 }`) referencing this member.
+    for (owner, field, range) in &access_ranges.struct_fields {
+        if owner == &key.owner && field == &key.name {
+            ranges.push(*range);
         }
     }
 
@@ -516,20 +523,64 @@ pub fn collect_member_ranges(
 /// Build a `NodeId -> Range` index over the *member-name* portion of every
 /// `FieldAccess`/`OptionalAccess` node. The range covers exactly the field or
 /// method name (after the final `.`), not the receiver.
-fn build_member_access_ranges(analysis: &Analysis, content: &str) -> HashMap<NodeId, Range> {
+/// Member-name ranges collected from a buffer: `obj.member` accesses keyed by
+/// their `FieldAccess` NodeId, plus struct-literal field names — `Point { x: 1 }`
+/// — which have no NodeId of their own and are keyed by `(owner_type, field)`.
+#[derive(Default)]
+struct RangeIndex {
+    by_node: HashMap<NodeId, Range>,
+    struct_fields: Vec<(String, String, Range)>,
+}
+
+fn build_member_access_ranges(analysis: &Analysis, content: &str) -> RangeIndex {
     let lines: Vec<&str> = content.lines().collect();
-    let mut index = HashMap::new();
+    let mut index = RangeIndex::default();
     for stmt in &analysis.program.statements {
         collect_access_ranges_stmt(stmt, &lines, &mut index);
     }
     index
 }
 
-fn collect_access_ranges_stmt(
-    stmt: &Statement,
-    lines: &[&str],
-    index: &mut HashMap<NodeId, Range>,
-) {
+/// Locate a struct-literal field NAME's range. The name sits on the field
+/// value's line, immediately before the value, followed by `:`. Returns `None`
+/// if it can't be located (e.g. a spread/shorthand without `name:`).
+fn struct_literal_field_range(field: &str, value: &Expression, lines: &[&str]) -> Option<Range> {
+    let line_idx = value.span.line;
+    if line_idx == 0 || line_idx > lines.len() {
+        return None;
+    }
+    let chars: Vec<char> = lines[line_idx - 1].chars().collect();
+    let target: Vec<char> = field.chars().collect();
+    if target.is_empty() {
+        return None;
+    }
+    let is_word = |c: char| c.is_alphanumeric() || c == '_';
+    let value_col = value.span.column.saturating_sub(1);
+    let mut i = 0;
+    while i + target.len() <= chars.len() && i < value_col {
+        let matches = chars[i..i + target.len()] == target[..];
+        let left_ok = i == 0 || !is_word(chars[i - 1]);
+        let mut j = i + target.len();
+        let right_word_ok = j >= chars.len() || !is_word(chars[j]);
+        while j < chars.len() && chars[j] == ' ' {
+            j += 1;
+        }
+        let colon_after = j < chars.len() && chars[j] == ':';
+        if matches && left_ok && right_word_ok && colon_after {
+            return Some(range_from_point(
+                Span {
+                    line: line_idx,
+                    column: i + 1,
+                },
+                field,
+            ));
+        }
+        i += 1;
+    }
+    None
+}
+
+fn collect_access_ranges_stmt(stmt: &Statement, lines: &[&str], index: &mut RangeIndex) {
     match &stmt.kind {
         StatementKind::VarDecl {
             initializer: Some(init),
@@ -575,22 +626,18 @@ fn collect_access_ranges_stmt(
     }
 }
 
-fn collect_access_ranges_block(block: &Block, lines: &[&str], index: &mut HashMap<NodeId, Range>) {
+fn collect_access_ranges_block(block: &Block, lines: &[&str], index: &mut RangeIndex) {
     for stmt in &block.statements {
         collect_access_ranges_stmt(stmt, lines, index);
     }
 }
 
-fn collect_access_ranges_expr(
-    expr: &Expression,
-    lines: &[&str],
-    index: &mut HashMap<NodeId, Range>,
-) {
+fn collect_access_ranges_expr(expr: &Expression, lines: &[&str], index: &mut RangeIndex) {
     if let ExpressionKind::FieldAccess { object, field }
     | ExpressionKind::OptionalAccess { object, field } = &expr.kind
     {
         if let Some(range) = member_name_range(object, field, lines) {
-            index.insert(expr.id, range);
+            index.by_node.insert(expr.id, range);
         }
     }
     match &expr.kind {
@@ -630,7 +677,16 @@ fn collect_access_ranges_expr(
                 collect_access_ranges_expr(v, lines, index);
             }
         }
-        ExpressionKind::StructLiteral { fields, .. } => {
+        ExpressionKind::StructLiteral { name, fields } => {
+            // A named struct literal's field names are references to the struct's
+            // fields — they must be renamed too, or renaming breaks the program.
+            if let Some(owner) = name {
+                for (fname, value) in fields {
+                    if let Some(r) = struct_literal_field_range(fname, value, lines) {
+                        index.struct_fields.push((owner.clone(), fname.clone(), r));
+                    }
+                }
+            }
             for (_, e) in fields {
                 collect_access_ranges_expr(e, lines, index);
             }

@@ -251,11 +251,17 @@ mod tests {
         };
         let edit = rename(&uri, content, pos, "px").expect("rename produces an edit");
         let edits = edits_for(&uri, &edit);
-        // Point.x decl (line 0) + Point access (line 5) = 2.
-        assert_eq!(edits.len(), 2, "got {:?}", edits);
+        // Point.x decl (line 0) + Point literal field (line 3) + Point access
+        // (line 5) = 3. The literal `Point { x: 1 }` MUST be renamed too.
+        assert_eq!(edits.len(), 3, "got {:?}", edits);
         assert!(edits.iter().all(|e| e.new_text == "px"));
-        // Box.x decl (line 1) and Box access (line 6) untouched.
+        assert!(
+            edits.iter().any(|e| e.range.start.line == 3),
+            "Point literal field renamed"
+        );
+        // Box.x decl (line 1), Box literal (line 4), Box access (line 6) untouched.
         assert!(edits.iter().all(|e| e.range.start.line != 1));
+        assert!(edits.iter().all(|e| e.range.start.line != 4));
         assert!(edits.iter().all(|e| e.range.start.line != 6));
     }
 
@@ -293,9 +299,13 @@ mod tests {
         };
         let edit = rename(&uri, content, pos, "coord").expect("rename produces an edit");
         let edits = edits_for(&uri, &edit);
-        // decl (line 0) + self.x (line 2) + p.x (line 6) = 3.
-        assert_eq!(edits.len(), 3, "got {:?}", edits);
+        // decl (0) + self.x (2) + struct-literal field (5) + p.x (6) = 4.
+        assert_eq!(edits.len(), 4, "got {:?}", edits);
         assert!(edits.iter().all(|e| e.new_text == "coord"));
+        assert!(
+            edits.iter().any(|e| e.range.start.line == 5),
+            "struct-literal field renamed (else the program won't compile)"
+        );
     }
 
     #[test]

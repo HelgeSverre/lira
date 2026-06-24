@@ -162,11 +162,17 @@ mod tests {
         let content = "struct Point { x: int, y: int }\nfn main() {\n    let p = Point { x: 1, y: 2 }\n    let a = p.x\n    let b = p.x\n}\n";
         // Cursor on `p.x` field name (line 3: `    let a = p.x`), `x` at col 14.
         let refs = find_references(&uri(), content, pos(3, 14), true);
-        // Field decl (line 0) + two accesses (lines 3, 4) = 3.
-        assert_eq!(refs.len(), 3, "got {:?}", refs);
+        // Field decl (line 0) + struct-literal field (line 2) + two accesses
+        // (lines 3, 4) = 4. The struct-literal `x` must be renamed too, or
+        // `Point { x: ... }` would reference the old name after a rename.
+        assert_eq!(refs.len(), 4, "got {:?}", refs);
         assert!(
             refs.iter().any(|l| l.range.start.line == 0),
             "decl included"
+        );
+        assert!(
+            refs.iter().any(|l| l.range.start.line == 2),
+            "struct-literal field included"
         );
         assert!(refs.iter().any(|l| l.range.start.line == 3));
         assert!(refs.iter().any(|l| l.range.start.line == 4));
@@ -178,10 +184,16 @@ mod tests {
         let content = "struct Point { x: int }\nstruct Box { x: int }\nfn main() {\n    let p = Point { x: 1 }\n    let q = Box { x: 9 }\n    let a = p.x\n    let b = q.x\n}\n";
         // Cursor on `p.x` (line 5: `    let a = p.x`), `x` at col 14.
         let refs = find_references(&uri(), content, pos(5, 14), true);
-        // Point.x decl (line 0) + the single Point access (line 5) = 2.
-        assert_eq!(refs.len(), 2, "got {:?}", refs);
-        // Never the Box.x decl (line 1) or the Box access (line 6).
+        // Point.x decl (line 0) + Point literal field (line 3) + the single
+        // Point access (line 5) = 3.
+        assert_eq!(refs.len(), 3, "got {:?}", refs);
+        assert!(
+            refs.iter().any(|l| l.range.start.line == 3),
+            "Point literal field included"
+        );
+        // Never Box.x: its decl (line 1), its literal (line 4), or access (line 6).
         assert!(refs.iter().all(|l| l.range.start.line != 1));
+        assert!(refs.iter().all(|l| l.range.start.line != 4));
         assert!(refs.iter().all(|l| l.range.start.line != 6));
     }
 
@@ -206,11 +218,15 @@ mod tests {
         let content = "struct Point { x: int }\nimpl Point {\n    fn get(self) -> int { self.x }\n}\nfn main() {\n    let p = Point { x: 1 }\n    let a = p.x\n}\n";
         // Cursor on the field decl `x` (line 0, col 15).
         let refs = find_references(&uri(), content, pos(0, 15), true);
-        // decl (line 0) + self.x (line 2) + p.x (line 6) = 3.
-        assert_eq!(refs.len(), 3, "got {:?}", refs);
+        // decl (line 0) + self.x (line 2) + literal (line 5) + p.x (line 6) = 4.
+        assert_eq!(refs.len(), 4, "got {:?}", refs);
         assert!(
             refs.iter().any(|l| l.range.start.line == 2),
             "self.x access"
+        );
+        assert!(
+            refs.iter().any(|l| l.range.start.line == 5),
+            "struct-literal field"
         );
     }
 
