@@ -1521,23 +1521,42 @@ impl TypeChecker {
             StatementKind::ImplDecl {
                 trait_name,
                 type_name,
-                type_params: _,
+                type_params,
                 methods,
             } => {
                 // Set current type name for Self resolution
                 let old_type_name = self.current_type_name.clone();
                 self.current_type_name = Some(type_name.clone());
 
+                // Type parameters declared on the impl block itself (e.g.
+                // `impl<T> Box<T>`). These are in scope for every method's
+                // signature. Generics are erased, so resolving to `TypeParam`
+                // (Any-compatible) is sufficient — codegen is unchanged.
+                let impl_type_params: HashMap<String, Vec<String>> = type_params
+                    .iter()
+                    .map(|tp| (tp.name.clone(), tp.bounds.clone()))
+                    .collect();
+
                 // Collect all implemented methods
                 let mut impl_methods: Vec<ImplMethod> = Vec::new();
                 for method in methods {
                     if let StatementKind::FnDecl {
                         name,
+                        type_params: method_type_params,
                         params,
                         return_type,
                         ..
                     } = &method.kind
                     {
+                        // Scope = impl type params + the method's own type
+                        // params (the method shadows the impl on collision).
+                        let mut scope = impl_type_params.clone();
+                        for tp in method_type_params {
+                            scope.insert(tp.name.clone(), tp.bounds.clone());
+                        }
+                        let old_type_params =
+                            std::mem::replace(&mut self.current_type_params, scope);
+
                         let has_self = params.first().map(|p| p.name == "self").unwrap_or(false);
                         let param_types: Vec<_> = params
                             .iter()
@@ -1547,6 +1566,8 @@ impl TypeChecker {
                             .as_ref()
                             .map(|t| self.resolve_type_expr(t))
                             .unwrap_or(Type::Any);
+
+                        self.current_type_params = old_type_params;
 
                         impl_methods.push(ImplMethod {
                             name: name.clone(),
@@ -3043,14 +3064,23 @@ impl TypeChecker {
                 receiver,
                 method,
                 args,
-                type_args: _, // TODO: Handle explicit type args for generic methods
+                type_args,
             } => {
                 let receiver_type = self.check_expression(receiver);
+                // Validate any explicit method type arguments (turbofish,
+                // e.g. `xs.collect::<int>()`). Generics are erased, so these
+                // resolve to TypeParam/concrete types but otherwise have no
+                // effect on the (dynamic) result type. We resolve them only to
+                // surface genuinely unknown type names.
+                for ty in type_args {
+                    let _ = self.resolve_type_expr(ty);
+                }
                 // Check arguments
                 for arg in args {
                     self.check_expression(&arg.value);
                 }
-                // For now, return Any - proper method resolution would go here
+                // Proper method resolution would refine this; the dynamic VM
+                // tolerates Any here.
                 let _ = (receiver_type, method);
                 Type::Any
             }
@@ -6320,6 +6350,62 @@ mod tests {
         assert!(
             result.is_err(),
             "bitwise on an unbounded type param should still be rejected"
+        );
+    }
+
+    #[test]
+    fn generic_method_signature_resolves_type_params() {
+        // `impl<T> Box<T>` with a method that introduces its own `<U>` must
+        // resolve both T and U rather than reporting `Unknown type`.
+        let result = check_source(
+            r#"
+            struct Box<T> { value: T }
+
+            impl<T> Box<T> {
+                fn get(self) -> T { return self.value }
+                fn map<U>(self, f: fn(T) -> U) -> Box<U> {
+                    return Box { value: f(self.value) }
+                }
+            }
+            "#,
+        );
+        assert!(
+            result.is_ok(),
+            "generic method signatures should resolve T/U as erased type params, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn resolve_type_expr_maps_type_param_not_unknown() {
+        use crate::ast::{TypeExpr, TypeExprKind};
+
+        let mut checker = TypeChecker::new();
+        checker
+            .current_type_params
+            .insert("T".to_string(), Vec::new());
+
+        let span = Span { line: 1, column: 1 };
+        let resolved = checker.resolve_type_expr(&TypeExpr {
+            kind: TypeExprKind::Named("T".to_string()),
+            span,
+        });
+        assert!(
+            matches!(resolved, Type::TypeParam(ref n) if n == "T"),
+            "an in-scope type param must resolve to TypeParam, got: {:?}",
+            resolved
+        );
+
+        // A name that is NOT in scope must still be Unknown (and report).
+        let span2 = Span { line: 1, column: 1 };
+        let unknown = checker.resolve_type_expr(&TypeExpr {
+            kind: TypeExprKind::Named("Nope".to_string()),
+            span: span2,
+        });
+        assert!(
+            matches!(unknown, Type::Unknown),
+            "an out-of-scope name must remain Unknown, got: {:?}",
+            unknown
         );
     }
 

@@ -1,0 +1,29 @@
+// Generic methods on generic structs (type erasure model)
+// @expect: got: 42
+// @expect: mapped: 84
+// @expect: name: lira
+
+struct Box<T> {
+    value: T
+}
+
+impl<T> Box<T> {
+    fn get(self) -> T {
+        return self.value
+    }
+
+    fn map<U>(self, f: fn(T) -> U) -> Box<U> {
+        return Box { value: f(self.value) }
+    }
+}
+
+fn main() {
+    let b = Box { value: 42 }
+    println("got: " + b.get())
+
+    let doubled = b.map(|x: int| x * 2)
+    println("mapped: " + doubled.get())
+
+    let s = Box { value: "lira" }
+    println("name: " + s.get())
+}

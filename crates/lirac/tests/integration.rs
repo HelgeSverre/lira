@@ -272,6 +272,7 @@ example_test!(test_generic_enum, "generic_enum.li");
 example_test!(test_try_operator, "try_operator.li");
 example_test!(test_result_propagation, "result_propagation.li");
 example_test!(test_impl_block, "impl_block.li");
+example_test!(test_generic_methods, "generic_methods.li");
 
 // Advanced features
 example_test!(test_null_and_optionals, "null_and_optionals.li");
