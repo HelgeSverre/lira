@@ -1,0 +1,19 @@
+// `let` binds an immutable value; `var` binds one you can reassign.
+// `const` is a compile-time constant. Local bindings infer their type
+// from the initializer — you annotate only where there's nothing to
+// infer from, like function parameters and return types.
+const MAX_RETRIES = 3
+
+fn main() {
+    let name = "Lira"      // inferred string
+    let answer = 42        // inferred int
+    let ratio = 0.5        // inferred float
+    let ready = true       // inferred bool
+
+    var count = 0          // var: reassignable
+    count = count + 1
+    count = count + 1
+
+    println("${name}: answer=${answer} ratio=${ratio} ready=${ready}")
+    println("count=${count} of ${MAX_RETRIES}")
+}

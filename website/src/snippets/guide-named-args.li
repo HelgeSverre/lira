@@ -1,0 +1,14 @@
+// Parameters may declare a default value. Callers can pass arguments
+// positionally, or by name (`name: value`) in any order — and skip any
+// parameter that has a default.
+fn greet(name: string, greeting: string = "Hello", excited: bool = false) -> string {
+    let mark = if excited { "!" } else { "." }
+    return "${greeting}, ${name}${mark}"
+}
+
+fn main() {
+    println(greet("Ada"))                              // both defaults
+    println(greet("Grace", greeting: "Hi"))            // override one
+    println(greet("Lin", greeting: "Hey", excited: true))
+    println(greet("Bob", excited: true))               // skip the middle default
+}

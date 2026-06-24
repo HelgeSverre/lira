@@ -6,35 +6,53 @@ import Code from "../components/Code.astro";
 <DocsLayout
   kicker="Guide"
   title="Getting started"
-  lede="Install the CLI, write your first program, and learn the core building blocks — values, functions, structs, and control flow."
+  lede="Install the CLI, write your first program, and work up through the core building blocks — values, functions, control flow, strings, arrays, structs, enums, Result, and a first taste of concurrency."
 >
   <div class="prose">
     <p>
       Lira is a statically-checked language that compiles to bytecode and runs
       on a small virtual machine. You write <code>.li</code> source, the checker
-      proves it sound, and the unified <code>lira</code> CLI runs it. Every
-      snippet on this page is a real file in the repository, verified to run
-      before this site is built.
+      proves it sound, and the unified <code>lira</code> CLI runs it. This page
+      is a progressive tour: each section builds on the last, and every snippet
+      is a real file in the repository, verified to run before this site is
+      built.
     </p>
 
-    <h2 id="cli">The CLI</h2>
+    <h2 id="install">Install &amp; the CLI</h2>
+    <p>
+      Lira builds from source with Cargo. From a clone of the repository, build
+      the release binary once:
+    </p>
+    <div class="diag-term" role="img" aria-label="Building Lira">
+      <pre><span class="diag-cmd">$ cargo build --release</span>   <span class="diag-note"># produces target/release/lira</span></pre>
+    </div>
     <p>
       A single binary, <code>lira</code>, drives the whole toolchain. The two
-      commands you reach for first are <code>run</code> and <code>check</code>.
+      commands you reach for first are <code>run</code> and <code>check</code>;
+      the rest expose each stage of the pipeline for when you want to look
+      inside.
     </p>
     <div class="diag-term" role="img" aria-label="Lira CLI commands">
-      <pre><span class="diag-cmd">$ lira run hello.li</span>     <span class="diag-note"># type-check, compile, and execute</span>
-<span class="diag-cmd">$ lira check hello.li</span>   <span class="diag-note"># type-check only, no output</span>
-<span class="diag-cmd">$ lira compile hello.li</span> <span class="diag-note"># emit bytecode (.lic)</span>
-<span class="diag-cmd">$ lira ast hello.li</span>     <span class="diag-note"># print the parsed AST</span>
-<span class="diag-cmd">$ lira disasm hello.li</span>  <span class="diag-note"># disassemble the bytecode</span></pre>
+      <pre><span class="diag-cmd">$ lira run hello.li</span>          <span class="diag-note"># type-check, compile, and execute</span>
+<span class="diag-cmd">$ lira check hello.li</span>        <span class="diag-note"># type-check only, no output</span>
+<span class="diag-cmd">$ lira compile hello.li</span>      <span class="diag-note"># emit bytecode → hello.lic</span>
+<span class="diag-cmd">$ lira ast hello.li</span>          <span class="diag-note"># dump the parsed AST as JSON</span>
+<span class="diag-cmd">$ lira disasm hello.lic</span>      <span class="diag-note"># disassemble compiled bytecode</span></pre>
     </div>
+    <aside class="callout callout--note">
+      <span class="callout__label">Note</span>
+      <p>
+        <code>disasm</code> reads a compiled <code>.lic</code> file, so run
+        <code>lira compile</code> first. A built-in <code>repl</code> command is
+        listed but is still coming soon.
+      </p>
+    </aside>
 
     <h2 id="hello">Hello, Lira</h2>
     <p>
       Execution starts at <code>fn&nbsp;main()</code>. <code>println</code> is a
-      VM built-in — no import needed — and strings interpolate with
-      <code>${"${…}"}</code>.
+      VM built-in — no import needed — and strings interpolate any expression
+      with <code>${"${…}"}</code>.
     </p>
     <Code file="website/src/snippets/guide-hello.li" filename="hello.li" />
     <p>Run it:</p>
@@ -46,47 +64,122 @@ Hello, world!</pre>
     <h2 id="values">Values and bindings</h2>
     <p>
       Bind a value with <code>let</code> for an immutable binding, or
-      <code>var</code> when you need to reassign it later. Local bindings infer
-      their type from the initializer; you only annotate where there is nothing
-      to infer from — function parameters and return types.
+      <code>var</code> when you need to reassign it later; <code>const</code> is
+      a compile-time constant. Local bindings infer their type from the
+      initializer — you only annotate where there is nothing to infer from, such
+      as function parameters and return types.
     </p>
+    <Code file="website/src/snippets/guide-values.li" filename="values.li" />
     <aside class="callout callout--note">
       <span class="callout__label">Note</span>
       <p>
         <code>let</code> is immutable: reassigning it is a compile error. Reach
         for <code>var</code> only when a value genuinely changes, like a loop
-        counter or an accumulator.
+        counter or an accumulator. The full set of types — optionals, generics,
+        and <code>Result</code> — is covered on the
+        <a href="/types">type system</a> page.
       </p>
     </aside>
 
     <h2 id="functions">Functions</h2>
     <p>
       Functions annotate each parameter and, if they return a value, the return
-      type after <code>-&gt;</code>. A function with no <code>-&gt;&nbsp;T</code>
-      returns nothing.
+      type after <code>-&gt;</code>. A function with no
+      <code>-&gt;&nbsp;T</code> returns nothing. Inside a body, <code>let</code>
+      bindings infer their type from the value.
     </p>
     <Code
       file="website/src/snippets/guide-functions.li"
       filename="functions.li"
     />
 
-    <h2 id="structs">Structs</h2>
+    <h3 id="named-args">Named arguments &amp; defaults</h3>
     <p>
-      Structs group named fields. Construct one with
-      <code>{"Name { field: value }"}</code> and read fields back with dot access.
-      <code>abs</code> here is a free function; many small numeric helpers are
-      built in.
+      A parameter may declare a default value. Callers can pass arguments
+      positionally, or by name with <code>name:&nbsp;value</code> in any order —
+      and skip any parameter that has a default. Named arguments make
+      call sites self-documenting and let defaults stand in for the rest.
     </p>
-    <Code file="website/src/snippets/guide-structs.li" filename="structs.li" />
+    <Code
+      file="website/src/snippets/guide-named-args.li"
+      filename="named_args.li"
+    />
 
     <h2 id="control">Control flow</h2>
     <p>
-      <code>if</code>/<code>else</code> and <code>while</code> work as you would
-      expect. The one worth highlighting is <code>match</code>: it is an
-      <em>expression</em>, so each arm yields a value and the whole match
-      evaluates to the arm that fits.
+      <code>if</code> is an <em>expression</em>: each branch yields a value, so
+      you can bind the whole thing to a <code>let</code>. <code>while</code>,
+      <code>for…in</code>, and the unbounded <code>loop&nbsp;{}</code> (which you
+      leave with <code>break</code>) drive iteration. And <code>match</code> —
+      the workhorse — is an expression too: each arm yields a value and the whole
+      match evaluates to the arm that fits.
     </p>
     <Code file="website/src/snippets/guide-control.li" filename="control.li" />
+    <p>
+      <code>match</code> is far richer than this — literals, bindings, guards,
+      and enforced exhaustiveness all live on the
+      <a href="/patterns">pattern matching</a> page.
+    </p>
+
+    <h2 id="strings">Strings &amp; interpolation</h2>
+    <p>
+      String literals interpolate any expression with <code>${"${…}"}</code> and
+      concatenate with <code>+</code>. Importing <code>std.strings</code> adds
+      method-style helpers like <code>to_upper</code> and <code>contains</code>.
+      To keep a literal dollar-brace, escape it as <code>\${"${}"}</code>.
+    </p>
+    <Code file="website/src/snippets/guide-strings.li" filename="strings.li" />
+
+    <h2 id="arrays">Arrays</h2>
+    <p>
+      Arrays are ordered and homogeneous. Index with <code>[i]</code>, ask for
+      <code>len(...)</code>, grow them with <code>push(...)</code>, and walk them
+      with <code>for…in</code>.
+    </p>
+    <Code file="website/src/snippets/guide-arrays.li" filename="arrays.li" />
+
+    <h2 id="data">Structs, enums &amp; Result</h2>
+    <p>
+      Structs group named fields; construct one with
+      <code>{"Name { field: value }"}</code> and read fields back with dot
+      access. Enums model a fixed set of cases, some of which carry data, and
+      <code>match</code> reads them back exhaustively — the checker rejects a
+      match that forgets a case. <code>Result&lt;T,&nbsp;E&gt;</code> is the
+      idiom for fallible work, and the <code>?</code> operator returns early on
+      an <code>Err</code> so the happy path stays flat.
+    </p>
+    <Code file="website/src/snippets/guide-data.li" filename="data.li" />
+    <aside class="callout callout--note">
+      <span class="callout__label">Note</span>
+      <p>
+        Generics, optionals (<code>T?</code>), and the <code>?</code> operator
+        get full treatment on the <a href="/types">type system</a> page;
+        exhaustiveness and richer patterns live on
+        <a href="/patterns">pattern matching</a>. The
+        <a href="/examples">examples gallery</a> has runnable versions of all of
+        these.
+      </p>
+    </aside>
+
+    <h2 id="concurrency">A taste of concurrency</h2>
+    <p>
+      Concurrency is one of Lira's signature features. <code>spawn</code> runs a
+      function on a lightweight fiber — a green thread scheduled by the VM —
+      and channels carry typed values between fibers. A <code>select</code> arm
+      binds a received value (using <code>recv</code> as a bare expression yields
+      an ok-bool, so the <code>select</code> arm is how you capture the value
+      itself).
+    </p>
+    <Code
+      file="website/src/snippets/guide-concurrency.li"
+      filename="concurrency.li"
+    />
+    <p>
+      That is the whole shape in miniature. Fibers, buffered vs. unbuffered
+      channels, <code>select</code> multiplexing, mutexes, semaphores, and wait
+      groups all get the full treatment on the
+      <a href="/concurrency">concurrency</a> page.
+    </p>
 
     <h2 id="diagnostics">When something is wrong</h2>
     <p>
@@ -100,6 +193,10 @@ Hello, world!</pre>
 <span class="diag-err">7:5: Cannot assign to immutable variable: total</span>
 <span class="diag-err">12:13: Undefined variable: y</span></pre>
     </div>
+    <p>
+      Because <code>lira check</code> never produces output on success, it is the
+      fast inner loop: fix until it is silent, then <code>lira run</code>.
+    </p>
 
     <h2 id="next">Where to go next</h2>
     <p>
@@ -109,7 +206,8 @@ Hello, world!</pre>
       optionals, and <code>Result</code>; and
       <a href="/patterns">pattern matching</a> with enforced exhaustiveness. The
       <a href="/stdlib">standard library</a> covers the everyday work in
-      between.
+      between, and the <a href="/examples">examples gallery</a> collects real
+      programs you can read end to end.
     </p>
   </div>
 </DocsLayout>

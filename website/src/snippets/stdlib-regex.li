@@ -1,0 +1,19 @@
+import std.regex
+
+fn main() {
+    // Validators return bool.
+    println(is_email("ada@lira.dev"))     // true
+    println(is_email("not-an-email"))     // false
+    println(is_url("https://lira.dev"))   // true
+    println(is_digits("12345"))           // true
+
+    // Extractors return [string].
+    let nums = extract_numbers("order 42 ships in 3 days")
+    println(nums)                         // [42, 3]
+
+    let words = extract_words("two words")
+    println(len(words))                   // 2
+
+    // Whitespace normalizers.
+    println(normalize_whitespace("a   b    c"))  // a b c
+}

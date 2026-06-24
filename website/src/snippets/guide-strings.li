@@ -1,0 +1,22 @@
+// Strings interpolate any expression with ${...}, concatenate with +,
+// and the std.strings module adds methods like to_upper and contains.
+import std.strings
+
+fn main() {
+    let name = "Lira"
+    let version = 7
+
+    println("Welcome to ${name}, v${version}")
+    println("2 + 2 = ${2 + 2}")
+
+    // Concatenate with +.
+    let shout = name + "!"
+    println(shout)
+
+    // Methods from std.strings.
+    println(name.to_upper())
+    println("${name} contains 'ir': ${name.contains("ir")}")
+
+    // \${ stays a literal dollar-brace.
+    println("a literal \${placeholder}")
+}

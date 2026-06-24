@@ -1,0 +1,23 @@
+import std.time
+
+fn main() {
+    // int gains duration helpers: 90.minutes() -> milliseconds.
+    let ninety_min = (90).minutes()
+    println(ninety_min)              // 5400000
+
+    // Build a fixed timestamp so output is deterministic.
+    let t = timestamp_from_datetime(2026, 6, 24, 9, 30, 0)
+
+    // Formatting methods on the Timestamp struct.
+    println(t.format_date())         // 2026-06-24
+    println(t.to_iso())              // 2026-06-24T09:30:00+00:00
+
+    // Arithmetic returns new timestamps; diff is in milliseconds.
+    let later = t.add(ninety_min)
+    println(later.format_time())     // 11:00:00
+    println(later.diff(t))           // 5400000
+
+    // Component accessors.
+    println(t.year())                // 2026
+    println(t.hour())                // 9
+}

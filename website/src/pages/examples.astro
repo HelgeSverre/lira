@@ -1,0 +1,229 @@
+---
+import DocsLayout from "../layouts/DocsLayout.astro";
+import Code from "../components/Code.astro";
+---
+
+<DocsLayout
+  kicker="Reference"
+  title="Examples"
+  lede="Real programs from the repository, every one verified to run under `lira run`. Each snippet below is an actual .li file — the same files the compiler checks when this site is built."
+>
+  <div class="prose">
+    <p>
+      This gallery is a guided tour of the <code>examples/</code> directory.
+      The programs are ordered roughly from "first ten minutes with Lira" to
+      "putting the standard library to work", and each one cross-links to the
+      deep-dive page where the feature is explained in full. New to the
+      language? Start with the <a href="/guide">guide</a>, then come back here
+      to see the pieces combined.
+    </p>
+
+    <aside class="callout callout--note">
+      <span class="callout__label">Every snippet runs</span>
+      <p>
+        Each example is rendered directly from its source file in the repo and
+        is re-compiled on every build. If any of them stopped running, the site
+        would fail to build — so what you see is exactly what executes.
+      </p>
+    </aside>
+
+    <h2 id="basics">Basics</h2>
+    <p>
+      The starting point: output, string interpolation, branching, and
+      iteration. These use only built-in syntax — no imports required.
+    </p>
+
+    <p>
+      <code>println</code> writes a line to standard output. The smallest
+      possible Lira program is a script with no <code>main</code> at all.
+    </p>
+    <Code file="examples/hello.li" filename="hello.li" />
+
+    <p>
+      String interpolation uses <code>{"${expr}"}</code> inside a string
+      literal, and any expression can go in the braces.
+    </p>
+    <Code
+      file="examples/string_interpolation.li"
+      filename="string_interpolation.li"
+    />
+
+    <p>
+      <code>if</code>/<code>else</code> and <code>while</code> work the way you
+      expect, and conditions are plain expressions.
+    </p>
+    <Code file="examples/control_flow.li" filename="control_flow.li" />
+
+    <p>
+      <code>for … in</code> iterates over arrays. Iterating an empty array
+      simply runs zero times.
+    </p>
+    <Code file="examples/for_loop.li" filename="for_loop.li" />
+
+    <h2 id="types">Structs &amp; enums</h2>
+    <p>
+      Lira's data modelling rests on <code>struct</code> (named fields, with
+      methods) and <code>enum</code> (a closed set of variants, optionally
+      carrying data). See <a href="/types">Types</a> for the full type system.
+    </p>
+
+    <p>
+      Structs bundle fields and methods. Methods take <code>self</code> as the
+      first parameter and are called with dot syntax.
+    </p>
+    <Code file="examples/structs.li" filename="structs.li" />
+
+    <p>
+      A C-style enum is a set of named variants, constructed with the
+      <code>::</code> syntax.
+    </p>
+    <Code file="examples/enums_basic.li" filename="enums_basic.li" />
+
+    <p>
+      Variants can carry data. Here <code>Option::Some(int)</code> wraps a
+      value, and a <code>match</code> pulls it back out.
+    </p>
+    <Code file="examples/enum_data.li" filename="enum_data.li" />
+
+    <h2 id="patterns">Pattern matching</h2>
+    <p>
+      <code>match</code> is an expression: every arm produces a value, and the
+      checker enforces exhaustiveness. The
+      <a href="/patterns">Patterns</a> page covers literals, bindings,
+      wildcards, and guards in depth.
+    </p>
+
+    <p>
+      Matching on literal values, with <code>_</code> as the catch-all.
+    </p>
+    <Code file="examples/pattern_match.li" filename="pattern_match.li" />
+
+    <p>
+      When every enum variant is covered, the match is exhaustive and needs no
+      wildcard — and the checker accepts it.
+    </p>
+    <Code
+      file="examples/match_exhaustive_enum.li"
+      filename="match_exhaustive_enum.li"
+    />
+
+    <p>
+      Guards add a boolean condition to an arm with
+      <code>pattern if cond =&gt; …</code>, letting one binding fan out into
+      several cases.
+    </p>
+    <Code file="examples/pattern_guards.li" filename="pattern_guards.li" />
+
+    <h2 id="generics">Generics</h2>
+    <p>
+      Functions, structs, and enums can be parameterized over types with
+      <code>&lt;T&gt;</code>. See <a href="/types">Types</a> for how generic
+      type parameters are checked.
+    </p>
+
+    <p>
+      A generic <code>identity</code> function and a generic <code>Box</code>
+      struct, reused at different element types.
+    </p>
+    <Code file="examples/generics_basic.li" filename="generics_basic.li" />
+
+    <p>
+      Enums are generic too — including multi-parameter variants like
+      <code>Pair&lt;A, B&gt;</code>.
+    </p>
+    <Code file="examples/generic_enum.li" filename="generic_enum.li" />
+
+    <h2 id="errors">Error handling</h2>
+    <p>
+      Lira models fallible work with <code>Result&lt;T, E&gt;</code> and
+      missing values with the optional type <code>T?</code>. The <code>?</code>
+      operator propagates the error or null case early, so the happy path stays
+      flat.
+    </p>
+
+    <p>
+      <code>divide</code> returns a <code>Result</code>; <code>?</code> in
+      <code>calculate</code> unwraps the <code>Ok</code> value or returns the
+      <code>Err</code> to the caller.
+    </p>
+    <Code
+      file="examples/result_propagation.li"
+      filename="result_propagation.li"
+    />
+
+    <p>
+      The same <code>?</code> operator works on optional types
+      (<code>int?</code>): it short-circuits to <code>null</code> when the value
+      is absent.
+    </p>
+    <Code file="examples/try_operator.li" filename="try_operator.li" />
+
+    <h2 id="concurrency">Concurrency</h2>
+    <p>
+      Fibers, channels, <code>select</code>, and <code>std.sync</code> make up
+      Lira's Go-shaped concurrency model. The
+      <a href="/concurrency">Concurrency</a> page walks through the whole thing,
+      including the worker-pool pattern.
+    </p>
+
+    <p>
+      Channels are created with <code>chan(n)</code> for a buffered channel.
+    </p>
+    <Code file="examples/channel_basic.li" filename="channel_basic.li" />
+
+    <p>
+      <code>select</code> waits on channel operations; a default arm makes it
+      non-blocking.
+    </p>
+    <Code file="examples/select_basic.li" filename="select_basic.li" />
+
+    <p>
+      <code>spawn</code> starts a function call on a fresh fiber. It takes a
+      call, not a block, and returns nothing.
+    </p>
+    <Code file="examples/spawn_expression.li" filename="spawn_expression.li" />
+
+    <p>
+      When you genuinely need shared mutable state, <code>import std.sync</code>
+      gives you a typed <code>IntMutex</code> and a <code>WaitGroup</code>. Two
+      fibers each increment the counter a thousand times, and the total lands on
+      exactly 2000 — no lost updates.
+    </p>
+    <Code
+      file="examples/sync_mutex_waitgroup.li"
+      filename="sync_mutex_waitgroup.li"
+    />
+
+    <h2 id="stdlib">Stdlib in anger</h2>
+    <p>
+      Two programs that lean on real <code>import std.X</code> declarations.
+      For the full surface area, see the
+      <a href="/stdlib">standard library reference</a>.
+    </p>
+
+    <p>
+      The module system exercised end to end: <code>import std.core</code> for
+      <code>int</code> methods like <code>abs</code>/<code>clamp</code> plus the
+      free <code>min</code>/<code>max</code>, and more.
+    </p>
+    <Code
+      file="examples/module_comprehensive.li"
+      filename="module_comprehensive.li"
+    />
+
+    <p>
+      <code>import std.collections</code> brings array helpers like
+      <code>sum</code>, <code>product</code>, <code>filter_*</code>,
+      <code>sort</code>, <code>unique</code>, and <code>range</code> into scope
+      as methods on arrays.
+    </p>
+    <Code file="examples/test_collections.li" filename="test_collections.li" />
+
+    <p>
+      Want more? Every file under <code>examples/</code> in the repository runs
+      the same way. Head to the <a href="/guide">guide</a> for a structured
+      walkthrough, or the <a href="/stdlib">standard library</a> for the full
+      API.
+    </p>
+  </div>
+</DocsLayout>

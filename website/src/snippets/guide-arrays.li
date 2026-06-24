@@ -1,0 +1,21 @@
+// Arrays are ordered, homogeneous, and grow with push. Index with [i],
+// ask for len(...), and walk them with for-in.
+fn main() {
+    let nums = [4, 8, 15, 16, 23, 42]
+
+    println("first=${nums[0]} last=${nums[5]} len=${len(nums)}")
+
+    // Sum with for-in.
+    var total = 0
+    for n in nums {
+        total = total + n
+    }
+    println("sum=${total}")
+
+    // Build one up with a `var` binding and push.
+    var doubled = []
+    for n in nums {
+        push(doubled, n * 2)
+    }
+    println("doubled first=${doubled[0]} len=${len(doubled)}")
+}

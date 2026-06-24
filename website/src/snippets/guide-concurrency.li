@@ -1,0 +1,17 @@
+// A taste of concurrency: `spawn` runs a function on a lightweight fiber,
+// channels carry typed values between fibers, and a `select` arm binds
+// a received value. (recv(ch) as a bare expression yields an ok-bool, so
+// the select arm is how you capture the value itself.)
+fn square(out: Channel<int>, n: int) {
+    send(out, n * n)
+}
+
+fn main() {
+    let ch = chan(1)         // buffered channel holding one int
+
+    spawn square(ch, 9)      // runs on its own fiber
+
+    select {
+        v = <-ch => println("9 squared is ${v}")
+    }
+}

@@ -1,0 +1,43 @@
+// Structs hold named fields; enums model a fixed set of cases, some of
+// which carry data. `match` reads them back, and the checker enforces
+// that every case is handled.
+struct User {
+    name: string,
+    age: int,
+}
+
+enum Plan {
+    Free,
+    Pro,
+    Team(int),   // number of seats
+}
+
+fn price(p: Plan) -> int {
+    return match p {
+        Plan::Free => 0,
+        Plan::Pro => 12,
+        Plan::Team(seats) => seats * 9,
+    }
+}
+
+// Result<T, E> is the idiom for fallible work; `?` returns early on Err.
+fn parse_age(raw: int) -> Result<int, string> {
+    if raw < 0 {
+        return Result::Err("age cannot be negative")
+    }
+    return Result::Ok(raw)
+}
+
+fn make_user(name: string, raw: int) -> Result<User, string> {
+    let age = parse_age(raw)?        // propagates the Err if there is one
+    return Result::Ok(User { name: name, age: age })
+}
+
+fn main() {
+    match make_user("Ada", 36) {
+        Result::Ok(user) => println("${user.name} is ${user.age}"),
+        Result::Err(e) => println("error: ${e}"),
+    }
+
+    println("Free=${price(Plan::Free)} Pro=${price(Plan::Pro)} Team(5)=${price(Plan::Team(5))}")
+}

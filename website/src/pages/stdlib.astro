@@ -2,133 +2,312 @@
 import DocsLayout from "../layouts/DocsLayout.astro";
 import Code from "../components/Code.astro";
 
-// Every module below was confirmed to import via `lira run`, and every
-// signature was read straight from stdlib/*.li — nothing here is invented.
-const modules = [
+// Every signature below was read straight from stdlib/*.li — nothing here is
+// invented. Methods are written `T::method`; free functions stand alone.
+// Each module is tagged pure (self-contained Lira, runnable example shown) or
+// I/O (a thin wrapper over a runtime builtin — signatures only).
+
+const groups = [
   {
-    name: "collections",
-    blurb:
-      "Array methods — sum, min, max, sort, unique, filter_even, contains, slice, concat — plus range / range_step generators.",
-    pure: true,
+    id: "numbers",
+    title: "Numbers & collections",
+    intro:
+      "core extends int with abs / clamp and adds min / max. math hangs single-argument operations off int and float and exposes multi-argument helpers as free functions. collections adds methods to typed arrays.",
+    modules: [
+      {
+        name: "core",
+        pure: true,
+        sigs: [
+          "int::abs() -> int",
+          "int::clamp(min, max) -> int",
+          "min(a: int, b: int) -> int",
+          "max(a: int, b: int) -> int",
+        ],
+      },
+      {
+        name: "math",
+        pure: true,
+        sigs: [
+          "// constants (functions returning float)",
+          "math_pi() · math_e() · math_tau() · math_sqrt2() · math_ln2() · math_log10e()",
+          "// int methods",
+          "int::{sign, factorial, fibonacci, is_prime, is_even, is_odd}() -> ...",
+          "int::{is_power_of_two, square, cube, next_power_of_two, popcount}() -> int",
+          "int::{sum_to, sum_squares_to}() -> int · int::pow(exp) · int::mod_floor(div)",
+          "// float methods",
+          "float::{sign, square, cube, cbrt, sigmoid, relu}() -> float",
+          "float::{to_radians, to_degrees, wrap_angle, normalize_angle}() -> float",
+          "float::clamp(min, max) -> float",
+          "// free functions",
+          "lerp(a, b, t) · inverse_lerp(a, b, v) · smoothstep(e0, e1, x)",
+          "hypot(x, y) · distance(x1, y1, x2, y2) · distance3d(...)",
+          "gcd(a, b) · lcm(a, b) · binomial(n, k) · nthroot(x, n) · log(x, base)",
+          "min_float(a, b) · max_float(a, b) · approx_equal(a, b, eps)",
+          "map_range(v, in_min, in_max, out_min, out_max) · leaky_relu(x, alpha)",
+          "sec(x) · csc(x) · cot(x) · asinh(x) · acosh(x) · atanh(x)",
+        ],
+      },
+      {
+        name: "collections",
+        pure: true,
+        sigs: [
+          "// on [int]",
+          "[int]::{map_double, map_square, filter_positive, filter_even, filter_odd}() -> [int]",
+          "[int]::{sum, product, min, max, count, index_of}() -> int · [int]::average() -> float",
+          "[int]::{reverse, unique, sort, sort_desc}() -> [int]",
+          "[int]::{take(n), skip(n), slice(start, end), concat(other)} -> [int]",
+          "[int]::contains(value) -> bool · [int]::{all_truthy, any_truthy, none_truthy}() -> bool",
+          "[int]::repeat(value, n) -> [int]   (static) · [[int]]::flatten() -> [int]",
+          "// on [float] — same reductions / transforms, plus filter_negative",
+          "// on [string]",
+          "[string]::{contains(v) -> bool, index_of(v) -> int, reverse() -> [string]}",
+          "// free generators",
+          "range(start, end) -> [int] · range_step(start, end, step) -> [int]",
+        ],
+      },
+    ],
   },
   {
-    name: "core",
-    blurb:
-      "abs and clamp as methods on int; min and max as free functions.",
-    pure: true,
+    id: "text",
+    title: "Text",
+    intro:
+      "strings extends the string type with methods, so you write name.to_upper() rather than to_upper(name). regex layers validators and extractors over the regex_* builtins.",
+    modules: [
+      {
+        name: "strings",
+        pure: true,
+        sigs: [
+          "string::{to_upper, to_lower, capitalize, title_case}() -> string",
+          "string::{trim, trim_start, trim_end, reverse}() -> string",
+          "string::char_at(i) -> string · string::char_code(i) -> int · string::substring(start, end)",
+          "string::{index_of, last_index_of}(substr) -> int · string::contains(substr) -> bool",
+          "string::{starts_with(prefix), ends_with(suffix)} -> bool",
+          "string::split(delim) -> [string] · string::{replace, replace_first}(old, new) -> string",
+          "string::repeat(count) -> string · string::{pad_start, pad_end}(length, pad) -> string",
+          "string::{is_empty, is_blank, is_numeric, is_alpha, is_alphanumeric}() -> bool",
+          "string::count(substr) -> int · string::word_count() -> int",
+          "// free functions",
+          "from_char_code(code) -> string · join(arr: [string], delim) -> string",
+        ],
+      },
+      {
+        name: "regex",
+        pure: true,
+        sigs: [
+          "is_email(text) · is_url(text) · is_phone(text) -> bool",
+          "is_digits(text) · is_alpha(text) · is_alphanumeric(text) -> bool",
+          "extract_numbers(text) -> [string] · extract_words(text) -> [string]",
+          "remove_whitespace(text) -> string · normalize_whitespace(text) -> string",
+        ],
+      },
+    ],
   },
   {
-    name: "math",
-    blurb:
-      "factorial, fibonacci, is_prime, sign on numbers; gcd, lcm, lerp, hypot and the math_pi / math_e constants.",
-    pure: true,
+    id: "data",
+    title: "Data formats",
+    intro:
+      "json wraps the json_parse / json_stringify / json_pretty builtins with safe helpers. url, uuid and hash sit on their own runtime builtins.",
+    modules: [
+      {
+        name: "json",
+        pure: true,
+        sigs: [
+          "// VM builtins (no import)",
+          "json_parse(text) · json_stringify(value) · json_pretty(value)",
+          "// std.json helpers",
+          "json_get(obj, key) · json_has(obj, key) -> bool · is_json_value(val) -> bool",
+          "json_object() · json_array() · json_parse_safe(text)",
+        ],
+      },
+      {
+        name: "url",
+        pure: true,
+        sigs: [
+          "struct URL",
+          "url_parse(str) -> URL · url_build(url: URL) -> string",
+          "url_origin(url) · url_path_query(url) -> string",
+          "url_is_absolute(s) · url_is_relative(s) · url_is_http(url) · url_is_https(url) · url_is_secure(url) -> bool",
+          "query_parse(q) -> [string] · query_get(q, key) -> string · query_has(q, key) -> bool · query_build(pairs)",
+        ],
+      },
+      {
+        name: "uuid",
+        pure: true,
+        sigs: [
+          "uuid() · generate() · random() · time_ordered() -> string",
+          "is_nil(uuid) -> bool · version(uuid) -> int",
+        ],
+      },
+      {
+        name: "hash",
+        pure: true,
+        sigs: [
+          "// builtins: md5 / sha1 / sha256 / sha512",
+          "verify_md5(input, expected) · verify_sha1(...) · verify_sha256(...) · verify_sha512(...) -> bool",
+          "md5_salted(input, salt) -> string · sha256_salted(input, salt) -> string",
+        ],
+      },
+    ],
   },
   {
-    name: "strings",
-    blurb:
-      "Methods on the string type: to_upper, trim, split, replace, starts_with, pad_start, and more; join as a free function.",
-    pure: true,
+    id: "time",
+    title: "Time",
+    intro:
+      "time adds duration helpers to int (90.minutes() -> milliseconds) and a Timestamp struct with formatting, arithmetic, and comparison methods.",
+    modules: [
+      {
+        name: "time",
+        pure: true,
+        sigs: [
+          "int::{seconds, minutes, hours, days, weeks}() -> int   (durations in ms)",
+          "struct Timestamp",
+          "timestamp_now() · timestamp_from_ms(ms) · timestamp_from_date(y, m, d)",
+          "timestamp_from_datetime(y, mo, d, h, mi, s) · timestamp_parse_iso(s) -> Timestamp",
+          "Timestamp::{to_iso, format(fmt), format_date, format_time, format_datetime, format_readable}() -> string",
+          "Timestamp::{add(ms), subtract(ms)} -> Timestamp · Timestamp::diff(other) -> int",
+          "Timestamp::{elapsed, elapsed_secs}() -> int",
+          "Timestamp::{is_before, is_after, is_past, is_future, is_today}() -> bool",
+          "Timestamp::{year, month, day, hour, minute, second}() -> int · Timestamp::components() -> [int]",
+          "today() · now_time() · now_iso() -> string · timezone_offset() -> int",
+        ],
+      },
+    ],
   },
   {
-    name: "json",
-    blurb:
-      "Helpers (json_has, json_get, json_object) over the json_parse / json_stringify builtins.",
-    pure: true,
+    id: "concurrency",
+    title: "Concurrency",
+    intro:
+      "sync gives you mutual exclusion and coordination built on the same channels and fibers covered in the concurrency guide. Because Lira has no RAII, locking is explicit: lock() takes the value out, unlock(v) puts one back; the with closure brackets that pair for you.",
+    modules: [
+      {
+        name: "sync",
+        pure: true,
+        sigs: [
+          "struct IntMutex · new_int_mutex(initial) -> IntMutex",
+          "IntMutex::lock() -> int · IntMutex::unlock(value) · IntMutex::with(f: fn(int) -> int)",
+          "struct StringMutex · new_string_mutex(initial) -> StringMutex   (lock / unlock / with)",
+          "struct WaitGroup · new_wait_group() -> WaitGroup · WaitGroup::done() · WaitGroup::wait(n)",
+          "struct Semaphore · new_semaphore(n) -> Semaphore · Semaphore::acquire() · Semaphore::release()",
+        ],
+      },
+    ],
   },
   {
-    name: "sync",
-    blurb:
-      "IntMutex, StringMutex, WaitGroup, Semaphore — explicit lock/unlock and with, built honestly on channels.",
-    pure: true,
+    id: "system",
+    title: "System & I/O",
+    intro:
+      "Thin, honest wrappers around runtime builtins: file handles, the system clock, the filesystem, and environment variables. Output depends on the host, so these are listed by signature.",
+    modules: [
+      {
+        name: "io",
+        pure: false,
+        sigs: [
+          "print_str(s) · print_line(s) · print_fmt(template, values: [string])",
+          "debug(label, value: int) · assert(condition: bool, message)",
+          "now_ms() -> int · delay(ms) · measure_time() -> int",
+        ],
+      },
+      {
+        name: "fs",
+        pure: false,
+        sigs: [
+          "read_file(path) -> string · write_file(path, content) -> bool",
+          "append_file(path, content) -> bool · exists(path) -> bool · size(path) -> int",
+        ],
+      },
+      {
+        name: "os",
+        pure: false,
+        sigs: [
+          "walk(path) -> [string] · exists(path) -> bool",
+          "home_dir() -> string · temp_dir() -> string",
+        ],
+      },
+      {
+        name: "env",
+        pure: false,
+        sigs: [
+          "get_or(name, default) -> string · get_bool(name) -> bool",
+          "is_ci() · is_debug() -> bool · user() · shell() -> string",
+        ],
+      },
+      {
+        name: "path",
+        pure: false,
+        sigs: [
+          "dirname(p) · basename(p) · extension(p) · stem(p) · parent(p) · normalize(p) -> string",
+          "is_absolute(p) · is_relative(p) · has_extension(p) · starts_with(p, pre) · ends_with(p, suf) -> bool",
+          "with_extension(p, ext) -> string · components(p) -> [string]",
+          "join(p1, p2) -> string · path_join(parts: [string]) -> string",
+        ],
+      },
+    ],
   },
   {
-    name: "regex",
-    blurb:
-      "is_email, is_url, extract_numbers, extract_words over the regex_* builtins.",
-    pure: true,
+    id: "network",
+    title: "Network",
+    intro:
+      "http and net wrap the runtime's HTTP and TCP builtins. They perform real I/O, so they are listed by signature.",
+    modules: [
+      {
+        name: "http",
+        pure: false,
+        sigs: [
+          "get(url) · get_ok(url) -> string",
+          "post_json(url, data) · post_form(url, data) · post_text(url, data) -> string",
+          "is_success(status) · is_redirect(status) · is_client_error(status) · is_server_error(status) · is_error(status) -> bool",
+        ],
+      },
+      {
+        name: "net",
+        pure: false,
+        sigs: [
+          "tcp_try_connect(host, port) -> int · is_connected(socket_id) -> bool",
+          "tcp_write_line(socket_id, line) -> int · tcp_write_lines(socket_id, lines: [string]) -> int",
+          "tcp_read_exact(socket_id, n) -> string · tcp_close_safe(socket_id) -> bool",
+        ],
+      },
+    ],
   },
   {
-    name: "random",
-    blurb:
-      "random_bool, random_range, dice_roll, coin_flip, shuffle_int_array over the random() builtin.",
-    pure: true,
-  },
-  {
-    name: "uuid",
-    blurb:
-      "uuid, time_ordered, is_nil, version — wrappers over uuid_v4 / uuid_v7 builtins.",
-    pure: true,
-  },
-  {
-    name: "url",
-    blurb:
-      "url_parse / url_build into a URL struct, plus query_parse / query_get / query_has.",
-    pure: true,
-  },
-  {
-    name: "path",
-    blurb:
-      "dirname, basename, extension, starts_with — Unix-style path string manipulation.",
-    pure: true,
-  },
-  {
-    name: "hash",
-    blurb:
-      "verify_md5 / verify_sha256, salted variants over the md5 / sha1 / sha256 / sha512 builtins.",
-    pure: true,
-  },
-  {
-    name: "time",
-    blurb:
-      "A Timestamp struct with timestamp_now, parsing, and formatting helpers.",
-    pure: true,
-  },
-  {
-    name: "env",
-    blurb:
-      "get_or, get_bool, is_ci, user, shell over the env_get / env_args builtins.",
-    pure: false,
-  },
-  {
-    name: "fs",
-    blurb:
-      "read_file, write_file, append_file, exists, size — high-level file ops.",
-    pure: false,
-  },
-  {
-    name: "os",
-    blurb: "walk, exists, home_dir, temp_dir.",
-    pure: false,
-  },
-  {
-    name: "io",
-    blurb:
-      "print_str, print_line, print_fmt, assert, plus now_ms / measure_time timing helpers.",
-    pure: false,
-  },
-  {
-    name: "log",
-    blurb:
-      "Leveled logging — debug, info, warn, error, fatal — as stateless functions.",
-    pure: false,
-  },
-  {
-    name: "http",
-    blurb:
-      "get, get_ok, post_json plus status-class predicates (is_success, is_redirect, …).",
-    pure: false,
-  },
-  {
-    name: "net",
-    blurb:
-      "TCP helpers — tcp_try_connect, tcp_write_line, tcp_read_exact, tcp_close_safe.",
-    pure: false,
-  },
-  {
-    name: "test",
-    blurb:
-      "describe, test, assert, assert_eq, summary — a tiny stateless assertion toolkit.",
-    pure: false,
+    id: "tooling",
+    title: "Testing, logging & random",
+    intro:
+      "test is a stateless assertion toolkit, log a leveled logger, and random a generator over the random() builtin. random is pure-ish but nondeterministic, so it is listed by signature.",
+    modules: [
+      {
+        name: "test",
+        pure: false,
+        sigs: [
+          "describe(name) · section(name) · test(name, passed) -> bool · run_test(name, passed) -> int",
+          "summary(total, passed, failed) · skip(name, reason) · expect_fail(name, passed) -> bool",
+          "assert(c) · assert_eq(a, b) · assert_eq_str(a, b) · assert_eq_float(a, b, eps) · assert_ne(a, b)",
+          "assert_true(v) · assert_false(v) · assert_gt / gte / lt / lte(a, b)  (+ _float variants)",
+          "assert_between(v, min, max) · assert_contains(hay, needle) · assert_starts_with / ends_with",
+          "assert_len(arr, n) · assert_empty(arr) · assert_array_contains(arr, v) · assert_null / not_null(v)",
+          "count_passed(r) -> int · count_failed(r) -> int · all_passed(failed) -> bool",
+        ],
+      },
+      {
+        name: "log",
+        pure: false,
+        sigs: [
+          "debug(msg) · info(msg) · warn(msg) · error(msg) · fatal(msg)",
+          "log(level, msg) · level_name(level) -> string · parse_level(name) -> int",
+          "log_kv(level, msg, k, v) · log_kv2(...) · log_kv3(...) · {debug,info,warn,error}_kv(msg, k, v)",
+          "log_timing(operation, start_ms) · log_timing_level(level, operation, start_ms)",
+        ],
+      },
+      {
+        name: "random",
+        pure: false,
+        sigs: [
+          "random_bool() -> bool · random_range(min: float, max: float) -> float",
+          "random_index(length) -> int · shuffle_int_array(arr) -> [int]",
+          "random_digits(n) -> int · coin_flip() -> string · dice_roll() -> int · dice_roll_n(sides) -> int",
+        ],
+      },
+    ],
   },
 ];
 ---
@@ -185,7 +364,8 @@ const modules = [
       </li>
       <li>
         <strong>JSON:</strong>
-        <code>json_parse</code>, <code>json_stringify</code>
+        <code>json_parse</code>, <code>json_stringify</code>,
+        <code>json_pretty</code>
       </li>
       <li>
         <strong>Numbers &amp; time:</strong>
@@ -209,101 +389,110 @@ const modules = [
 
     <Code file="website/src/snippets/stdlib-core.li" filename="core.li" />
 
-    <h2>The 21 std modules</h2>
+    <h2>The 21 std modules at a glance</h2>
     <p>
       Every module below imports cleanly today. The <span class="tag tag--pure"
         >pure</span
-      > ones are self-contained Lira you can read end to end; the <span
-        class="tag tag--io">I/O</span
-      > ones are thin, honest wrappers around runtime builtins (file handles, sockets,
-      the system clock, env vars).
+      > ones are self-contained Lira you can read end to end (and the examples in
+      this page run them); the <span class="tag tag--io">I/O</span> ones are thin,
+      honest wrappers around runtime builtins — file handles, sockets, the system
+      clock, env vars — so they are documented by signature.
     </p>
 
     <div class="modgrid">
       {
-        modules.map((m) => (
-          <div class="modcard">
-            <div class="modcard__head">
-              <code class="modcard__name">std.{m.name}</code>
-              <span class={`tag ${m.pure ? "tag--pure" : "tag--io"}`}>
-                {m.pure ? "pure" : "I/O"}
-              </span>
-            </div>
-            <p class="modcard__blurb">{m.blurb}</p>
-          </div>
-        ))
+        groups
+          .flatMap((g) => g.modules)
+          .map((m) => (
+            <a class="modcard" href={`#${m.name}`}>
+              <div class="modcard__head">
+                <code class="modcard__name">std.{m.name}</code>
+                <span class={`tag ${m.pure ? "tag--pure" : "tag--io"}`}>
+                  {m.pure ? "pure" : "I/O"}
+                </span>
+              </div>
+            </a>
+          ))
       }
     </div>
 
-    <h2>Strings</h2>
-    <p>
-      <code>std.strings</code> extends the <code>string</code> type with methods,
-      so you write <code>name.to_upper()</code> rather than
-      <code>to_upper(name)</code>. <code>split</code> returns
-      <code>[string]</code>; the inverse, <code>join</code>, is a free function.
-    </p>
+    {
+      groups.map((g) => (
+        <section>
+          <h2 id={g.id}>{g.title}</h2>
+          <p>{g.intro}</p>
 
-    <Code file="website/src/snippets/stdlib-strings.li" filename="strings.li" />
+          {g.modules.map((m) => (
+            <div class="modsection" id={m.name}>
+              <div class="modsection__head">
+                <code class="modsection__name">std.{m.name}</code>
+                <span class={`tag ${m.pure ? "tag--pure" : "tag--io"}`}>
+                  {m.pure ? "pure" : "I/O"}
+                </span>
+              </div>
+              <pre class="sigs">{m.sigs.join("\n")}</pre>
+            </div>
+          ))}
 
-    <h2>Math</h2>
-    <p>
-      <code>std.math</code> hangs methods off <code>int</code> and
-      <code>float</code> for the single-argument operations, and exposes free
-      functions for the multi-argument ones. Note that many trig and rounding
-      functions (<code>sin</code>, <code>cos</code>, <code>floor</code>,
-      <code>pow</code>) are VM builtins — <code>std.math</code> adds the rest.
-    </p>
-
-    <Code file="website/src/snippets/stdlib-math.li" filename="math.li" />
-
-    <h2>Collections</h2>
-    <p>
-      <code>std.collections</code> adds methods to typed arrays —
-      <code>[int]</code>, <code>[float]</code>, and <code>[string]</code>.
-      Transformations like <code>sort</code> and <code>filter_even</code> return
-      fresh arrays; reductions like <code>sum</code> and <code>max</code> return
-      a scalar.
-    </p>
-
-    <Code
-      file="website/src/snippets/stdlib-collections.li"
-      filename="collections.li"
-    />
-
-    <h2>JSON</h2>
-    <p>
-      The heavy lifting — <code>json_parse</code> and
-      <code>json_stringify</code> — is built into the VM. <code>std.json</code> layers
-      on convenience helpers like <code>json_has</code> and
-      <code>json_get</code>. Parse a string, index into it, and round-trip it
-      back:
-    </p>
-
-    <Code file="website/src/snippets/stdlib-json.li" filename="json.li" />
-
-    <h2>Sync</h2>
-    <p>
-      <code>std.sync</code> gives you mutual exclusion and coordination built on
-      the same channels and fibers covered in the
-      <a href="/concurrency">concurrency guide</a>. Because Lira has no RAII,
-      locking is <strong>explicit</strong>: <code>lock()</code> takes the value
-      out, <code>unlock(v)</code> puts one back. The <code>with</code> closure
-      form brackets that pair for you.
-    </p>
-
-    <Code file="website/src/snippets/stdlib-sync.li" filename="sync.li" />
-
-    <aside class="callout callout--warning">
-      <span class="callout__label">Not yet implemented</span>
-      <p>
-        RAII guard mutexes, <code>RwLock</code>, <code>Condvar</code>, and
-        atomics are deliberately omitted — they need <code>Drop</code> or have no
-        meaningful semantics on a cooperative VM. <code>std.sync</code> ships
-        only what it can implement honestly: <code>IntMutex</code>,
-        <code>StringMutex</code>, <code>WaitGroup</code>, and
-        <code>Semaphore</code>.
-      </p>
-    </aside>
+          {g.id === "numbers" && (
+            <>
+              <Code
+                file="website/src/snippets/stdlib-math.li"
+                filename="math.li"
+              />
+              <Code
+                file="website/src/snippets/stdlib-collections.li"
+                filename="collections.li"
+              />
+            </>
+          )}
+          {g.id === "text" && (
+            <>
+              <Code
+                file="website/src/snippets/stdlib-strings.li"
+                filename="strings.li"
+              />
+              <Code
+                file="website/src/snippets/stdlib-regex.li"
+                filename="regex.li"
+              />
+            </>
+          )}
+          {g.id === "data" && (
+            <Code
+              file="website/src/snippets/stdlib-json.li"
+              filename="json.li"
+            />
+          )}
+          {g.id === "time" && (
+            <Code
+              file="website/src/snippets/stdlib-time.li"
+              filename="time.li"
+            />
+          )}
+          {g.id === "concurrency" && (
+            <>
+              <Code
+                file="website/src/snippets/stdlib-sync.li"
+                filename="sync.li"
+              />
+              <aside class="callout callout--warning">
+                <span class="callout__label">Not yet implemented</span>
+                <p>
+                  RAII guard mutexes, <code>RwLock</code>, <code>Condvar</code>,
+                  and atomics are deliberately omitted — they need{" "}
+                  <code>Drop</code> or have no meaningful semantics on a
+                  cooperative VM. <code>std.sync</code> ships only what it can
+                  implement honestly: <code>IntMutex</code>,{" "}
+                  <code>StringMutex</code>, <code>WaitGroup</code>, and{" "}
+                  <code>Semaphore</code>.
+                </p>
+              </aside>
+            </>
+          )}
+        </section>
+      ))
+    }
 
     <h2>Where to go next</h2>
     <p>
@@ -312,7 +501,9 @@ const modules = [
         href="/types">types</a
       > covers generics and optionals, <a href="/patterns">patterns</a> covers
       matching and exhaustiveness, and <a href="/concurrency">concurrency</a> goes
-      deep on fibers, channels, and <code>select</code>.
+      deep on fibers, channels, and <code>select</code>. The <a href="/examples"
+        >examples</a
+      > gallery shows whole programs that run.
     </p>
   </div>
 </DocsLayout>
@@ -321,23 +512,31 @@ const modules = [
   /* Module reference grid — page-unique layout, theme variables only. */
   .modgrid {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: var(--sp-2);
     margin: var(--sp-4) 0;
   }
   .modcard {
+    display: block;
     background: var(--dusk);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     padding: var(--sp-2) var(--sp-3);
     box-shadow: var(--elevation-1);
+    text-decoration: none;
+    transition:
+      border-color 0.15s ease,
+      transform 0.15s ease;
+  }
+  .modcard:hover {
+    border-color: var(--lira-gold);
+    transform: translateY(-1px);
   }
   .modcard__head {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: var(--sp-2);
-    margin-bottom: var(--sp-1);
   }
   .modcard__name {
     color: var(--lira-gold);
@@ -345,12 +544,37 @@ const modules = [
     font-size: var(--fs-code);
     font-weight: 600;
   }
-  .modcard__blurb {
-    color: var(--text-muted);
-    font-size: var(--fs-small);
-    margin: 0;
-    line-height: 1.5;
+
+  /* Per-module signature block. */
+  .modsection {
+    margin: var(--sp-4) 0 var(--sp-2);
   }
+  .modsection__head {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    margin-bottom: var(--sp-1);
+  }
+  .modsection__name {
+    color: var(--lira-gold);
+    font-family: var(--font-mono);
+    font-size: var(--fs-code);
+    font-weight: 600;
+  }
+  .sigs {
+    background: var(--dusk);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--sp-2) var(--sp-3);
+    font-family: var(--font-mono);
+    font-size: var(--fs-small);
+    line-height: 1.7;
+    color: var(--text-muted);
+    overflow-x: auto;
+    margin: 0;
+    white-space: pre;
+  }
+
   .tag {
     font-family: var(--font-mono);
     font-size: 0.7rem;
@@ -371,7 +595,12 @@ const modules = [
     background: color-mix(in srgb, var(--starlight) 12%, transparent);
   }
 
-  @media (max-width: 640px) {
+  @media (max-width: 760px) {
+    .modgrid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+  @media (max-width: 480px) {
     .modgrid {
       grid-template-columns: 1fr;
     }

@@ -1,5 +1,6 @@
-// Control flow: if/else as a statement, while loops, and `match`
-// as an expression that yields a value.
+// `if` is an expression: each branch yields a value, so you can bind
+// the whole thing to a `let`. `while`, `for`, and `loop` drive iteration,
+// and `match` (covered below) is also an expression.
 fn classify(n: int) -> string {
     return match n {
         0 => "zero",
@@ -8,11 +9,24 @@ fn classify(n: int) -> string {
 }
 
 fn main() {
+    // if-as-expression
+    let parity = if 7 % 2 == 0 { "even" } else { "odd" }
+    println("7 is ${parity}")
+
+    // while
     var i = 0
     while i < 3 {
         println("tick ${i}")
         i = i + 1
     }
+
+    // loop + break (an unbounded loop you exit explicitly)
+    var n = 1
+    loop {
+        n = n * 2
+        if n > 20 { break }
+    }
+    println("first power of two over 20 is ${n}")
 
     println(classify(7))
     println(classify(0))
