@@ -935,15 +935,14 @@ impl CodeGenerator {
 
     fn collect_free_vars(&self, expr: &Expression, bound: &[String], free: &mut Vec<String>) {
         match &expr.kind {
-            ExpressionKind::Identifier(name) => {
+            ExpressionKind::Identifier(name)
                 // If not bound locally and not already captured, and exists in enclosing scope
                 if !bound.contains(name)
                     && !free.contains(name)
                     && self.lookup_local(name).is_some()
-                {
+                => {
                     free.push(name.clone());
                 }
-            }
             ExpressionKind::Binary { left, right, .. } => {
                 self.collect_free_vars(left, bound, free);
                 self.collect_free_vars(right, bound, free);
@@ -3339,18 +3338,19 @@ impl CodeGenerator {
                     None
                 }
             }
-            ExpressionKind::Binary { left, right, op } => match op {
-                BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
-                    let left_type = self.expr_type_name(left);
-                    let right_type = self.expr_type_name(right);
-                    match (left_type.as_deref(), right_type.as_deref()) {
-                        (Some("float"), _) | (_, Some("float")) => Some("float".to_string()),
-                        (Some("int"), Some("int")) => Some("int".to_string()),
-                        _ => None,
-                    }
+            ExpressionKind::Binary {
+                left,
+                right,
+                op: BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod,
+            } => {
+                let left_type = self.expr_type_name(left);
+                let right_type = self.expr_type_name(right);
+                match (left_type.as_deref(), right_type.as_deref()) {
+                    (Some("float"), _) | (_, Some("float")) => Some("float".to_string()),
+                    (Some("int"), Some("int")) => Some("int".to_string()),
+                    _ => None,
                 }
-                _ => None,
-            },
+            }
             // A method call `recv.method(..)` parses as a Call with a FieldAccess
             // callee. Recover its result type from the method's declared return
             // type so chained calls dispatch via the typed-impl path rather than
@@ -3426,7 +3426,7 @@ mod tests {
     /// Check if a specific opcode appears in the bytecode's code section
     fn find_opcode(bytecode: &[u8], opcode: Opcode) -> bool {
         let code_section = extract_code_section(bytecode);
-        code_section.iter().any(|&b| b == opcode as u8)
+        code_section.contains(&(opcode as u8))
     }
 
     /// Count occurrences of a specific opcode in the code section

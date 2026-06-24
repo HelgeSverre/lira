@@ -305,6 +305,6 @@ All types are checked.
     #[test]
     fn test_extract_grammar() {
         let spec = Specification::from_content(MINIMAL_SPEC.to_string()).unwrap();
-        assert!(spec.grammar.len() > 0);
+        assert!(!spec.grammar.is_empty());
     }
 }

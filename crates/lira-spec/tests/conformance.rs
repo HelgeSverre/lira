@@ -34,7 +34,7 @@ fn test_ebnf_extraction() {
     }
 
     let grammar = EbnfGrammar::from_spec(SPEC_PATH).expect("Failed to extract EBNF");
-    assert!(grammar.len() > 0, "Grammar should have productions");
+    assert!(!grammar.is_empty(), "Grammar should have productions");
 }
 
 #[test]
@@ -365,7 +365,7 @@ fn test_treesitter_grammar_parsing() {
     }
 
     let grammar = TreeSitterGrammar::from_file(GRAMMAR_PATH).expect("Failed to parse grammar.js");
-    assert!(grammar.len() > 0, "Grammar should have rules");
+    assert!(!grammar.is_empty(), "Grammar should have rules");
     println!("Parsed {} tree-sitter rules", grammar.len());
 }
 
@@ -442,7 +442,7 @@ fn test_grammar_comparison() {
 
     // We expect at least some rules to match
     assert!(
-        comparison.matched.len() > 0,
+        !comparison.matched.is_empty(),
         "Expected at least some matching rules"
     );
 }

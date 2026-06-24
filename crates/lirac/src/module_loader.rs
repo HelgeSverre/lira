@@ -255,14 +255,14 @@ mod tests {
 
     #[test]
     fn test_resolve_stdlib_path() {
-        let loader = ModuleLoader::new("test.li");
+        let _loader = ModuleLoader::new("test.li");
         // This test depends on stdlib existing
     }
 
     #[test]
     fn test_module_path_parsing() {
         // Test that module paths are correctly structured
-        let path = vec!["std".to_string(), "fs".to_string()];
+        let path = ["std".to_string(), "fs".to_string()];
         assert_eq!(path.len(), 2);
         assert_eq!(path[0], "std");
         assert_eq!(path[1], "fs");

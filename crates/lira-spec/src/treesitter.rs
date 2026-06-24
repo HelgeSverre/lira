@@ -101,6 +101,12 @@ impl TreeSitterGrammar {
         // Extract rules from rules: { ... }
         if let Some(rules_block) = Self::extract_rules_block(content) {
             let rule_re = Regex::new(r"(\w+):\s*\$\s*=>").unwrap();
+            // Extract keywords (strings in quotes)
+            let kw_re = Regex::new(r"'([a-zA-Z_][a-zA-Z0-9_]*)'").unwrap();
+            // Extract operators (special chars in quotes)
+            let op_re = Regex::new(r"'([+\-*/%&|^~!<>=.,:;?@#]+)'").unwrap();
+            // Extract rule references ($._name or $.name)
+            let ref_re = Regex::new(r"\$\.(_?\w+)").unwrap();
             for caps in rule_re.captures_iter(&rules_block) {
                 let name = caps.get(1).unwrap().as_str().to_string();
 
@@ -111,22 +117,16 @@ impl TreeSitterGrammar {
                     .trim()
                     .to_string();
 
-                // Extract keywords (strings in quotes)
-                let kw_re = Regex::new(r"'([a-zA-Z_][a-zA-Z0-9_]*)'").unwrap();
                 let rule_keywords: Vec<String> = kw_re
                     .captures_iter(&definition)
                     .map(|c| c.get(1).unwrap().as_str().to_string())
                     .collect();
 
-                // Extract operators (special chars in quotes)
-                let op_re = Regex::new(r"'([+\-*/%&|^~!<>=.,:;?@#]+)'").unwrap();
                 let rule_operators: Vec<String> = op_re
                     .captures_iter(&definition)
                     .map(|c| c.get(1).unwrap().as_str().to_string())
                     .collect();
 
-                // Extract rule references ($._name or $.name)
-                let ref_re = Regex::new(r"\$\.(_?\w+)").unwrap();
                 let references: Vec<String> = ref_re
                     .captures_iter(&definition)
                     .map(|c| c.get(1).unwrap().as_str().to_string())

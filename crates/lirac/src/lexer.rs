@@ -964,9 +964,9 @@ mod tests {
 
     #[test]
     fn test_numbers() {
-        let tokens = tokenize("42 3.14 0xFF 0b1010 1_000_000").unwrap();
+        let tokens = tokenize("42 2.5 0xFF 0b1010 1_000_000").unwrap();
         assert!(matches!(tokens[0].kind, TokenKind::IntLiteral(42)));
-        assert!(matches!(tokens[1].kind, TokenKind::FloatLiteral(f) if (f - 3.14).abs() < 0.001));
+        assert!(matches!(tokens[1].kind, TokenKind::FloatLiteral(f) if (f - 2.5).abs() < 0.001));
         assert!(matches!(tokens[2].kind, TokenKind::IntLiteral(255)));
         assert!(matches!(tokens[3].kind, TokenKind::IntLiteral(10)));
         assert!(matches!(tokens[4].kind, TokenKind::IntLiteral(1_000_000)));

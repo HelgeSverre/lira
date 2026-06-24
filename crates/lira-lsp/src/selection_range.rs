@@ -198,9 +198,7 @@ fn find_enclosing_block(lines: &[&str], line_idx: usize) -> Option<Range> {
     let mut in_string = false;
     let mut prev_char = '\0';
 
-    for idx in start_line..lines.len() {
-        let line = lines[idx];
-
+    for (idx, line) in lines.iter().enumerate().skip(start_line) {
         for (char_idx, ch) in line.chars().enumerate() {
             if ch == '"' && prev_char != '\\' {
                 in_string = !in_string;

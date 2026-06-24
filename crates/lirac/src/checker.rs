@@ -3916,7 +3916,7 @@ impl TypeChecker {
                 if let Some(ty) = self.impl_method_to_function("array", field) {
                     return ty;
                 }
-                match field.as_ref() {
+                match field {
                     "len" => Type::Function {
                         params: vec![],
                         return_type: Box::new(Type::Int),

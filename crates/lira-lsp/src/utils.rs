@@ -100,12 +100,6 @@ pub fn is_identifier_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 
-/// Check if a character can start an identifier
-#[inline]
-pub fn is_identifier_start(c: char) -> bool {
-    c.is_alphabetic() || c == '_'
-}
-
 /// Context information for string/comment detection
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TextContext {
@@ -195,39 +189,10 @@ pub fn is_in_string_or_comment(line: &str, pos: usize) -> bool {
     )
 }
 
-/// Convert a character column to a byte offset in a string.
-/// Handles UTF-8 correctly.
-pub fn char_col_to_byte_offset(line: &str, char_col: usize) -> usize {
-    line.chars().take(char_col).map(|c| c.len_utf8()).sum()
-}
-
 /// Convert a byte offset to a character column.
 /// Handles UTF-8 correctly.
 pub fn byte_offset_to_char_col(line: &str, byte_offset: usize) -> usize {
     line[..byte_offset.min(line.len())].chars().count()
-}
-
-/// Get the byte range for a word in a line given character positions
-pub fn word_byte_range(line: &str, start_col: usize, end_col: usize) -> (usize, usize) {
-    let start_byte = char_col_to_byte_offset(line, start_col);
-    let end_byte = char_col_to_byte_offset(line, end_col);
-    (start_byte, end_byte)
-}
-
-/// Extract a substring using character positions (UTF-8 safe)
-pub fn substring_by_chars(s: &str, start: usize, end: usize) -> &str {
-    let start_byte = char_col_to_byte_offset(s, start);
-    let end_byte = char_col_to_byte_offset(s, end);
-    &s[start_byte..end_byte.min(s.len())]
-}
-
-/// Check if a string is a valid Lira identifier
-pub fn is_valid_identifier(s: &str) -> bool {
-    let mut chars = s.chars();
-    match chars.next() {
-        Some(c) if is_identifier_start(c) => chars.all(is_identifier_char),
-        _ => false,
-    }
 }
 
 /// Lira keywords that cannot be used as identifiers
@@ -241,74 +206,6 @@ pub const KEYWORDS: &[&str] = &[
 /// Check if a string is a Lira keyword
 pub fn is_keyword(s: &str) -> bool {
     KEYWORDS.contains(&s)
-}
-
-/// Lira builtin types
-pub const BUILTIN_TYPES: &[&str] = &[
-    "int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64",
-    "float", "float32", "float64", "bool", "string", "char", "void", "any", "never",
-];
-
-/// Check if a string is a builtin type
-pub fn is_builtin_type(s: &str) -> bool {
-    BUILTIN_TYPES.contains(&s)
-}
-
-/// Lira builtin functions
-pub const BUILTIN_FUNCTIONS: &[&str] = &[
-    "print",
-    "println",
-    "len",
-    "push",
-    "pop",
-    "append",
-    "insert",
-    "remove",
-    "contains",
-    "keys",
-    "values",
-    "clear",
-    "clone",
-    "to_string",
-    "parse",
-    "abs",
-    "min",
-    "max",
-    "sqrt",
-    "pow",
-    "floor",
-    "ceil",
-    "round",
-    "sin",
-    "cos",
-    "tan",
-    "log",
-    "exp",
-    "random",
-    "open",
-    "read",
-    "write",
-    "close",
-    "exists",
-    "mkdir",
-    "remove_file",
-    "sleep",
-    "now",
-    "spawn",
-    "send",
-    "recv",
-    "select",
-    "chan",
-    "type_of",
-    "size_of",
-    "assert",
-    "panic",
-    "error",
-];
-
-/// Check if a string is a builtin function
-pub fn is_builtin_function(s: &str) -> bool {
-    BUILTIN_FUNCTIONS.contains(&s)
 }
 
 #[cfg(test)]
@@ -445,33 +342,9 @@ mod tests {
 
     // UTF-8 conversion tests
     #[test]
-    fn test_char_col_to_byte_offset_ascii() {
-        assert_eq!(char_col_to_byte_offset("hello", 2), 2);
-    }
-
-    #[test]
-    fn test_char_col_to_byte_offset_unicode() {
-        // "日本語" has 3 chars but 9 bytes
-        assert_eq!(char_col_to_byte_offset("日本語", 1), 3);
-        assert_eq!(char_col_to_byte_offset("日本語", 2), 6);
-    }
-
-    #[test]
     fn test_byte_offset_to_char_col() {
         assert_eq!(byte_offset_to_char_col("日本語", 3), 1);
         assert_eq!(byte_offset_to_char_col("日本語", 6), 2);
-    }
-
-    // Identifier validation tests
-    #[test]
-    fn test_is_valid_identifier() {
-        assert!(is_valid_identifier("foo"));
-        assert!(is_valid_identifier("_bar"));
-        assert!(is_valid_identifier("foo123"));
-        assert!(is_valid_identifier("_"));
-        assert!(!is_valid_identifier("123foo"));
-        assert!(!is_valid_identifier(""));
-        assert!(!is_valid_identifier("foo-bar"));
     }
 
     #[test]

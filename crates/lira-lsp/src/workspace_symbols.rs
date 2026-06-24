@@ -234,7 +234,7 @@ fn find_container(lines: &[&str], current_line: usize) -> Option<String> {
 /// Filter symbols by query string (fuzzy match)
 pub fn filter_symbols(symbols: &[ExtractedSymbol], query: &str) -> Vec<SymbolInformation> {
     if query.is_empty() {
-        return symbols.iter().map(|s| to_symbol_information(s)).collect();
+        return symbols.iter().map(to_symbol_information).collect();
     }
 
     let query_lower = query.to_lowercase();
@@ -246,7 +246,7 @@ pub fn filter_symbols(symbols: &[ExtractedSymbol], query: &str) -> Vec<SymbolInf
             // Simple fuzzy match: query chars appear in order
             fuzzy_match(&name_lower, &query_lower)
         })
-        .map(|s| to_symbol_information(s))
+        .map(to_symbol_information)
         .collect()
 }
 

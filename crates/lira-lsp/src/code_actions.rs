@@ -63,8 +63,8 @@ fn mutability_toggle_action(uri: &Url, line: &str, line_idx: usize) -> Option<Co
     let indent = &line[..line.len() - trimmed.len()];
 
     // Check for let declaration
-    if trimmed.starts_with("let ") {
-        let new_line = format!("{}var {}", indent, &trimmed[4..]);
+    if let Some(rest) = trimmed.strip_prefix("let ") {
+        let new_line = format!("{}var {}", indent, rest);
         return Some(create_replace_line_action(
             uri,
             "Convert to var (mutable)",
@@ -76,8 +76,8 @@ fn mutability_toggle_action(uri: &Url, line: &str, line_idx: usize) -> Option<Co
     }
 
     // Check for var declaration
-    if trimmed.starts_with("var ") {
-        let new_line = format!("{}let {}", indent, &trimmed[4..]);
+    if let Some(rest) = trimmed.strip_prefix("var ") {
+        let new_line = format!("{}let {}", indent, rest);
         return Some(create_replace_line_action(
             uri,
             "Convert to let (immutable)",

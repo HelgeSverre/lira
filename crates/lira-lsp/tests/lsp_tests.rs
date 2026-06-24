@@ -1624,10 +1624,7 @@ fn createUser(name: string) -> User {
     );
 
     let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
-    assert!(
-        names.iter().any(|n| *n == "User"),
-        "Should find User struct"
-    );
+    assert!(names.contains(&"User"), "Should find User struct");
     assert!(
         names.iter().any(|n| n.contains("User")),
         "Should find getUser function"

@@ -587,7 +587,7 @@ fn debug_event_to_messages(
             FiberEvent::FiberSpawned { fiber_id, ip } => {
                 messages.push(ServerMessage::FiberSpawned {
                     fiber: FiberInfo {
-                        id: fiber_id as u64,
+                        id: fiber_id,
                         state: "Ready".to_string(),
                         ip,
                     },
@@ -599,7 +599,7 @@ fn debug_event_to_messages(
                 ..
             } => {
                 messages.push(ServerMessage::FiberStateChanged {
-                    fiber_id: fiber_id as u64,
+                    fiber_id,
                     new_state,
                 });
             }
@@ -609,7 +609,7 @@ fn debug_event_to_messages(
             } => {
                 messages.push(ServerMessage::ChannelCreated {
                     channel: ChannelInfo {
-                        id: channel_id as u64,
+                        id: channel_id,
                         capacity,
                         buffer_size: 0,
                         closed: false,
@@ -622,7 +622,7 @@ fn debug_event_to_messages(
                 value,
             } => {
                 messages.push(ServerMessage::ChannelMessage {
-                    channel_id: channel_id as u64,
+                    channel_id,
                     operation,
                     value,
                 });
@@ -630,7 +630,7 @@ fn debug_event_to_messages(
             FiberEvent::ChannelClosed { channel_id } => {
                 // Send as a channel message with "close" operation
                 messages.push(ServerMessage::ChannelMessage {
-                    channel_id: channel_id as u64,
+                    channel_id,
                     operation: "close".to_string(),
                     value: String::new(),
                 });

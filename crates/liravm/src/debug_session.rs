@@ -350,13 +350,6 @@ impl Default for DebugSession {
 mod tests {
     use super::*;
 
-    fn compile_test_program(source: &str) -> Vec<u8> {
-        // For testing, we need to compile source to bytecode
-        // This would normally use lirac, but for unit tests we'll skip this
-        // and test with pre-compiled bytecode in integration tests
-        vec![]
-    }
-
     #[test]
     fn test_session_creation() {
         let session = DebugSession::new();

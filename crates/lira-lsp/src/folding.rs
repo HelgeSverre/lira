@@ -31,22 +31,20 @@ fn find_brace_blocks(lines: &[&str]) -> Vec<FoldingRange> {
         let trimmed = line.trim();
 
         // Determine the kind of block starting on this line
-        let kind = if trimmed.starts_with("fn ") || trimmed.contains(" fn ") {
-            Some(FoldingRangeKind::Region)
-        } else if trimmed.starts_with("struct ")
+        let starts_foldable = trimmed.starts_with("fn ")
+            || trimmed.contains(" fn ")
+            || trimmed.starts_with("struct ")
             || trimmed.starts_with("class ")
             || trimmed.starts_with("enum ")
             || trimmed.starts_with("trait ")
             || trimmed.starts_with("impl ")
-        {
-            Some(FoldingRangeKind::Region)
-        } else if trimmed.starts_with("if ")
+            || trimmed.starts_with("if ")
             || trimmed.starts_with("else ")
             || trimmed.starts_with("while ")
             || trimmed.starts_with("for ")
             || trimmed.starts_with("loop ")
-            || trimmed.starts_with("match ")
-        {
+            || trimmed.starts_with("match ");
+        let kind = if starts_foldable {
             Some(FoldingRangeKind::Region)
         } else {
             None

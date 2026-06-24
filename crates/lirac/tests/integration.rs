@@ -177,7 +177,7 @@ fn get_example_files() -> Vec<std::path::PathBuf> {
         .expect("Failed to read examples directory")
         .filter_map(|e| e.ok())
         .map(|e| e.path())
-        .filter(|p| p.extension().map_or(false, |e| e == "li"))
+        .filter(|p| p.extension().is_some_and(|e| e == "li"))
         .collect();
 
     files.sort();
@@ -378,7 +378,7 @@ fn test_all_examples_compile() {
     let mut compile_errors = Vec::new();
 
     for path in &files {
-        let source = fs::read_to_string(&path).expect("Failed to read file");
+        let source = fs::read_to_string(path).expect("Failed to read file");
         let source_path = path.to_string_lossy().to_string();
 
         // Check for skip marker

@@ -3184,15 +3184,15 @@ mod tests {
     #[test]
     fn test_float_operations() {
         let program = make_program(
-            vec![Value::Float(3.14), Value::Float(2.0)],
+            vec![Value::Float(2.5), Value::Float(2.0)],
             vec![
                 Opcode::LoadConst as u8,
                 0,
-                0, // Load 3.14
+                0, // Load 2.5
                 Opcode::LoadConst as u8,
                 1,
                 0,                   // Load 2.0
-                Opcode::Mul as u8,   // 3.14 * 2.0
+                Opcode::Mul as u8,   // 2.5 * 2.0
                 Opcode::Print as u8, // Print result
                 Opcode::Halt as u8,
             ],

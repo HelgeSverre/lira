@@ -120,7 +120,7 @@ fn find_variable_hints(
 /// Infer type from a value expression
 fn infer_type_from_value(
     value: &str,
-    content: &str,
+    _content: &str,
     function_types: &[(String, String)],
 ) -> Option<String> {
     let value = value.trim();
@@ -138,10 +138,8 @@ fn infer_type_from_value(
     }
 
     // Float literal (contains . or e/E)
-    if value.contains('.') || value.to_lowercase().contains('e') {
-        if value.parse::<f64>().is_ok() {
-            return Some("float".to_string());
-        }
+    if (value.contains('.') || value.to_lowercase().contains('e')) && value.parse::<f64>().is_ok() {
+        return Some("float".to_string());
     }
 
     // Hex/binary/octal literals
@@ -185,7 +183,7 @@ fn infer_type_from_value(
             return None;
         }
         let first = inner.split(',').next()?.trim();
-        if let Some(elem_type) = infer_type_from_value(first, content, function_types) {
+        if let Some(elem_type) = infer_type_from_value(first, _content, function_types) {
             return Some(format!("[{}]", elem_type));
         }
     }
