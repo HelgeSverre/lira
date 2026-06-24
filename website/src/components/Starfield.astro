@@ -1,7 +1,7 @@
 ---
-// Subtle Lyra-constellation starfield for the hero background.
+// Subtle constellation starfield for the hero background.
 // Low-opacity dots + thin connecting lines evoke concurrent fibers/strings.
-// Coordinates are a stylized Lyra (Vega at top), not an astronomical chart.
+// Coordinates are a stylized constellation (bright star at top), not a chart.
 const stars = [
   { x: 50, y: 12, r: 2.4 }, // Vega (brightest)
   { x: 41, y: 30, r: 1.5 },
@@ -38,7 +38,7 @@ const field = Array.from({ length: 46 }, (_, i) => ({
   <g class="starfield__field">
     {field.map((d) => <circle cx={d.x} cy={d.y} r={d.r} />)}
   </g>
-  <g class="starfield__lyra">
+  <g class="starfield__constellation">
     {
       links.map(([a, b]) => (
         <line
@@ -65,11 +65,11 @@ const field = Array.from({ length: 46 }, (_, i) => ({
     fill: var(--snow);
     opacity: 0.06;
   }
-  .starfield__lyra circle {
+  .starfield__constellation circle {
     fill: var(--lira-gold);
     opacity: 0.5;
   }
-  .starfield__lyra line {
+  .starfield__constellation line {
     stroke: var(--lira-gold);
     stroke-width: 0.18;
     opacity: 0.22;
