@@ -116,12 +116,12 @@
 //! - 193: uuid_nil (get nil UUID)
 
 use crate::value::Value;
+use gc::{Gc, GcCell};
 use md5::{Digest, Md5};
 use regex::Regex;
 use serde_json::{Map, Value as JsonValue};
 use sha1::Sha1;
 use sha2::{Sha256, Sha512};
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
@@ -712,14 +712,14 @@ impl Runtime {
             JsonValue::String(s) => Value::String(Rc::new(s)),
             JsonValue::Array(arr) => {
                 let values: Vec<Value> = arr.into_iter().map(|v| self.json_to_value(v)).collect();
-                Value::Array(Rc::new(RefCell::new(values)))
+                Value::Array(Gc::new(GcCell::new(values)))
             }
             JsonValue::Object(map) => {
                 let mut obj = HashMap::new();
                 for (k, v) in map {
                     obj.insert(k, self.json_to_value(v));
                 }
-                Value::Object(Rc::new(RefCell::new(obj)))
+                Value::Object(Gc::new(GcCell::new(obj)))
             }
         }
     }

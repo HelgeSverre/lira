@@ -1,0 +1,53 @@
+// Cycle Collector Stress Test
+//
+// Builds many reference cycles in a loop, dropping each one before the next
+// iteration, and periodically calls collect() to reclaim them. Under plain
+// reference counting these cycles would leak forever (each cycle keeps its own
+// strong count above zero), so a run that stays memory-bounded demonstrates the
+// tracing cycle collector is doing its job.
+//
+// A reference cycle is formed with a self-referential array: push(node, node)
+// makes node[last] point back at node. We also build mutual cycles where two
+// arrays reference each other (a -> b -> a).
+//
+// @expect-contains: cycle stress complete
+
+fn build_self_cycle(seed: int) -> int {
+    // A fresh array that contains itself: node -> node.
+    var node = [seed]
+    push(node, node)
+    // Return something derived from it so the work isn't optimized away.
+    return len(node)
+}
+
+fn build_mutual_cycle(seed: int) -> int {
+    // Two arrays that reference each other: a -> b -> a.
+    var a = [seed]
+    var b = [seed + 1]
+    push(a, b)
+    push(b, a)
+    return len(a) + len(b)
+}
+
+var total = 0
+var i = 0
+while i < 5000 {
+    // Each iteration allocates new cyclic garbage. The locals go out of scope
+    // at the end of the loop body, leaving the cycles unreachable.
+    total = total + build_self_cycle(i)
+    total = total + build_mutual_cycle(i)
+
+    // Periodically reclaim the accumulated cyclic garbage. If the collector
+    // works, live memory stays bounded across all 5000 iterations.
+    if i % 500 == 0 {
+        collect()
+    }
+
+    i = i + 1
+}
+
+// One final sweep after the loop.
+collect()
+
+println("checksum: " + total)
+println("cycle stress complete")

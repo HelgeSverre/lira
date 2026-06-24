@@ -1,0 +1,27 @@
+// Automatic Cycle Collection (no explicit collect())
+//
+// This program builds far more than AUTO_COLLECT_INTERVAL (10,000) cyclic
+// allocations but NEVER calls collect() itself. It runs to completion only
+// because the VM automatically forces a collection at the interpreter-loop
+// boundary once enough cyclic-capable values have been allocated. Each cycle is
+// a self-referential array (node -> node) that is unreachable after its loop
+// iteration, so without automatic reclamation the heap would grow without bound.
+//
+// @expect-contains: auto gc complete
+
+fn make_cycle(seed: int) -> int {
+    var node = [seed]
+    push(node, node) // node[1] == node -> reference cycle
+    return len(node)
+}
+
+var total = 0
+var i = 0
+// 60,000 cyclic allocations, well past several auto-collection intervals.
+while i < 60000 {
+    total = total + make_cycle(i)
+    i = i + 1
+}
+
+println("checksum: " + total)
+println("auto gc complete")

@@ -27,11 +27,23 @@
 
 ### 1.1 Memory Management Strategy
 
-> **Implementation status:** The current VM provides ARC via the host runtime's
-> reference counting (Rust `Rc`). The **cycle detector described below is
-> specified but not yet implemented** — there is no separate cycle-collecting GC
-> module in the runtime today. Programs that form reference cycles will leak
-> until a collector is added.
+> **Implementation status:** The current VM manages acyclic heap data
+> (interned strings) with the host runtime's reference counting (Rust `Rc`), and
+> manages the **cyclic-capable** heap variants — arrays, objects, and closures —
+> with a **tracing mark-and-sweep cycle collector** (the [`gc`](https://crates.io/crates/gc)
+> crate's `Gc<GcCell<T>>` / `Gc<T>`). Reference cycles (a node pointing back at
+> itself, two objects referencing each other, a closure capturing a table that
+> holds the closure) are therefore reclaimed rather than leaked. The collector
+> runs both automatically — at an instruction-boundary safe point once enough
+> cyclic values have been allocated, and via the `gc` crate's own allocation
+> threshold — and on demand through the `collect()` builtin
+> (`Opcode::Collect`). Collection only ever runs at an instruction boundary where
+> no interior-mutability borrow is held, so it never observes a half-mutated
+> heap. The conceptual algorithm below matches the deployed collector; the
+> refcount-header pseudocode in §2 is illustrative of the ARC model rather than a
+> literal description of the `gc`-backed implementation. Reclamation runs
+> `Finalize` (not `Drop`) on swept objects, so any future variant needing RAII
+> teardown must implement `Finalize`.
 
 Lira uses **Automatic Reference Counting (ARC)** with **cycle detection** for memory management:
 
@@ -311,7 +323,25 @@ Reference counting alone cannot handle cycles:
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+> **As implemented:** the shipping collector is a **tracing mark-and-sweep**
+> collector (the `gc` crate), not the trial-deletion design sketched in §3.2
+> below. Roots are the `Gc` handles reachable from owned Rust state — the
+> operand stack, locals, call-frame captures, every fiber's stack/locals/result,
+> channel buffers, and the program constant pool. Each collection marks from
+> those roots and sweeps (frees) everything unmarked; a cycle with no live root
+> is unmarked and reclaimed, while a cycle still reachable from any root is kept.
+> No manual edge bookkeeping (no per-`SetField`/`ArrayPush` adopt/unadopt) is
+> required. The trial-deletion pseudocode in §3.2 and the refcount header in §2
+> are retained as design background; they describe an alternative ARC-integrated
+> scheme, not the deployed code. Triggers: the `collect()` builtin
+> (`Opcode::Collect`), an instruction-boundary auto-collection every ~10,000
+> cyclic allocations, and the `gc` crate's own allocation-threshold heuristic.
+
 ### 3.2 Trial Deletion Algorithm
+
+> _The remainder of this section documents the originally specified
+> trial-deletion design. The deployed collector uses mark-and-sweep (see the
+> note above)._
 
 Lira uses the "trial deletion" algorithm (Lins' algorithm):
 

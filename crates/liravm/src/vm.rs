@@ -11,8 +11,8 @@ use crate::debug::{
 use crate::fiber::{FiberEvent, Scheduler};
 use crate::runtime::Runtime;
 use crate::value::{ChannelId, ClosureData, FiberId, Value};
+use gc::{Gc, GcCell};
 use lira_core::opcode::Opcode;
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::mpsc::{channel, Receiver};
@@ -112,7 +112,7 @@ struct CallFrame {
     /// Base pointer for operand stack (to isolate caller's values)
     stack_base: usize,
     /// Captured values for this closure call (if any)
-    captures: Option<Rc<ClosureData>>,
+    captures: Option<Gc<ClosureData>>,
 }
 
 /// The Lira Virtual Machine
@@ -163,9 +163,30 @@ pub struct VM {
     /// more state (stack base, captures) than the scheduler's `FiberCallFrame`,
     /// so each fiber's call stack is parked here across context switches.
     fiber_call_stacks: HashMap<FiberId, Vec<CallFrame>>,
+    /// Count of cyclic-capable heap allocations (objects, arrays, closures)
+    /// since startup. Drives the periodic auto-collection at the interpreter
+    /// loop boundary (see [`VM::AUTO_COLLECT_INTERVAL`]).
+    allocations: u64,
 }
 
 impl VM {
+    /// Number of cyclic-capable heap allocations between automatic collections.
+    ///
+    /// The tracing cycle collector is also driven implicitly by rust-gc's own
+    /// allocation-threshold heuristic (it may collect inside `Gc::new`), but we
+    /// additionally force a collection from the interpreter loop every this many
+    /// object/array/closure allocations. Driving it from the loop boundary
+    /// guarantees collection happens at a point where no `GcCell` is borrowed
+    /// (every `execute_*` handler releases its borrows before returning), making
+    /// the trigger deterministic and independent of allocation-site timing.
+    const AUTO_COLLECT_INTERVAL: u64 = 10_000;
+
+    /// Record a cyclic-capable heap allocation (object, array, or closure).
+    #[inline]
+    fn note_allocation(&mut self) {
+        self.allocations = self.allocations.wrapping_add(1);
+    }
+
     /// Create a new VM with the given program
     pub fn new(program: Program) -> Self {
         // Set up fiber event channel
@@ -196,6 +217,7 @@ impl VM {
             main_fiber_id: 0,
             main_exit_code: 0,
             fiber_call_stacks: HashMap::new(),
+            allocations: 0,
         }
     }
 
@@ -694,6 +716,19 @@ impl VM {
                 return Ok(0);
             }
 
+            // Auto-collection safe point. We are at an instruction boundary: the
+            // operand stack, locals, call frames, and fiber state all hold their
+            // `Value`s (and thus `Gc` handles) directly in owned Rust containers,
+            // so they are GC roots; no `GcCell` borrow guard is alive here. This
+            // is the ONLY place the VM forces a collection, upholding the
+            // invariant "never collect while a GcCell is borrowed, never collect
+            // mid-handler". Driving it here (rather than relying solely on the
+            // implicit collection inside `Gc::new`) keeps it deterministic.
+            if self.allocations >= Self::AUTO_COLLECT_INTERVAL {
+                self.allocations = 0;
+                gc::force_collect();
+            }
+
             let opcode = self.decode_next()?;
 
             // Execute the opcode
@@ -765,7 +800,7 @@ impl VM {
             Opcode::TypeIs | Opcode::Cast => self.execute_type(opcode),
 
             // System operations
-            Opcode::Print | Opcode::Syscall => self.execute_system(opcode),
+            Opcode::Print | Opcode::Collect | Opcode::Syscall => self.execute_system(opcode),
 
             // Fiber and channel operations
             Opcode::Spawn
@@ -841,7 +876,11 @@ impl VM {
                 };
                 let object = self.pop()?;
 
-                match object {
+                // Match by reference: `Value` now implements `Drop` (GC derive),
+                // so moving the inner `Gc` out of an owned `Value` is rejected
+                // (E0509). Borrowing the handle and cloning what we need keeps the
+                // `_` arm's `object.type_name()` usable too.
+                match &object {
                     Value::Object(obj) => {
                         let value = obj
                             .borrow()
@@ -863,7 +902,7 @@ impl VM {
                 let value = self.pop()?;
                 let object = self.pop()?;
 
-                match object {
+                match &object {
                     Value::Object(obj) => {
                         obj.borrow_mut().insert(field_name, value);
                     }
@@ -872,7 +911,8 @@ impl VM {
             }
 
             Opcode::NewObject => {
-                let obj = Rc::new(RefCell::new(HashMap::new()));
+                let obj = Gc::new(GcCell::new(HashMap::new()));
+                self.note_allocation();
                 self.stack.push(Value::Object(obj));
             }
 
@@ -883,7 +923,8 @@ impl VM {
                     Value::Int(n) => n as usize,
                     _ => return Err("Array size must be an integer".to_string()),
                 };
-                let arr = Rc::new(RefCell::new(vec![Value::Null; size]));
+                let arr = Gc::new(GcCell::new(vec![Value::Null; size]));
+                self.note_allocation();
                 self.stack.push(Value::Array(arr));
             }
 
@@ -891,14 +932,14 @@ impl VM {
                 let index = self.pop()?;
                 let array = self.pop()?;
 
-                match (array, index) {
+                match (&array, &index) {
                     (Value::Array(arr), Value::Int(idx)) => {
-                        let idx = idx as usize;
+                        let idx = *idx as usize;
                         let value = arr.borrow().get(idx).cloned().unwrap_or(Value::Null);
                         self.stack.push(value);
                     }
                     (Value::String(s), Value::Int(idx)) => {
-                        let idx = idx as usize;
+                        let idx = *idx as usize;
                         let value = s
                             .chars()
                             .nth(idx)
@@ -908,7 +949,7 @@ impl VM {
                     }
                     // Support object indexing with string keys (for JSON objects)
                     (Value::Object(obj), Value::String(key)) => {
-                        let value = obj.borrow().get(&*key).cloned().unwrap_or(Value::Null);
+                        let value = obj.borrow().get(&**key).cloned().unwrap_or(Value::Null);
                         self.stack.push(value);
                     }
                     _ => return Err("Invalid array/index types".to_string()),
@@ -920,9 +961,9 @@ impl VM {
                 let index = self.pop()?;
                 let array = self.pop()?;
 
-                match (array, index) {
+                match (&array, &index) {
                     (Value::Array(arr), Value::Int(idx)) => {
-                        let idx = idx as usize;
+                        let idx = *idx as usize;
                         let mut arr = arr.borrow_mut();
                         if idx < arr.len() {
                             arr[idx] = value;
@@ -934,7 +975,7 @@ impl VM {
 
             Opcode::ArrayLen => {
                 let array = self.pop()?;
-                let len = match array {
+                let len = match &array {
                     Value::Array(arr) => arr.borrow().len() as i64,
                     Value::String(s) => s.len() as i64,
                     _ => return Err("Cannot get length of non-array/string".to_string()),
@@ -945,7 +986,7 @@ impl VM {
             Opcode::ArrayPush => {
                 let value = self.pop()?;
                 let array = self.pop()?;
-                match array {
+                match &array {
                     Value::Array(arr) => {
                         arr.borrow_mut().push(value);
                     }
@@ -955,7 +996,7 @@ impl VM {
 
             Opcode::ArrayPop => {
                 let array = self.pop()?;
-                match array {
+                match &array {
                     Value::Array(arr) => {
                         let value = arr.borrow_mut().pop().unwrap_or(Value::Null);
                         self.stack.push(value);
@@ -980,7 +1021,8 @@ impl VM {
                     code_offset,
                     captures,
                 };
-                self.stack.push(Value::Closure(Rc::new(closure)));
+                self.note_allocation();
+                self.stack.push(Value::Closure(Gc::new(closure)));
             }
 
             Opcode::LoadCapture => {
@@ -1334,8 +1376,12 @@ impl VM {
                 let arg_count = self.read_u8()? as usize;
                 let callee = self.pop()?;
 
-                match callee {
+                // Match by reference: `Value: Drop` (GC derive) forbids moving the
+                // inner `Gc` out of an owned `Value` (E0509). Cloning the `Gc`
+                // handle inside the arm is a cheap refcount bump.
+                match &callee {
                     Value::Function(code_offset) => {
+                        let code_offset = *code_offset;
                         // Pop arguments and store as locals
                         let args: Vec<Value> = (0..arg_count)
                             .map(|_| self.pop())
@@ -1453,19 +1499,21 @@ impl VM {
                 let type_id = self.read_u8()?;
                 let value = self.pop()?;
                 let result = match type_id {
-                    // Cast to int
-                    2 => match value {
-                        Value::Int(n) => Value::Int(n),
-                        Value::Float(f) => Value::Int(f as i64),
-                        Value::Bool(b) => Value::Int(if b { 1 } else { 0 }),
+                    // Cast to int. Match by reference: `Value` now implements
+                    // `Drop` (via the GC derive), so moving a field out of an
+                    // owned `Value` is rejected (E0509).
+                    2 => match &value {
+                        Value::Int(n) => Value::Int(*n),
+                        Value::Float(f) => Value::Int(*f as i64),
+                        Value::Bool(b) => Value::Int(if *b { 1 } else { 0 }),
                         Value::String(s) => Value::Int(s.parse().unwrap_or(0)),
                         _ => Value::Int(0),
                     },
                     // Cast to float
-                    3 => match value {
-                        Value::Int(n) => Value::Float(n as f64),
-                        Value::Float(f) => Value::Float(f),
-                        Value::Bool(b) => Value::Float(if b { 1.0 } else { 0.0 }),
+                    3 => match &value {
+                        Value::Int(n) => Value::Float(*n as f64),
+                        Value::Float(f) => Value::Float(*f),
+                        Value::Bool(b) => Value::Float(if *b { 1.0 } else { 0.0 }),
                         Value::String(s) => Value::Float(s.parse().unwrap_or(0.0)),
                         _ => Value::Float(0.0),
                     },
@@ -1501,6 +1549,16 @@ impl VM {
                 } else {
                     println!("{}", output_str);
                 }
+            }
+
+            Opcode::Collect => {
+                // The `collect()` builtin. We are at an opcode-dispatch boundary:
+                // every `execute_*` handler releases its `GcCell` borrows before
+                // returning, so no interior-mutability guard is alive here and it
+                // is sound to run a collection (see the "never collect while a
+                // GcCell is borrowed" invariant documented at the main loop).
+                gc::force_collect();
+                self.stack.push(Value::Null);
             }
 
             Opcode::Syscall => {
@@ -2006,14 +2064,14 @@ impl VM {
                 Value::Float($e)
             };
             (StrArray, $e:expr) => {
-                Value::Array(Rc::new(RefCell::new(
+                Value::Array(Gc::new(GcCell::new(
                     $e.into_iter()
                         .map(|s| Value::String(Rc::new(s)))
                         .collect::<Vec<_>>(),
                 )))
             };
             (IntArray, $e:expr) => {
-                Value::Array(Rc::new(RefCell::new(
+                Value::Array(Gc::new(GcCell::new(
                     $e.into_iter().map(Value::Int).collect::<Vec<_>>(),
                 )))
             };
@@ -2034,12 +2092,15 @@ impl VM {
                 Value::Int($b)
             };
         }
+        // Bindings come from a by-reference match (see `sys_typed!`), so `str`
+        // binds `&IString` and `int` binds `&i64`. Deref to the shapes the
+        // runtime methods expect (`&str` and `i64`).
         macro_rules! sys_call {
             (str, $b:ident) => {
-                &$b
+                &**$b
             };
             (int, $b:ident) => {
-                $b
+                *$b
             };
         }
         macro_rules! sys_desc {
@@ -2054,7 +2115,10 @@ impl VM {
             // Single argument: error reads "NAME requires <type> argument".
             ($name:literal, $a:ident $b:ident => $ret:ident : $method:ident) => {{
                 let $b = self.pop()?;
-                match $b {
+                // Match by reference: `Value: Drop` (GC derive) forbids moving the
+                // inner value out of an owned `Value` (E0509). `sys_call!` derefs
+                // the resulting reference bindings back to the method's arg types.
+                match &$b {
                     sys_pat!($a, $b) => {
                         let result = self.runtime.$method(sys_call!($a, $b));
                         self.stack.push(sys_wrap!($ret, result));
@@ -2067,7 +2131,7 @@ impl VM {
             ($name:literal, $($a:ident $b:ident),+ => $ret:ident : $method:ident) => {{
                 // Reverse-pop so the right-most (last-pushed) arg is popped first.
                 sys_typed!(@pop_rev self, $($a $b),+);
-                match ( $( $b ),+ , ) {
+                match ( $( &$b ),+ , ) {
                     ( $( sys_pat!($a, $b) ),+ , ) => {
                         let result = self.runtime.$method( $( sys_call!($a, $b) ),+ );
                         self.stack.push(sys_wrap!($ret, result));
@@ -2194,9 +2258,9 @@ impl VM {
             10 => {
                 let mode = self.pop()?;
                 let path = self.pop()?;
-                match (path, mode) {
+                match (&path, &mode) {
                     (Value::String(path), Value::Int(mode)) => {
-                        match self.runtime.file_open(&path, mode) {
+                        match self.runtime.file_open(path, *mode) {
                             Ok(fd) => {
                                 self.stack.push(Value::Int(fd));
                                 Ok(())
@@ -2216,9 +2280,9 @@ impl VM {
             11 => {
                 let max_bytes = self.pop()?;
                 let fd = self.pop()?;
-                match (fd, max_bytes) {
+                match (&fd, &max_bytes) {
                     (Value::Int(fd), Value::Int(max_bytes)) => {
-                        match self.runtime.file_read(fd, max_bytes) {
+                        match self.runtime.file_read(*fd, *max_bytes) {
                             Ok(data) => {
                                 self.stack.push(Value::String(Rc::new(data)));
                                 Ok(())
@@ -2237,9 +2301,9 @@ impl VM {
             12 => {
                 let data = self.pop()?;
                 let fd = self.pop()?;
-                match (fd, data) {
+                match (&fd, &data) {
                     (Value::Int(fd), Value::String(data)) => {
-                        match self.runtime.file_write(fd, &data) {
+                        match self.runtime.file_write(*fd, data) {
                             Ok(bytes) => {
                                 self.stack.push(Value::Int(bytes));
                                 Ok(())
@@ -2257,9 +2321,9 @@ impl VM {
             // file_close(fd: int) -> bool
             13 => {
                 let fd = self.pop()?;
-                match fd {
+                match &fd {
                     Value::Int(fd) => {
-                        let success = self.runtime.file_close(fd).is_ok();
+                        let success = self.runtime.file_close(*fd).is_ok();
                         self.stack.push(Value::Bool(success));
                         Ok(())
                     }
@@ -2271,9 +2335,9 @@ impl VM {
             // file_size(path: string) -> int
             15 => {
                 let path = self.pop()?;
-                match path {
+                match &path {
                     Value::String(path) => {
-                        let size = self.runtime.file_size(&path).unwrap_or(-1);
+                        let size = self.runtime.file_size(path).unwrap_or(-1);
                         self.stack.push(Value::Int(size));
                         Ok(())
                     }
@@ -2288,9 +2352,9 @@ impl VM {
             // env_get(name: string) -> string (or null)
             20 => {
                 let name = self.pop()?;
-                match name {
+                match &name {
                     Value::String(name) => {
-                        let value = self.runtime.env_get(&name);
+                        let value = self.runtime.env_get(name);
                         self.stack.push(match value {
                             Some(v) => Value::String(Rc::new(v)),
                             None => Value::Null,
@@ -2367,9 +2431,9 @@ impl VM {
             // base64_decode(input: string) -> string
             61 => {
                 let input = self.pop()?;
-                match input {
+                match &input {
                     Value::String(s) => {
-                        match self.runtime.base64_decode(&s) {
+                        match self.runtime.base64_decode(s) {
                             Ok(decoded) => {
                                 self.stack.push(Value::String(Rc::new(decoded)));
                                 Ok(())
@@ -2390,9 +2454,9 @@ impl VM {
             // base64_decode_url(input: string) -> string
             63 => {
                 let input = self.pop()?;
-                match input {
+                match &input {
                     Value::String(s) => {
-                        match self.runtime.base64_decode_url(&s) {
+                        match self.runtime.base64_decode_url(s) {
                             Ok(decoded) => {
                                 self.stack.push(Value::String(Rc::new(decoded)));
                                 Ok(())
@@ -2429,8 +2493,8 @@ impl VM {
             // json_parse(json_str: string) -> value
             50 => {
                 let input = self.pop()?;
-                match input {
-                    Value::String(s) => match self.runtime.json_parse(&s) {
+                match &input {
+                    Value::String(s) => match self.runtime.json_parse(s) {
                         Ok(value) => {
                             self.stack.push(value);
                             Ok(())
@@ -2520,19 +2584,19 @@ impl VM {
             // http_get(url: string) -> [int, string] (status, body)
             120 => {
                 let url = self.pop()?;
-                match url {
+                match &url {
                     Value::String(url) => {
-                        match self.runtime.http_get(&url) {
+                        match self.runtime.http_get(url) {
                             Ok((status, _headers, body)) => {
                                 // Return array [status, body]
                                 let arr = vec![Value::Int(status), Value::String(Rc::new(body))];
-                                self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
+                                self.stack.push(Value::Array(Gc::new(GcCell::new(arr))));
                                 Ok(())
                             }
                             Err(e) => {
                                 // Return error as [-1, error_message]
                                 let arr = vec![Value::Int(-1), Value::String(Rc::new(e))];
-                                self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
+                                self.stack.push(Value::Array(Gc::new(GcCell::new(arr))));
                                 Ok(())
                             }
                         }
@@ -2545,18 +2609,18 @@ impl VM {
                 let content_type = self.pop()?;
                 let body = self.pop()?;
                 let url = self.pop()?;
-                match (url, body, content_type) {
+                match (&url, &body, &content_type) {
                     (Value::String(url), Value::String(body), Value::String(content_type)) => {
-                        match self.runtime.http_post(&url, &body, &content_type) {
+                        match self.runtime.http_post(url, body, content_type) {
                             Ok((status, _headers, response_body)) => {
                                 let arr =
                                     vec![Value::Int(status), Value::String(Rc::new(response_body))];
-                                self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
+                                self.stack.push(Value::Array(Gc::new(GcCell::new(arr))));
                                 Ok(())
                             }
                             Err(e) => {
                                 let arr = vec![Value::Int(-1), Value::String(Rc::new(e))];
-                                self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
+                                self.stack.push(Value::Array(Gc::new(GcCell::new(arr))));
                                 Ok(())
                             }
                         }
@@ -2570,22 +2634,22 @@ impl VM {
                 let headers = self.pop()?;
                 let url = self.pop()?;
                 let method = self.pop()?;
-                match (method, url, headers, body) {
+                match (&method, &url, &headers, &body) {
                     (
                         Value::String(method),
                         Value::String(url),
                         Value::String(headers),
                         Value::String(body),
-                    ) => match self.runtime.http_request(&method, &url, &headers, &body) {
+                    ) => match self.runtime.http_request(method, url, headers, body) {
                         Ok((status, response_body)) => {
                             let arr =
                                 vec![Value::Int(status), Value::String(Rc::new(response_body))];
-                            self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
+                            self.stack.push(Value::Array(Gc::new(GcCell::new(arr))));
                             Ok(())
                         }
                         Err(e) => {
                             let arr = vec![Value::Int(-1), Value::String(Rc::new(e))];
-                            self.stack.push(Value::Array(Rc::new(RefCell::new(arr))));
+                            self.stack.push(Value::Array(Gc::new(GcCell::new(arr))));
                             Ok(())
                         }
                     },
@@ -3154,6 +3218,120 @@ mod tests {
         let mut vm = VM::new(program);
         let result = vm.run();
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_collect_opcode_runs_and_pushes_null() {
+        // Build a 1-element array, make it self-referential (arr contains arr),
+        // drop it, then run Collect. This exercises the `collect()` builtin's
+        // opcode path: the VM must run a garbage collection at the opcode
+        // boundary and push null, leaving the program in a valid state.
+        let program = make_program(
+            vec![Value::Int(0)],
+            vec![
+                // NewArray of size 0 -> stack: [arr].
+                Opcode::LoadConst as u8,
+                0,
+                0,
+                Opcode::NewArray as u8,
+                // Dup -> stack: [arr, arr].
+                Opcode::Dup as u8,
+                // ArrayPush pops (array, value): arr.push(arr) forms a self-cycle
+                // and leaves the stack empty.
+                Opcode::ArrayPush as u8,
+                // The array is now unreachable from the stack. Collect it; the
+                // opcode pushes null.
+                Opcode::Collect as u8,
+                // Discard the null and halt.
+                Opcode::Pop as u8,
+                Opcode::Halt as u8,
+            ],
+        );
+        let mut vm = VM::new(program);
+        let result = vm.run();
+        assert!(result.is_ok(), "Collect opcode should execute cleanly");
+    }
+
+    #[test]
+    fn test_auto_collection_fires_at_threshold() {
+        // A bytecode loop that allocates one array per iteration and immediately
+        // drops it, WITHOUT ever calling collect(). Allocating well past
+        // AUTO_COLLECT_INTERVAL must trigger the loop-boundary auto-collection,
+        // keeping the live heap bounded. Relative jump offsets are computed for
+        // the exact byte layout documented inline.
+        let count = (VM::AUTO_COLLECT_INTERVAL + 50) as i64;
+        // Offsets: JumpIfFalse @9 reads its operand, ip becomes 12; end is @30,
+        // so its relative offset is 30 - 12 = 18. Jump @27 -> loop top @6 from
+        // ip 30, so its relative offset is 6 - 30 = -24.
+        let jif: i16 = 18;
+        let back: i16 = -24;
+        let program = make_program(
+            vec![Value::Int(count), Value::Int(0), Value::Int(1)],
+            vec![
+                // 0: counter = count
+                Opcode::LoadConst as u8,
+                0,
+                0,
+                // 3: store counter -> local 0
+                Opcode::StoreLocal as u8,
+                0,
+                0,
+                // 6: loop top -- load counter
+                Opcode::LoadLocal as u8,
+                0,
+                0,
+                // 9: if counter == 0 jump to end (+18)
+                Opcode::JumpIfFalse as u8,
+                jif as u16 as u8,
+                (jif as u16 >> 8) as u8,
+                // 12: array size 0
+                Opcode::LoadConst as u8,
+                1,
+                0,
+                // 15: allocate array (bumps allocation counter)
+                Opcode::NewArray as u8,
+                // 16: drop it -> unreachable
+                Opcode::Pop as u8,
+                // 17: counter
+                Opcode::LoadLocal as u8,
+                0,
+                0,
+                // 20: 1
+                Opcode::LoadConst as u8,
+                2,
+                0,
+                // 23: counter - 1
+                Opcode::Sub as u8,
+                // 24: store counter
+                Opcode::StoreLocal as u8,
+                0,
+                0,
+                // 27: jump back to loop top (-24)
+                Opcode::Jump as u8,
+                back as u16 as u8,
+                (back as u16 >> 8) as u8,
+                // 30: end
+                Opcode::Halt as u8,
+            ],
+        );
+
+        gc::force_collect();
+        let baseline = gc::stats().bytes_allocated;
+
+        let mut vm = VM::new(program);
+        let result = vm.run();
+        assert!(result.is_ok(), "allocation loop should run to completion");
+
+        // If auto-collection never fired, ~10,050 self-dropped arrays would have
+        // accumulated. The live heap during/after the run must stay far below
+        // that. After completion the counter has been reset and one more
+        // collection settles the heap to baseline.
+        gc::force_collect();
+        let after = gc::stats().bytes_allocated;
+        assert_eq!(
+            after, baseline,
+            "all transient arrays must be reclaimed (auto + final collect)"
+        );
     }
 
     #[test]

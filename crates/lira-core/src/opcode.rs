@@ -150,6 +150,9 @@ pub enum Opcode {
     // System operations
     /// Print value (debug)
     Print = 0xF0,
+    /// Force a garbage collection of cyclic heap values (the `collect()`
+    /// builtin). Takes no operands and pushes `null`.
+    Collect = 0xFD,
     /// System call
     Syscall = 0xFE,
     /// Halt execution
@@ -217,6 +220,7 @@ impl Opcode {
             0xC0 => Some(Opcode::TypeIs),
             0xC1 => Some(Opcode::Cast),
             0xF0 => Some(Opcode::Print),
+            0xFD => Some(Opcode::Collect),
             0xFE => Some(Opcode::Syscall),
             0xFF => Some(Opcode::Halt),
             _ => None,

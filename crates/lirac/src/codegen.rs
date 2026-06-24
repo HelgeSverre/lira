@@ -2002,6 +2002,13 @@ impl CodeGenerator {
                             self.emit_opcode(Opcode::Yield);
                             return;
                         }
+                        "collect" => {
+                            // collect() - force a garbage collection of cyclic
+                            // heap values. Takes no arguments; the VM pushes null
+                            // so it composes as a normal expression.
+                            self.emit_opcode(Opcode::Collect);
+                            return;
+                        }
                         "fiber_id" => {
                             // fiber_id() - get current fiber ID
                             self.emit_opcode(Opcode::FiberId);

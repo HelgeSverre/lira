@@ -393,6 +393,10 @@ impl TypeEnv {
         reg("fiber_yield", vec![], Type::Void, 0);
         reg("fiber_id", vec![], Type::Int, 0);
 
+        // Memory management built-in functions
+        // `collect()` forces a garbage collection of cyclic heap values.
+        reg("collect", vec![], Type::Void, 0);
+
         // Array built-in functions
         reg("len", vec![Type::Any], Type::Int, 1);
         reg("push", vec![Type::Any, Type::Any], Type::Void, 2);
