@@ -176,6 +176,9 @@ pub struct CodeGenerator {
     captures: Vec<String>,
     /// Function default parameter values: fn_name -> [(param_index, default_expr)]
     function_defaults: FunctionDefaults,
+    /// Function parameter names (in declaration order): fn_name -> [param_name, ...].
+    /// Used to reorder named arguments at call sites into positional order.
+    function_param_names: HashMap<String, Vec<String>>,
     /// Module-level constants: name -> constant pool index
     module_consts: HashMap<String, u16>,
     /// Impl methods for all types: type_name -> {method_name -> mangled_function_name}
@@ -237,6 +240,7 @@ impl CodeGenerator {
             struct_methods: HashMap::new(),
             captures: Vec::new(),
             function_defaults: HashMap::new(),
+            function_param_names: HashMap::new(),
             module_consts: HashMap::new(),
             impl_methods: HashMap::new(),
             impl_method_returns: HashMap::new(),
@@ -283,6 +287,12 @@ impl CodeGenerator {
                     if !defaults.is_empty() {
                         self.function_defaults.insert(name.clone(), defaults);
                     }
+                    // Record parameter names so named arguments can be reordered
+                    // into positional order at call sites.
+                    self.function_param_names.insert(
+                        name.clone(),
+                        params.iter().map(|p| p.name.clone()).collect(),
+                    );
                 }
                 StatementKind::ImplDecl {
                     type_name, methods, ..
@@ -611,6 +621,41 @@ impl CodeGenerator {
             }
         }
         None
+    }
+
+    /// Rearrange call arguments into the callee's declared parameter order so
+    /// named arguments bind to the correct slots at runtime. Positional args
+    /// keep their index; named args are placed by matching the parameter name.
+    /// The type checker has already validated the names, so on any mismatch we
+    /// conservatively fall back to source order.
+    fn order_call_args<'a>(&self, callee: &Expression, args: &'a [Argument]) -> Vec<&'a Argument> {
+        // Nothing to do when there are no named arguments.
+        if !args.iter().any(|a| a.name.is_some()) {
+            return args.iter().collect();
+        }
+
+        let param_names = match &callee.kind {
+            ExpressionKind::Identifier(name) => self.function_param_names.get(name),
+            _ => None,
+        };
+
+        let Some(param_names) = param_names else {
+            return args.iter().collect();
+        };
+
+        let mut slots: Vec<Option<&'a Argument>> = vec![None; param_names.len()];
+        for (pos, arg) in args.iter().enumerate() {
+            match &arg.name {
+                None if pos < slots.len() => slots[pos] = Some(arg),
+                None => return args.iter().collect(), // excess positional; bail
+                Some(name) => match param_names.iter().position(|p| p == name) {
+                    Some(idx) if slots[idx].is_none() => slots[idx] = Some(arg),
+                    _ => return args.iter().collect(), // unknown/dup; bail
+                },
+            }
+        }
+
+        slots.into_iter().flatten().collect()
     }
 
     fn define_local_type(&mut self, name: &str, type_name: &str) {
@@ -2370,13 +2415,18 @@ impl CodeGenerator {
                     // Object is left on stack
                 } else {
                     // Regular function call
+                    // Reorder named arguments into positional (declaration) order
+                    // so they bind to the correct parameter slots at runtime. The
+                    // checker has already validated names; here we only rearrange.
+                    let ordered_args: Vec<&Argument> = self.order_call_args(callee, args);
+
                     // Push arguments first
-                    for arg in args {
+                    for arg in &ordered_args {
                         self.generate_expression(&arg.value);
                     }
 
                     // Check if we need to fill in default parameter values
-                    let mut total_args = args.len();
+                    let mut total_args = ordered_args.len();
                     if let ExpressionKind::Identifier(fn_name) = &callee.kind {
                         if let Some(defaults) = self.function_defaults.get(fn_name).cloned() {
                             // Find the expected param count
@@ -2384,7 +2434,9 @@ impl CodeGenerator {
                                 let expected_params = func.param_count as usize;
                                 // Generate code for missing default values
                                 for (param_idx, default_expr) in defaults {
-                                    if param_idx >= args.len() && param_idx < expected_params {
+                                    if param_idx >= ordered_args.len()
+                                        && param_idx < expected_params
+                                    {
                                         self.generate_expression(&default_expr);
                                         total_args += 1;
                                     }

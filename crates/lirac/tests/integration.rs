@@ -253,6 +253,7 @@ example_test!(
 example_test!(test_lambda, "lambda.li");
 example_test!(test_mutual_recursion, "mutual_recursion.li");
 example_test!(test_recursion_stress, "recursion_stress.li");
+example_test!(test_named_args, "named_args.li");
 
 // Concurrency
 example_test!(test_fiber_basic, "fiber_basic.li");

@@ -288,6 +288,9 @@ pub struct TypeEnv {
     trait_impls: HashMap<(String, String), Vec<ImplMethod>>, // (trait_name, type_name) -> impl
     /// Maps generic function names to their type parameter names
     generic_functions: HashMap<String, Vec<String>>, // fn_name -> [T, U, ...]
+    /// Maps function names to their declared parameter names (in declaration
+    /// order). Used to resolve and reorder named arguments at call sites.
+    fn_param_names: HashMap<String, Vec<String>>, // fn_name -> [param_name, ...]
     next_type_var: u32,
     structured_errors: Vec<CheckerError>,
 }
@@ -329,6 +332,7 @@ impl TypeEnv {
             trait_defs: HashMap::new(),
             trait_impls: HashMap::new(),
             generic_functions: HashMap::new(),
+            fn_param_names: HashMap::new(),
             next_type_var: 0,
             structured_errors: Vec::new(),
         };
@@ -827,6 +831,17 @@ impl TypeEnv {
     /// Check if a function is generic
     pub fn is_generic_function(&self, name: &str) -> bool {
         self.generic_functions.contains_key(name)
+    }
+
+    /// Record the declared parameter names of a function (in order), so named
+    /// arguments at call sites can be matched/reordered by name.
+    pub fn register_fn_param_names(&mut self, name: &str, param_names: Vec<String>) {
+        self.fn_param_names.insert(name.to_string(), param_names);
+    }
+
+    /// Look up the declared parameter names for a function by name.
+    pub fn fn_param_names(&self, name: &str) -> Option<&Vec<String>> {
+        self.fn_param_names.get(name)
     }
 
     pub fn has_errors(&self) -> bool {
@@ -1793,6 +1808,10 @@ impl TypeChecker {
                 kind: SymbolKind::Function,
             });
 
+            // Record parameter names so call sites can resolve named arguments.
+            let param_names: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
+            self.env.register_fn_param_names(name, param_names);
+
             // Register generic function type parameters for monomorphization
             if !type_params.is_empty() {
                 let type_param_names: Vec<String> =
@@ -2087,6 +2106,82 @@ impl TypeChecker {
         for stmt in &block.statements {
             self.check_statement(stmt);
         }
+    }
+
+    /// Resolve named call arguments against a function's declared parameter
+    /// names, returning the arguments rearranged into declaration order.
+    ///
+    /// Positional arguments fill parameter slots left-to-right; named arguments
+    /// are placed into the slot whose name matches. Validation errors (unknown
+    /// argument name, duplicate binding, or a missing required parameter that no
+    /// argument supplies) are reported via the type environment, and `None` is
+    /// returned so callers can fall back to source order for error recovery.
+    ///
+    /// `param_names` already excludes the implicit `self` for method calls.
+    fn reorder_named_args<'a>(
+        &mut self,
+        args: &'a [crate::ast::Argument],
+        param_names: &[String],
+        span: &Span,
+    ) -> Option<Vec<&'a crate::ast::Argument>> {
+        // slots[i] holds the argument bound to param_names[i], if any.
+        let mut slots: Vec<Option<&'a crate::ast::Argument>> = vec![None; param_names.len()];
+        let mut ok = true;
+
+        for (pos, arg) in args.iter().enumerate() {
+            match &arg.name {
+                None => {
+                    // Positional argument binds to the parameter at the same index.
+                    // (The parser guarantees positionals precede named args.)
+                    if pos < slots.len() {
+                        slots[pos] = Some(arg);
+                    }
+                    // Excess positional args are caught by the arg-count check.
+                }
+                Some(name) => match param_names.iter().position(|p| p == name) {
+                    Some(idx) => {
+                        if slots[idx].is_some() {
+                            self.env.error(
+                                &arg.span,
+                                format!("Duplicate value for parameter '{}'", name),
+                            );
+                            ok = false;
+                        } else {
+                            slots[idx] = Some(arg);
+                        }
+                    }
+                    None => {
+                        self.env
+                            .error(&arg.span, format!("Unknown named argument '{}'", name));
+                        ok = false;
+                    }
+                },
+            }
+        }
+
+        // Every parameter that received an argument must form a contiguous
+        // prefix once reordered; a gap means a required parameter was skipped.
+        // Default-valued / optional params are allowed to remain unfilled and
+        // are handled by the existing arg-count check, so we only flag a gap
+        // that sits *before* a filled slot.
+        let last_filled = slots.iter().rposition(|s| s.is_some());
+        if let Some(last) = last_filled {
+            for (idx, slot) in slots.iter().enumerate().take(last + 1) {
+                if slot.is_none() {
+                    self.env.error(
+                        span,
+                        format!("Missing value for parameter '{}'", param_names[idx]),
+                    );
+                    ok = false;
+                }
+            }
+        }
+
+        if !ok {
+            return None;
+        }
+
+        Some(slots.into_iter().flatten().collect())
     }
 
     fn check_expression(&mut self, expr: &Expression) -> Type {
@@ -2485,10 +2580,33 @@ impl TypeChecker {
                             &params[..]
                         };
 
-                        // TODO: Handle named argument reordering here
-                        // For now, just check positional argument types
+                        // Resolve the declared parameter names that line up with
+                        // `params_to_check` (self is dropped for method calls), so
+                        // named arguments can be matched and reordered by name.
+                        let param_names: Option<Vec<String>> =
+                            function_name.as_ref().and_then(|fn_name| {
+                                self.env.fn_param_names(fn_name).map(|names| {
+                                    if is_method_call && !names.is_empty() {
+                                        names[1..].to_vec()
+                                    } else {
+                                        names.clone()
+                                    }
+                                })
+                            });
+
+                        // Reorder named arguments to positional order. Positional
+                        // args keep their slot; named args are matched by name.
+                        // Validation (unknown / duplicate / missing) is reported as
+                        // errors and we fall back to source order for recovery.
+                        let ordered_args: Vec<&crate::ast::Argument> = match &param_names {
+                            Some(names) if args.iter().any(|a| a.name.is_some()) => self
+                                .reorder_named_args(args, names, &expr.span)
+                                .unwrap_or_else(|| args.iter().collect()),
+                            _ => args.iter().collect(),
+                        };
+
                         let mut inferred_types = Vec::new();
-                        for (arg, param_type) in args.iter().zip(params_to_check.iter()) {
+                        for (arg, param_type) in ordered_args.iter().zip(params_to_check.iter()) {
                             let arg_type = self.check_expression(&arg.value);
                             if !arg_type.is_compatible_with(param_type) {
                                 self.env.record_error(CheckerError::TypeMismatchContext {
@@ -7037,5 +7155,64 @@ mod tests {
         assert!(errors
             .iter()
             .any(|e| e.message().contains("Logical not requires bool operand")));
+    }
+
+    // ========================================================================
+    // Named-argument reordering at call sites
+    // ========================================================================
+
+    #[test]
+    fn test_named_args_reordered_typecheck() {
+        // Named args supplied out of order must bind to the correct parameter by
+        // name, so the (string, int) call type-checks against fn(int, string).
+        let src = "fn f(a: int, b: string) {}\nfn main() { f(b: \"x\", a: 1) }";
+        assert!(
+            check_source(src).is_ok(),
+            "out-of-order named args should type-check: {:?}",
+            check_source(src)
+        );
+    }
+
+    #[test]
+    fn test_named_args_mixed_with_positional() {
+        let src = "fn g(a: int, b: int, c: int) {}\nfn main() { g(1, c: 3, b: 2) }";
+        assert!(check_source(src).is_ok(), "{:?}", check_source(src));
+    }
+
+    #[test]
+    fn test_named_args_unknown_name_errors() {
+        let errors = collect_errors("fn f(a: int, b: string) {}\nfn main() { f(a: 1, c: \"x\") }");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message().contains("Unknown named argument 'c'")),
+            "expected unknown-named-argument error, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_named_args_duplicate_errors() {
+        let errors = collect_errors("fn f(a: int, b: string) {}\nfn main() { f(1, a: 2) }");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message().contains("Duplicate value for parameter 'a'")),
+            "expected duplicate-parameter error, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_named_args_missing_required_errors() {
+        // Supplying only `b` leaves required `a` unbound.
+        let errors = collect_errors("fn f(a: int, b: string) {}\nfn main() { f(b: \"x\") }");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message().contains("Missing value for parameter 'a'")),
+            "expected missing-parameter error, got: {:?}",
+            errors
+        );
     }
 }

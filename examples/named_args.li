@@ -1,0 +1,29 @@
+// Named arguments can be passed in any order and are matched to parameters by
+// name, then reordered to bind correctly at runtime.
+
+fn describe(name: string, age: int) {
+    println("${name} is ${age}")
+}
+
+fn point(x: int, y: int, z: int) {
+    println("(${x}, ${y}, ${z})")
+}
+
+// Named arguments after positional ones, and defaults filled in by name.
+fn greet(greeting: string, name: string = "world") {
+    println("${greeting}, ${name}!")
+}
+
+fn main() {
+    // All named, reversed order.
+    describe(age: 30, name: "Alice") // @expect: Alice is 30
+
+    // Mixed: positional first, then named out of order.
+    point(1, z: 3, y: 2) // @expect: (1, 2, 3)
+
+    // Named arg with a defaulted trailing parameter left out.
+    greet(greeting: "Hello") // @expect: Hello, world!
+
+    // Positional plus a named override of the default.
+    greet("Hi", name: "Bob") // @expect: Hi, Bob!
+}
