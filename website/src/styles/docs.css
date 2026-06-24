@@ -1,0 +1,292 @@
+/* docs.css — shared documentation prose + chrome styles for DocsLayout.
+   Reuses the brand variables defined in theme.css. No new hardcoded colors. */
+
+/* ------------------------------------------------------------------ *
+ * Page shell: header band + two-column body (content + sticky TOC)
+ * ------------------------------------------------------------------ */
+
+.docs {
+  /* readable measure for prose; the TOC lives in its own track */
+  --docs-measure: 70ch;
+}
+
+.docs__header {
+  background: var(--gradient-hero);
+  border-bottom: 1px solid var(--border);
+  padding: var(--sp-12) 0 var(--sp-8);
+}
+
+.docs__kicker {
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--lira-gold);
+  margin: 0 0 var(--sp-2);
+}
+
+.docs__title {
+  font-size: clamp(2rem, 4vw, var(--fs-h1));
+  margin: 0 0 var(--sp-2);
+}
+
+.docs__lede {
+  color: var(--text-muted);
+  font-size: 1.125rem;
+  max-width: 60ch;
+  margin: 0;
+}
+
+.docs__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px;
+  gap: var(--sp-8);
+  align-items: start;
+  padding-top: var(--sp-8);
+  padding-bottom: var(--sp-8);
+}
+
+/* The prose column. Constrain line length for readability. */
+.docs__content {
+  min-width: 0; /* allow code blocks to scroll instead of blowing out grid */
+  max-width: var(--docs-measure);
+}
+
+/* ------------------------------------------------------------------ *
+ * Prose typography
+ * ------------------------------------------------------------------ */
+
+.prose {
+  color: var(--text-muted);
+}
+
+.prose > :first-child {
+  margin-top: 0;
+}
+
+.prose p,
+.prose ul,
+.prose ol {
+  font-size: var(--fs-body);
+  line-height: 1.7;
+  margin: 0 0 var(--sp-2);
+}
+
+/* Code specimens flow in prose with breathing room (the component resets the
+   <figure> margin to 0 for the landing's grid/card layout, so this .docs-scoped
+   rule wins on specificity and restores spacing — extra room below). */
+.docs .prose .specimen {
+  margin: var(--sp-3) 0 var(--sp-5);
+}
+
+.prose h2 {
+  font-size: var(--fs-h2);
+  color: var(--snow);
+  margin: var(--sp-8) 0 var(--sp-2);
+  scroll-margin-top: 88px; /* clears the sticky nav on anchor jump */
+}
+
+.prose h3 {
+  font-size: var(--fs-h3);
+  color: var(--snow);
+  margin: var(--sp-6) 0 var(--sp-2);
+  scroll-margin-top: 88px;
+}
+
+.prose h4 {
+  font-size: var(--fs-h4);
+  color: var(--snow);
+  margin: var(--sp-4) 0 var(--sp-1);
+}
+
+.prose ul,
+.prose ol {
+  padding-left: var(--sp-3);
+}
+
+.prose li {
+  margin: 0 0 var(--sp-1);
+}
+
+.prose li::marker {
+  color: var(--starlight);
+}
+
+.prose strong {
+  color: var(--snow);
+  font-weight: 600;
+}
+
+/* Inline code in prose. */
+.prose :not(pre) > code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  color: var(--starlight);
+  background: rgba(107, 154, 196, 0.1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.1em 0.36em;
+}
+
+.prose a {
+  color: var(--starlight);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(107, 154, 196, 0.35);
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.prose a:hover {
+  color: var(--lira-gold);
+  border-bottom-color: var(--lira-gold);
+}
+
+
+/* Anchored heading affordance: a gold "#" link that appears on hover. */
+.prose .heading-anchor {
+  margin-left: var(--sp-1);
+  color: var(--lira-gold);
+  border-bottom: 0;
+  opacity: 0;
+  font-weight: 400;
+  text-decoration: none;
+  transition: opacity 0.15s ease;
+}
+
+.prose h2:hover .heading-anchor,
+.prose h3:hover .heading-anchor,
+.prose .heading-anchor:focus {
+  opacity: 1;
+}
+
+/* ------------------------------------------------------------------ *
+ * Callout boxes — Note (moss) and Warning / Not-implemented (ember)
+ * ------------------------------------------------------------------ */
+
+.callout {
+  margin: var(--sp-3) 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: rgba(245, 245, 247, 0.02);
+}
+
+.callout > :last-child {
+  margin-bottom: 0;
+}
+
+/* The colored, uppercase micro-label carries the meaning — no accent bar. */
+.callout__label {
+  display: block;
+  font-weight: 700;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: var(--sp-1);
+}
+
+/* Note — moss/green for neutral asides and tips. */
+.callout--note {
+  background: rgba(122, 168, 116, 0.07);
+}
+.callout--note .callout__label {
+  color: var(--moss);
+}
+
+/* Warning / Not-yet-implemented — ember/red tint for honesty callouts. */
+.callout--warning {
+  background: rgba(232, 90, 79, 0.07);
+}
+.callout--warning .callout__label {
+  color: var(--ember);
+}
+
+/* ------------------------------------------------------------------ *
+ * "On this page" table of contents (sticky, right rail)
+ * ------------------------------------------------------------------ */
+
+.docs__toc {
+  position: sticky;
+  top: 88px;
+  align-self: start;
+  font-size: var(--fs-small);
+}
+
+.docs__toc-title {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin: 0 0 var(--sp-2);
+}
+
+.docs__toc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-left: 1px solid var(--border);
+}
+
+.docs__toc-list li {
+  margin: 0;
+}
+
+.docs__toc-list a {
+  display: block;
+  padding: 6px 0 6px var(--sp-2);
+  margin-left: -1px;
+  color: var(--text-muted);
+  border-left: 1px solid transparent;
+  text-decoration: none;
+  line-height: 1.4;
+}
+
+.docs__toc-list a:hover {
+  color: var(--snow);
+}
+
+.docs__toc-list a[aria-current="true"] {
+  color: var(--lira-gold);
+  border-left-color: var(--lira-gold);
+}
+
+/* ------------------------------------------------------------------ *
+ * Responsive: collapse the TOC rail on narrower viewports
+ * ------------------------------------------------------------------ */
+
+@media (max-width: 920px) {
+  .docs__body {
+    grid-template-columns: 1fr;
+    gap: var(--sp-4);
+  }
+  .docs__content {
+    max-width: var(--docs-measure);
+  }
+  /* The TOC degrades to a static block at the top of the content flow. */
+  .docs__toc {
+    position: static;
+    top: auto;
+    order: -1;
+    padding: var(--sp-2) var(--sp-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--dusk);
+  }
+  .docs__toc-list {
+    border-left: 0;
+  }
+  .docs__toc-list a {
+    padding-left: 0;
+    border-left: 0;
+  }
+  .docs__toc-list a[aria-current="true"] {
+    border-left: 0;
+  }
+}
+
+/* When JS is off or there are no h2s, the empty TOC simply collapses. */
+.docs__toc:empty {
+  display: none;
+}

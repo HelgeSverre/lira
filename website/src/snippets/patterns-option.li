@@ -1,0 +1,16 @@
+// A generic enum makes its own Option type. Matching binds the
+// payload of `Some`, and the checker forces you to handle `None`.
+enum Opt<T> {
+    Some(T),
+    None
+}
+
+fn unwrap_or(o: Opt<int>, fallback: int) -> int {
+    return match o {
+        Opt::Some(v) => v,
+        Opt::None => fallback
+    }
+}
+
+println(unwrap_or(Opt::Some(42), 0))
+println(unwrap_or(Opt::None, -1))

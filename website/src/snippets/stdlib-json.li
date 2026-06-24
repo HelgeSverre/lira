@@ -1,0 +1,19 @@
+import std.json
+
+fn main() {
+    // json_parse / json_stringify are VM builtins; std.json adds helpers.
+    let text = "{\"name\": \"lira\", \"stars\": 7}"
+    let obj = json_parse(text)
+
+    // Index into the parsed object.
+    println(obj["name"])         // lira
+    println(obj["stars"])        // 7
+
+    // json_has is a std.json helper.
+    println(json_has(obj, "name"))    // true
+    println(json_has(obj, "missing")) // false
+
+    // Round-trip back to a string.
+    let out = json_stringify(obj)
+    println(len(out) > 0)        // true
+}

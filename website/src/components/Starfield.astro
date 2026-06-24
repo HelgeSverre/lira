@@ -1,0 +1,85 @@
+---
+// Subtle constellation starfield for the hero background.
+// Low-opacity dots + thin connecting lines evoke concurrent fibers/strings.
+// Coordinates are a stylized constellation (bright star at top), not a chart.
+const stars = [
+  { x: 50, y: 12, r: 2.4 }, // Vega (brightest)
+  { x: 41, y: 30, r: 1.5 },
+  { x: 60, y: 32, r: 1.5 },
+  { x: 38, y: 52, r: 1.4 },
+  { x: 63, y: 54, r: 1.4 },
+  { x: 50, y: 70, r: 1.2 },
+];
+// Connecting lines (the lyre's parallelogram + stem).
+const links: [number, number][] = [
+  [0, 1],
+  [0, 2],
+  [1, 3],
+  [2, 4],
+  [3, 5],
+  [4, 5],
+  [3, 4],
+];
+// Scattered low-opacity field dots.
+const field = Array.from({ length: 46 }, (_, i) => ({
+  x: (i * 53.7) % 100,
+  y: (i * 29.3 + 7) % 100,
+  r: 0.5 + ((i * 7) % 3) * 0.35,
+}));
+---
+
+<svg
+  class="starfield"
+  viewBox="0 0 100 100"
+  preserveAspectRatio="xMidYMid slice"
+  aria-hidden="true"
+  focusable="false"
+>
+  <g class="starfield__field">
+    {field.map((d) => <circle cx={d.x} cy={d.y} r={d.r} />)}
+  </g>
+  <g class="starfield__constellation">
+    {
+      links.map(([a, b]) => (
+        <line
+          x1={stars[a].x}
+          y1={stars[a].y}
+          x2={stars[b].x}
+          y2={stars[b].y}
+        />
+      ))
+    }
+    {stars.map((s) => <circle cx={s.x} cy={s.y} r={s.r} />)}
+  </g>
+</svg>
+
+<style>
+  .starfield {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    opacity: 0.6;
+    /* Dissolve toward the edges so it stays a whisper, not a backdrop. */
+    -webkit-mask-image: radial-gradient(
+      115% 95% at 72% 22%,
+      #000 0%,
+      transparent 70%
+    );
+    mask-image: radial-gradient(115% 95% at 72% 22%, #000 0%, transparent 70%);
+  }
+  .starfield__field circle {
+    fill: var(--snow);
+    opacity: 0.03;
+  }
+  .starfield__constellation circle {
+    fill: var(--lira-gold);
+    opacity: 0.28;
+  }
+  .starfield__constellation line {
+    stroke: var(--lira-gold);
+    stroke-width: 0.16;
+    opacity: 0.1;
+  }
+</style>

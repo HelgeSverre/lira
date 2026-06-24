@@ -1,0 +1,13 @@
+// A bounded type parameter: T must satisfy the Numeric constraint, which is
+// what lets the body use the `+` operator. The same function serves ints and
+// floats — the constraint is checked statically, then erased at runtime.
+fn add<T: Numeric>(a: T, b: T) -> T {
+    return a + b
+}
+
+fn main() {
+    println(add(2, 3))        // 5
+    println(add(1.5, 2.5))    // 4
+}
+
+main()

@@ -1,0 +1,20 @@
+import std.strings
+
+fn main() {
+    let title = "  the lyre is tuned  "
+
+    // Methods hang off the string type itself.
+    println(title.trim().title_case())   // The Lyre Is Tuned
+
+    let name = "lira"
+    println(name.to_upper())             // LIRA
+    println(name.capitalize())           // Lira
+    println(name.repeat(3))              // liralira lira -> liraliralira
+    println(name.starts_with("li"))      // true
+    println(name.index_of("r"))          // 2
+
+    // split returns [string]; join is a free function.
+    let parts = "a,b,c".split(",")
+    println(len(parts))                  // 3
+    println(join(parts, " / "))          // a / b / c
+}

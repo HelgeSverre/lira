@@ -1,0 +1,241 @@
+---
+import DocsLayout from "../layouts/DocsLayout.astro";
+import Code from "../components/Code.astro";
+---
+
+<DocsLayout
+  kicker="Types"
+  title="Types & Generics"
+  lede="Lira checks your types ahead of time, then erases them to run on a compact, tagged VM. Strong guarantees at compile time; one uniform value model at runtime."
+>
+  <div class="prose">
+    <p>
+      Lira is statically checked. The checker verifies your program before any
+      bytecode is generated — argument types, return types, optional handling,
+      and generic constraints are all settled up front, and mistakes come back
+      as <a href="/guide">located diagnostics</a> with a <code>line:column</code>.
+      What follows is a tour of the type system as it works today.
+    </p>
+
+    <h2>Primitives and sized integers</h2>
+    <p>
+      The everyday primitives are <code>int</code>, <code>float</code>,
+      <code>bool</code>, and <code>string</code>. When you need a specific width,
+      Lira offers sized integer types — signed (<code>int8</code>,
+      <code>int16</code>, <code>int32</code>, <code>int64</code>) and unsigned
+      (<code>uint8</code>, <code>uint16</code>, <code>uint32</code>), with
+      <code>byte</code> as an alias for <code>uint8</code>. A plain
+      <code>int</code> is 64-bit signed.
+    </p>
+
+    <Code file="examples/integer_types.li" filename="integer_types.li" />
+
+    <h2>Inference vs. annotations</h2>
+    <p>
+      Local <code>let</code> bindings infer their type from the initializer, so
+      you rarely annotate them. Where there is nothing to infer from — function
+      parameters and return types — annotations are required. That split keeps
+      bodies terse while making signatures self-documenting.
+    </p>
+
+    <Code
+      file="website/src/snippets/types-inference.li"
+      filename="inference.li"
+    />
+
+    <aside class="callout callout--note">
+      <span class="callout__label">Note</span>
+      <p>
+        String interpolation — <code>{'"count=${count}"'}</code> — works for any
+        value that prints. Use <code>lira check file.li</code> to run the checker
+        without executing.
+      </p>
+    </aside>
+
+    <h2>Function types and closures</h2>
+    <p>
+      Functions are values. A parameter typed <code>fn(int) -&gt; int</code>
+      accepts any function with that shape, so you can pass behavior around and
+      compose it. Closures are written <code>|params| body</code> and capture the
+      variables in scope where they are defined.
+    </p>
+
+    <Code file="examples/function_types.li" filename="function_types.li" />
+
+    <p>
+      A closure body can be a single expression or a full block with an early
+      <code>return</code>. Annotate the closure's parameters so the checker can
+      type the body:
+    </p>
+
+    <Code
+      file="website/src/snippets/types-closures.li"
+      filename="closures.li"
+    />
+
+    <h2>Arrays and tuples</h2>
+    <p>
+      An array of <code>T</code> is written <code>[T]</code>; every element shares
+      one type. Tuples group a fixed number of values of possibly different types
+      — <code>(int, string)</code> — and you take them apart by
+      <a href="/patterns">pattern matching</a>.
+    </p>
+
+    <Code file="examples/array_types.li" filename="array_types.li" />
+    <Code file="examples/tuple_types.li" filename="tuple_types.li" />
+
+    <h2>Optionals</h2>
+    <p>
+      An optional type is written <code>T?</code> — it holds either a
+      <code>T</code> or <code>null</code>. Two operators make optionals pleasant
+      to work with: <code>??</code> supplies a fallback when the left side is
+      null, and <code>?.</code> reads a field only when the receiver is non-null,
+      otherwise short-circuiting to null.
+    </p>
+
+    <Code
+      file="examples/optional_chaining.li"
+      filename="optional_chaining.li"
+    />
+
+    <p>
+      Optional field access with <code>?.</code> reaches into a struct safely:
+      a present value yields the field, a null receiver yields null.
+    </p>
+
+    <Code file="examples/optional_access.li" filename="optional_access.li" />
+
+    <h2>Result and the <code>?</code> operator</h2>
+    <p>
+      Lira models fallible operations as values, not exceptions. A function that
+      can fail returns <code>Result&lt;T, E&gt;</code> — <code>Result::Ok(value)</code>
+      or <code>Result::Err(error)</code>. The postfix <code>?</code> operator
+      propagates an <code>Err</code> to the caller and unwraps an <code>Ok</code>,
+      so success paths read top to bottom without nesting.
+    </p>
+
+    <Code
+      file="examples/result_propagation.li"
+      filename="result_propagation.li"
+    />
+
+    <aside class="callout callout--note">
+      <span class="callout__label">Note</span>
+      <p>
+        You handle a <code>Result</code> by matching on it. The checker enforces
+        exhaustiveness, so you can't forget the <code>Err</code> case — see
+        <a href="/patterns">Pattern Matching</a>.
+      </p>
+    </aside>
+
+    <h2>Generics</h2>
+    <p>
+      Generic type parameters let one definition serve many concrete types. Lira
+      supports generic functions and generic structs out of the box:
+    </p>
+
+    <Code file="examples/generics_basic.li" filename="generics_basic.li" />
+
+    <p>
+      Generic <strong>enums</strong> work too — which means you can build your
+      own <code>Option</code>- or <code>Result</code>-shaped types. Multiple type
+      parameters are fine (<code>Pair&lt;A, B&gt;</code>), and you can annotate a
+      binding with a concrete instantiation like <code>Opt&lt;int&gt;</code>:
+    </p>
+
+    <Code file="examples/generic_enum.li" filename="generic_enum.li" />
+
+    <h2>Bounded-operation generics</h2>
+    <p>
+      An unconstrained parameter <code>T</code> is opaque — the checker has no
+      grounds to assume it supports any particular operation. To use an operator
+      inside a generic body, bound the parameter. A <code>Numeric</code> bound is
+      exactly what licenses arithmetic on <code>T</code>:
+    </p>
+
+    <Code
+      file="website/src/snippets/types-bounded-generics.li"
+      filename="bounded_generics.li"
+    />
+
+    <p>
+      Drop the bound and the same code is rejected — using
+      <code>+</code> on an unconstrained <code>T</code> is a compile error, with
+      a message that tells you exactly what to add:
+    </p>
+
+    <div class="term" role="img" aria-label="Compiler error for unbounded generic arithmetic">
+      <pre><span class="term__cmd">$ lira run unbounded.li</span>
+<span class="term__err">2:12: Cannot use Add on unconstrained generic type.</span>
+<span class="term__err">       Add a numeric constraint or use concrete types.</span></pre>
+    </div>
+
+    <h2>Checked, then erased</h2>
+    <p>
+      It's worth being precise about what generics buy you. Lira checks types
+      statically and then performs <strong>runtime type erasure</strong>: there is
+      no monomorphization. Every value runs on the same tagged dynamic VM, where
+      types are carried as runtime tags rather than compiled into specialized
+      code paths.
+    </p>
+    <p>
+      So generics here are a <em>checking and ergonomics</em> feature — they let
+      you write one well-typed definition and have the compiler verify each use —
+      not a performance specialization mechanism. The same erasure is why a
+      function with untyped parameters falls back to a dynamic <code>Any</code>
+      value, dispatched at runtime:
+    </p>
+
+    <Code
+      file="examples/untyped_function_ops.li"
+      filename="untyped_function_ops.li"
+    />
+
+    <aside class="callout callout--warning">
+      <span class="callout__label">Not yet implemented</span>
+      <p>
+        Turbofish syntax for explicit type arguments
+        (<code>identity::&lt;int&gt;(42)</code>) is not supported. Generic methods
+        on generic structs and enums (an <code>impl&lt;T&gt;</code> block) are
+        likewise not available yet — generic functions and generic
+        struct/enum <em>declarations</em> work today; generic methods do not.
+      </p>
+    </aside>
+
+    <h2>Where to go next</h2>
+    <p>
+      Optionals and <code>Result</code> are most useful alongside pattern
+      matching — head to <a href="/patterns">Pattern Matching</a> for exhaustive
+      <code>match</code>, guards, and tuple patterns. To put typed channels to
+      work, see <a href="/concurrency">Concurrency</a>. Or start from the top with
+      the <a href="/guide">Guide</a>.
+    </p>
+  </div>
+</DocsLayout>
+
+<style>
+  /* A small terminal panel for showing real compiler output, matching the
+     diagnostics treatment on the landing page. Uses theme.css variables only. */
+  .term {
+    background: var(--night);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--sp-3);
+    box-shadow: var(--elevation-1);
+    overflow-x: auto;
+    margin: var(--sp-3) 0;
+  }
+  .term pre {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: var(--fs-code);
+    line-height: 1.7;
+    color: var(--snow);
+  }
+  .term__cmd {
+    color: var(--text-muted);
+  }
+  .term__err {
+    color: var(--ember);
+  }
+</style>

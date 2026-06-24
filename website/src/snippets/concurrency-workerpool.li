@@ -1,0 +1,45 @@
+// A worker pool: one producer fills a jobs channel, three workers pull jobs,
+// square them, and fan results back in. A WaitGroup tells main when every
+// worker has drained the queue.
+import std.sync
+
+fn worker(jobs: Channel<int>, results: Channel<int>, wg: WaitGroup) {
+    var running = true
+    while running {
+        select {
+            j = <-jobs => send(results, j * j)
+            _ => running = false   // no jobs left: this worker retires
+        }
+    }
+    wg.done()
+}
+
+fn main() {
+    let jobs = chan(8)
+    let results = chan(8)
+    let wg = new_wait_group()
+
+    var i = 1
+    while i <= 8 {
+        send(jobs, i)
+        i = i + 1
+    }
+
+    spawn worker(jobs, results, wg)
+    spawn worker(jobs, results, wg)
+    spawn worker(jobs, results, wg)
+
+    wg.wait(3)   // block until all three workers signal done
+
+    var total = 0
+    var got = 0
+    while got < 8 {
+        select {
+            r = <-results => {
+                total = total + r
+                got = got + 1
+            }
+        }
+    }
+    println("sum of squares 1..8 = ${total}")
+}

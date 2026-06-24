@@ -1,0 +1,145 @@
+---
+// DocsLayout.astro — the shared shell for every documentation article.
+//
+// Wraps the site Layout (nav + footer + Night shell) and provides:
+//   • a page header band (kicker + H1 title + one-line lede)
+//   • a constrained, readable prose column for content + <Code> specimens
+//   • a sticky "On this page" TOC, built client-side from the page's <h2>s
+//
+// Usage:
+//   ---
+//   import DocsLayout from "../layouts/DocsLayout.astro";
+//   import Code from "../components/Code.astro";
+//   ---
+//   <DocsLayout
+//     kicker="Guide"
+//     title="Hello, Lira"
+//     lede="Write, check, and run your first program."
+//   >
+//     <div class="prose">
+//       <h2 id="install">Install</h2>
+//       <p>…</p>
+//       <Code file="website/src/snippets/guide-hello.li" />
+//     </div>
+//   </DocsLayout>
+//
+// The TOC + heading anchors are progressive enhancement: with JS off the page
+// still reads top-to-bottom, just without the right rail.
+import Layout from "./Layout.astro";
+import "../styles/docs.css";
+
+interface Props {
+  title: string;
+  lede?: string;
+  kicker?: string;
+  description?: string;
+}
+
+const { title, lede, kicker, description } = Astro.props as Props;
+
+// Feed the document <title> / meta description through to the base Layout.
+const headTitle = `${title} — Lira`;
+const headDescription = description ?? lede;
+---
+
+<Layout title={headTitle} description={headDescription}>
+  <article class="docs">
+    <header class="docs__header">
+      <div class="container">
+        {kicker && <p class="docs__kicker">{kicker}</p>}
+        <h1 class="docs__title">{title}</h1>
+        {lede && <p class="docs__lede">{lede}</p>}
+      </div>
+    </header>
+
+    <div class="container docs__body">
+      <div class="docs__content" data-docs-content>
+        <slot />
+      </div>
+
+      <!-- Populated on load from the <h2> headings in .docs__content. -->
+      <nav class="docs__toc" aria-label="On this page" data-docs-toc hidden></nav>
+    </div>
+  </article>
+</Layout>
+
+<script>
+  // Progressive enhancement: build the "On this page" list, give headings
+  // anchor links, and highlight the section currently in view.
+  function slugify(text: string): string {
+    return text
+      .toLowerCase()
+      .trim()
+      .replace(/[^\w\s-]/g, "")
+      .replace(/\s+/g, "-");
+  }
+
+  const content = document.querySelector<HTMLElement>("[data-docs-content]");
+  const toc = document.querySelector<HTMLElement>("[data-docs-toc]");
+  if (content && toc) {
+    const headings = Array.from(content.querySelectorAll<HTMLElement>("h2"));
+
+    if (headings.length) {
+      const seen = new Set<string>();
+      const links: HTMLAnchorElement[] = [];
+
+      const title = document.createElement("p");
+      title.className = "docs__toc-title";
+      title.textContent = "On this page";
+      toc.appendChild(title);
+
+      const list = document.createElement("ul");
+      list.className = "docs__toc-list";
+
+      for (const h of headings) {
+        // Ensure a stable, unique id.
+        let id = h.id || slugify(h.textContent ?? "");
+        if (!id) continue;
+        let unique = id;
+        let n = 2;
+        while (seen.has(unique)) unique = `${id}-${n++}`;
+        seen.add(unique);
+        h.id = unique;
+
+        // Gold "#" anchor affordance on the heading itself.
+        const anchor = document.createElement("a");
+        anchor.className = "heading-anchor";
+        anchor.href = `#${unique}`;
+        anchor.setAttribute("aria-label", `Link to ${h.textContent}`);
+        anchor.textContent = "#";
+        h.appendChild(anchor);
+
+        const li = document.createElement("li");
+        const link = document.createElement("a");
+        link.href = `#${unique}`;
+        link.textContent = h.textContent?.replace(/#$/, "") ?? "";
+        li.appendChild(link);
+        list.appendChild(li);
+        links.push(link);
+      }
+
+      toc.appendChild(list);
+      toc.hidden = false;
+
+      // Scroll-spy: mark the heading nearest the top as current.
+      const byId = new Map(links.map((l) => [l.hash.slice(1), l]));
+      let current: HTMLAnchorElement | null = null;
+      const observer = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            if (entry.isIntersecting) {
+              const link = byId.get(entry.target.id);
+              if (link) {
+                current?.removeAttribute("aria-current");
+                link.setAttribute("aria-current", "true");
+                current = link;
+              }
+            }
+          }
+        },
+        { rootMargin: "-80px 0px -70% 0px", threshold: 0 },
+      );
+      headings.forEach((h) => observer.observe(h));
+    }
+  }
+</script>

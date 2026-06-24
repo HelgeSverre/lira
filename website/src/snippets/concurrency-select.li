@@ -1,0 +1,27 @@
+// select waits on several channel operations at once and runs the first
+// arm that is ready. It supports three kinds of arm:
+//   v = <-ch  =>   receive arm  (binds the received value to v)
+//   x -> ch   =>   send arm     (sends the in-scope value x into ch)
+//   _         =>   default arm  (runs immediately if nothing else is ready)
+fn main() {
+    let ch = chan(1)
+
+    // Nothing has been sent yet, so the default arm fires: select is
+    // non-blocking when a default arm is present.
+    select {
+        v = <-ch => println("got ${v}")
+        _ => println("nothing ready yet")
+    }
+
+    let payload = 7
+    select {
+        payload -> ch => println("sent ${payload}")
+        _ => println("send would block")
+    }
+
+    // Now the value is buffered, so the receive arm wins.
+    select {
+        v = <-ch => println("got ${v}")
+        _ => println("nothing ready yet")
+    }
+}

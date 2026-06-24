@@ -1,0 +1,23 @@
+// Closures are written |params| body. They capture surrounding variables.
+fn apply(f: fn(int) -> int, x: int) -> int {
+    return f(x)
+}
+
+fn main() {
+    let factor = 3
+    let scale = |x: int| x * factor      // captures `factor`
+    println(scale(10))                   // 30
+
+    let inc = |n: int| n + 1
+    println(apply(inc, 41))              // 42
+
+    // A closure can have a full body block with an early return.
+    let clamp_low = |n: int| {
+        if n < 0 { return 0 }
+        return n
+    }
+    println(clamp_low(-5))               // 0
+    println(clamp_low(7))                // 7
+}
+
+main()

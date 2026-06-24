@@ -1,0 +1,21 @@
+// Spawn a producer; receive its values with a bound select.
+fn produce(out: Channel<int>) {
+    send(out, 1)
+    send(out, 2)
+    send(out, 3)
+}
+
+fn main() {
+    let ch = chan(3)
+    spawn produce(ch)
+
+    var seen = 0
+    while seen < 3 {
+        select {
+            n = <-ch => {
+                println("recv ${n}")
+                seen = seen + 1
+            }
+        }
+    }
+}

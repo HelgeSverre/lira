@@ -1,0 +1,26 @@
+// `match` is an expression: every arm yields a value, and the
+// whole match evaluates to the arm that fits. Here we match on
+// integer literals, with a wildcard `_` as the catch-all.
+fn grade(score: int) -> string {
+    return match score {
+        100 => "perfect",
+        90 => "A",
+        80 => "B",
+        _ => "keep going"
+    }
+}
+
+// String and bool literals match the same way.
+fn greet(lang: string) -> string {
+    return match lang {
+        "en" => "hello",
+        "no" => "hei",
+        _ => "..."
+    }
+}
+
+println(grade(100))
+println(grade(80))
+println(grade(42))
+println(greet("no"))
+println(greet("fr"))

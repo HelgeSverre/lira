@@ -1,0 +1,174 @@
+---
+import "@fontsource/inter/400.css";
+import "@fontsource/inter/500.css";
+import "@fontsource/inter/600.css";
+import "@fontsource/inter/700.css";
+import "@fontsource/jetbrains-mono/400.css";
+import "@fontsource/jetbrains-mono/500.css";
+import "../styles/theme.css";
+
+interface Props {
+  title?: string;
+  description?: string;
+}
+
+const {
+  title = "Lira — a statically-checked language with fiber concurrency",
+  description = "Lira is a statically-checked systems language with Go-style fiber concurrency, pattern matching, and a bytecode VM.",
+} = Astro.props as Props;
+
+const nav = [
+  { label: "Guide", href: "/guide" },
+  { label: "Concurrency", href: "/concurrency" },
+  { label: "Types", href: "/types" },
+  { label: "Patterns", href: "/patterns" },
+  { label: "Stdlib", href: "/stdlib" },
+];
+const github = "https://github.com/HelgeSverre/lira";
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
+    <meta name="generator" content={Astro.generator} />
+  </head>
+  <body>
+    <header class="nav">
+      <div class="container nav__inner">
+        <a href="/" class="brand" aria-label="Lira home">
+          <img src="/lira.svg" alt="" width="24" height="29" class="brand__mark" />
+          <span class="brand__word">Lira</span>
+        </a>
+        <nav class="nav__links" aria-label="Primary">
+          {nav.map((item) => <a href={item.href}>{item.label}</a>)}
+          <a
+            href={github}
+            class="nav__github"
+            rel="noopener"
+            target="_blank">GitHub ↗</a
+          >
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <slot />
+    </main>
+
+    <footer class="footer">
+      <div class="container footer__inner">
+        <div class="footer__brand">
+          <img src="/lira.svg" alt="" width="20" height="24" />
+          <span>Lira</span>
+        </div>
+        <nav class="footer__links" aria-label="Footer">
+          {nav.map((item) => <a href={item.href}>{item.label}</a>)}
+          <a href={github} rel="noopener" target="_blank">GitHub</a>
+        </nav>
+        <p class="footer__note">
+          A statically-checked language with fiber concurrency. Built in Rust,
+          compiled to bytecode.
+        </p>
+      </div>
+    </footer>
+
+    <style>
+      .nav {
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        background: rgba(26, 27, 38, 0.82);
+        backdrop-filter: saturate(150%) blur(10px);
+        border-bottom: 1px solid var(--border);
+      }
+      .nav__inner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        height: 64px;
+      }
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--snow);
+      }
+      .brand:hover {
+        color: var(--snow);
+      }
+      .brand__word {
+        font-weight: 700;
+        font-size: 1.25rem;
+        letter-spacing: -0.01em;
+      }
+      .nav__links {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-3);
+        font-size: var(--fs-small);
+        font-weight: 500;
+      }
+      .nav__links a {
+        color: var(--text-muted);
+      }
+      .nav__links a:hover {
+        color: var(--snow);
+      }
+      .nav__github {
+        color: var(--snow) !important;
+      }
+      @media (max-width: 720px) {
+        .nav__links {
+          gap: var(--sp-2);
+          font-size: 0.8rem;
+          flex-wrap: wrap;
+          justify-content: flex-end;
+        }
+      }
+
+      .footer {
+        border-top: 1px solid var(--border);
+        margin-top: var(--sp-16);
+        padding: var(--sp-8) 0;
+      }
+      .footer__inner {
+        display: flex;
+        flex-direction: column;
+        gap: var(--sp-2);
+      }
+      .footer__brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: 700;
+        color: var(--snow);
+      }
+      .footer__links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--sp-3);
+        font-size: var(--fs-small);
+      }
+      .footer__links a {
+        color: var(--text-muted);
+      }
+      .footer__links a:hover {
+        color: var(--snow);
+      }
+      .footer__note {
+        color: var(--text-muted);
+        font-size: var(--fs-small);
+        max-width: 52ch;
+        margin: 0;
+      }
+    </style>
+  </body>
+</html>

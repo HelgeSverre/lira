@@ -1,0 +1,24 @@
+// Local `let` bindings infer their type from the initializer.
+fn main() {
+    let count = 42          // inferred int
+    let name = "Lira"       // inferred string
+    let ratio = 0.5         // inferred float
+    let ready = true        // inferred bool
+
+    println(count)
+    println(name)
+    println(ratio)
+    println(ready)
+
+    // String interpolation reads the bindings back.
+    println("count=${count} name=${name} ready=${ready}")
+
+    // Annotations are required where there is nothing to infer from:
+    // function parameters and return types.
+    println(area(3, 4))
+}
+
+// Parameters and the return type are annotated explicitly.
+fn area(w: int, h: int) -> int {
+    return w * h
+}

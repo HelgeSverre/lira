@@ -1,0 +1,62 @@
+name: site
+
+# Anti-drift gate for the website. The Vercel build only runs `astro build`
+# (its Node image has no Rust toolchain), so the guarantee that every embedded
+# .li snippet actually compiles and runs is enforced here, where we can build
+# the real Lira CLI. Keep this green before relying on a Vercel deploy.
+on:
+  push:
+    branches: [main, feat/website-astro]
+    paths:
+      - "website/**"
+      - "crates/**"
+      - "stdlib/**"
+      - "examples/**"
+      - "editors/vscode-lira/syntaxes/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/site.yml"
+  pull_request:
+    paths:
+      - "website/**"
+      - "crates/**"
+      - "stdlib/**"
+      - "examples/**"
+      - "editors/vscode-lira/syntaxes/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/site.yml"
+
+jobs:
+  build-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build Lira CLI (release)
+        run: cargo build --release -p lira
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+
+      - name: Install website deps
+        working-directory: website
+        run: npm ci
+
+      - name: Verify embedded Lira snippets compile and run
+        working-directory: website
+        run: npm run check:examples
+
+      - name: Build site
+        working-directory: website
+        run: npm run build

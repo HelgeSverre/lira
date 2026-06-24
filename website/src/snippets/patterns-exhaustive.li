@@ -1,0 +1,20 @@
+// Matching every variant of an enum satisfies the exhaustiveness
+// checker. No wildcard needed — the compiler can see all cases are
+// covered, so this compiles and runs.
+enum Signal {
+    Red,
+    Amber,
+    Green
+}
+
+fn action(s: Signal) -> string {
+    return match s {
+        Signal::Red => "stop",
+        Signal::Amber => "slow",
+        Signal::Green => "go"
+    }
+}
+
+println(action(Signal::Red))
+println(action(Signal::Amber))
+println(action(Signal::Green))

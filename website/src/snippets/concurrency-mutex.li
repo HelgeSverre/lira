@@ -1,0 +1,30 @@
+// std.sync gives you shared-state primitives. Here two fibers each increment
+// a shared IntMutex 1000 times; mutual exclusion guarantees no lost updates,
+// so the total is exactly 2000.
+import std.sync
+
+fn worker(m: IntMutex, wg: WaitGroup, iters: int) {
+    var i = 0
+    while i < iters {
+        let v = m.lock()       // lock returns the current value
+        m.unlock(v + 1)        // unlock writes the new value back
+        i = i + 1
+    }
+    wg.done()
+}
+
+fn main() {
+    let m = new_int_mutex(0)
+    let wg = new_wait_group()
+    let iters = 1000
+
+    spawn worker(m, wg, iters)
+    spawn worker(m, wg, iters)
+
+    wg.wait(2)
+
+    let total = m.lock()
+    m.unlock(total)
+    println("total: ${total}")
+    println("expected: ${2 * iters}")
+}

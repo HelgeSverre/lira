@@ -1,0 +1,10 @@
+// @expect-error
+// The scheduler detects deadlock: if every fiber is blocked with no way to
+// make progress, the program halts with a located error instead of hanging.
+fn main() {
+    let ch = chan()      // unbuffered: a send needs a matching receiver
+
+    // No other fiber is running, so this recv can never be satisfied.
+    let ok = recv(ch)
+    println("unreachable: ${ok}")
+}

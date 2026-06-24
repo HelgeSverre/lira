@@ -1,0 +1,197 @@
+/* Lira brand system — see docs/branding.md. Dark "night-sky observatory" theme. */
+
+:root {
+  /* Palette */
+  --lira-gold: #e8a924;
+  --lira-gold-bright: #f0c14b;
+  --night: #1a1b26;
+  --snow: #f5f5f7;
+  --dusk: #2d2f3d;
+  --starlight: #6b9ac4;
+  --moss: #7aa874;
+  --ember: #e85a4f;
+  --mist: #e8e8ec;
+
+  /* Code token colors (Lira Night) */
+  --code-comment: #6b7280;
+  --code-type: #c4a7e7;
+  --code-operator: #89ddff;
+
+  /* Semantic */
+  --bg: var(--night);
+  --surface: var(--dusk);
+  --text: var(--snow);
+  --text-muted: #a9abbd;
+  --border: rgba(232, 232, 236, 0.12);
+  --accent: var(--lira-gold);
+  --link: var(--starlight);
+
+  /* Gradients */
+  --gradient-hero: linear-gradient(135deg, #1a1b26 0%, #2d2f3d 100%);
+  --gradient-accent: linear-gradient(135deg, #e8a924 0%, #f0c14b 100%);
+
+  /* Type */
+  --font-sans:
+    "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono:
+    "JetBrains Mono", "Fira Code", "SF Mono", Consolas, monospace;
+
+  --fs-h1: 3rem;
+  --fs-h2: 2.25rem;
+  --fs-h3: 1.5rem;
+  --fs-h4: 1.25rem;
+  --fs-body: 1rem;
+  --fs-small: 0.875rem;
+  --fs-code: 0.875rem;
+
+  /* Spacing — 8px grid */
+  --sp-1: 8px;
+  --sp-2: 16px;
+  --sp-3: 24px;
+  --sp-4: 32px;
+  --sp-6: 48px;
+  --sp-8: 64px;
+  --sp-12: 96px;
+  --sp-16: 128px;
+
+  /* Radii */
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+
+  /* Shadows */
+  --elevation-1:
+    0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --elevation-2:
+    0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+
+  --maxw: 1120px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  font-weight: 400;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-sans);
+  margin: 0 0 var(--sp-2);
+  color: var(--snow);
+}
+h1 {
+  font-size: var(--fs-h1);
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+h2 {
+  font-size: var(--fs-h2);
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+h3 {
+  font-size: var(--fs-h3);
+  font-weight: 600;
+  line-height: 1.3;
+}
+h4 {
+  font-size: var(--fs-h4);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+p {
+  margin: 0 0 var(--sp-2);
+}
+
+a {
+  color: var(--link);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+a:hover {
+  color: var(--lira-gold-bright);
+}
+
+code,
+pre {
+  font-family: var(--font-mono);
+  font-size: var(--fs-code);
+}
+
+.container {
+  width: 100%;
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: 0 var(--sp-3);
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 12px 22px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  font-size: var(--fs-body);
+  cursor: pointer;
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.15s ease,
+    background 0.15s ease;
+  border: 1px solid transparent;
+}
+.btn-primary {
+  background: var(--gradient-accent);
+  color: var(--night);
+}
+.btn-primary:hover {
+  color: var(--night);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px -6px rgba(232, 169, 36, 0.5);
+}
+.btn-secondary {
+  background: transparent;
+  color: var(--snow);
+  border-color: var(--border);
+}
+.btn-secondary:hover {
+  color: var(--snow);
+  border-color: rgba(232, 232, 236, 0.3);
+  background: rgba(245, 245, 247, 0.04);
+}
+
+/* Visually-hidden utility */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

@@ -1,0 +1,26 @@
+// Tuple patterns destructure positionally — and the elements can be
+// literals, bindings, or nested tuples. Classifying a point by which
+// axis it sits on falls out naturally.
+fn quadrant(p: (int, int)) -> string {
+    return match p {
+        (0, 0) => "origin",
+        (0, y) => "on the y-axis",
+        (x, 0) => "on the x-axis",
+        (x, y) => "at (${x}, ${y})"
+    }
+}
+
+// Nesting works too: a pattern can reach into an inner tuple.
+fn label(p: ((int, int), int)) -> string {
+    return match p {
+        ((0, 0), z) => "axis origin, depth ${z}",
+        ((x, y), 0) => "flat at (${x}, ${y})",
+        ((x, y), z) => "point in space"
+    }
+}
+
+println(quadrant((0, 0)))
+println(quadrant((0, 5)))
+println(quadrant((3, 4)))
+println(label(((0, 0), 9)))
+println(label(((1, 2), 0)))

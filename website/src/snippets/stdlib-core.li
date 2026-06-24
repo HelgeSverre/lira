@@ -1,0 +1,11 @@
+import std.core
+
+fn main() {
+    // abs and clamp are methods on int.
+    println((-5).abs())        // 5
+    println((15).clamp(0, 10)) // 10
+
+    // min and max are free functions taking two ints.
+    println(min(3, 9))         // 3
+    println(max(3, 9))         // 9
+}

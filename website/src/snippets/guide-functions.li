@@ -1,0 +1,16 @@
+// Functions annotate their parameters and return type.
+// Inside a body, `let` bindings infer their type from the value.
+fn add(a: int, b: int) -> int {
+    return a + b
+}
+
+// A function with no `-> T` returns nothing.
+fn announce(label: string, value: int) {
+    println("${label} = ${value}")
+}
+
+fn main() {
+    let sum = add(2, 3)        // inferred int
+    announce("sum", sum)
+    announce("doubled", add(sum, sum))
+}

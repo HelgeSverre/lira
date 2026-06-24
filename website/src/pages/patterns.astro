@@ -1,0 +1,175 @@
+---
+import DocsLayout from "../layouts/DocsLayout.astro";
+import Code from "../components/Code.astro";
+---
+
+<DocsLayout
+  kicker="Patterns"
+  title="Pattern matching"
+  lede="Match is an expression. Destructure literals, tuples, enums, and structs — and let the checker prove you handled every case."
+>
+  <div class="prose">
+    <p>
+      In Lira, <code>match</code> is an expression: each arm yields a value, and
+      the whole match evaluates to the arm that fits. You reach for it
+      constantly — to branch on a number, pull data out of an enum, or classify
+      a point by which axis it sits on. And because the checker enforces
+      <a href="#exhaustiveness">exhaustiveness</a> on enums, a match that forgets
+      a case is a compile error, not a lurking bug.
+    </p>
+
+    <h2 id="literals">Literal patterns</h2>
+    <p>
+      The simplest patterns are literals — integers, strings, and booleans.
+      Arms are tried top to bottom; a wildcard <code>_</code> is the catch-all
+      that matches anything left over. Since <code>match</code> is an
+      expression, you can <code>return</code> it directly.
+    </p>
+    <Code file="website/src/snippets/patterns-literals.li" filename="literals.li" />
+    <aside class="callout callout--note">
+      <span class="callout__label">Note</span>
+      <p>
+        A <code>match</code> on a non-enum value (an <code>int</code> or
+        <code>string</code>) needs a <code>_</code> arm to cover the values you
+        did not list — there is no way to enumerate every integer.
+      </p>
+    </aside>
+
+    <h2 id="bindings">Bindings and guards</h2>
+    <p>
+      A bare name in a pattern is a <em>binding</em>: it matches anything and
+      binds the value so you can use it on the right-hand side. Add a
+      <em>guard</em> — <code>if&nbsp;cond</code> — to refine an arm so it only
+      fires when the condition holds. Guards are checked in order alongside the
+      patterns themselves.
+    </p>
+    <Code file="website/src/snippets/patterns-bindings.li" filename="bindings.li" />
+
+    <h2 id="tuples">Tuple patterns</h2>
+    <p>
+      Tuple patterns destructure positionally, and each element can be a
+      literal, a binding, or another tuple. Mixing literal and binding elements
+      is where they shine — classifying a point by which axis it lands on falls
+      right out.
+    </p>
+    <Code file="website/src/snippets/patterns-tuples.li" filename="tuples.li" />
+    <p>
+      Nested tuple patterns reach into inner tuples in the same arm, with literal
+      elements at any depth. The compiler emits the equality checks for you, so
+      <code>(0,&nbsp;0)</code> really only matches the origin.
+    </p>
+
+    <h2 id="enums">Enum and constructor patterns</h2>
+    <p>
+      Constructor patterns match enum variants. Qualify the variant as
+      <code>Enum::Variant</code>, and bind any payload right inside the pattern —
+      single values, multiple fields, or none at all.
+    </p>
+    <Code file="website/src/snippets/patterns-enums.li" filename="enums.li" />
+    <p>
+      The same shape powers your own Option- or Result-like types. A generic
+      enum carries a payload of any type, and matching binds it:
+    </p>
+    <Code file="website/src/snippets/patterns-option.li" filename="option.li" />
+    <p>
+      See <a href="/types">Types</a> for more on generic enums, optionals
+      (<code>T?</code>), and <code>Result</code> with the <code>?</code>
+      operator.
+    </p>
+
+    <h2 id="structs">Struct patterns</h2>
+    <p>
+      Struct patterns destructure named fields. In a <code>let</code> binding you
+      can pull the fields you want straight into local names — by shorthand
+      (<code>{"{ x, y }"}</code>) or by renaming (<code>{"{ x: ox, y: oy }"}</code>).
+    </p>
+    <Code file="website/src/snippets/patterns-structs.li" filename="structs.li" />
+    <aside class="callout callout--warning">
+      <span class="callout__label">Not yet implemented</span>
+      <p>
+        Struct patterns inside <code>match</code> arms
+        (<code>{"match p { Point { x, y } => … }"}</code>) are not supported yet.
+        Today, destructure a struct in a <code>let</code> binding as shown above,
+        or match on its fields after binding the whole value.
+      </p>
+    </aside>
+
+    <h2 id="exhaustiveness">Exhaustiveness</h2>
+    <p>
+      Here is the part worth leading with. When you match on an
+      <strong>enum</strong>, the checker verifies that every variant is handled.
+      Cover all of them — or add a wildcard — and it compiles. Miss one, and
+      compilation stops with a located error before any bytecode is generated.
+    </p>
+    <p>This match covers all three variants, so it is accepted:</p>
+    <Code
+      file="website/src/snippets/patterns-exhaustive.li"
+      filename="exhaustive.li"
+    />
+    <p>
+      Drop the <code>Green</code> arm with no wildcard to fall back on, and the
+      checker refuses it:
+    </p>
+    <Code
+      file="website/src/snippets/patterns-nonexhaustive.li"
+      filename="nonexhaustive.li"
+    />
+    <div class="diag-term" role="img" aria-label="Compiler exhaustiveness error">
+      <pre><span class="diag-cmd">$ lira run nonexhaustive.li</span>
+<span class="diag-err">11:12: Match on enum 'Signal' is not exhaustive: missing variant(s) Green.
+Add the missing arm(s) or a wildcard '_' arm.</span></pre>
+    </div>
+    <p>
+      Two ways to satisfy it: list every variant, or add a <code>_</code> arm.
+      The first is usually better — when you later add a fourth signal, the
+      compiler will walk you to every match that needs updating, instead of
+      silently funnelling the new case into a wildcard.
+    </p>
+    <aside class="callout callout--note">
+      <span class="callout__label">Note</span>
+      <p>
+        Exhaustiveness is enforced for enums specifically — the compiler knows
+        their full set of variants. For open-ended types like <code>int</code>
+        and <code>string</code>, a <code>_</code> arm is required instead.
+      </p>
+    </aside>
+
+    <h2 id="next">Where to go next</h2>
+    <p>
+      Pattern matching pairs naturally with the rest of the language: bind
+      received values in a <a href="/concurrency">select</a>, model errors as
+      enums and match on them (<a href="/types">Types</a>), or start from the
+      top with the <a href="/guide">guide</a>. Every snippet on this page is a
+      real <code>.li</code> file in the repository, verified to run before this
+      site is built.
+    </p>
+  </div>
+</DocsLayout>
+
+<style>
+  /* A compiler-output terminal block, matching the diagnostics treatment on
+     the landing page. Reuses theme.css variables only. */
+  .diag-term {
+    background: var(--night);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--sp-3);
+    box-shadow: var(--elevation-1);
+    overflow-x: auto;
+    margin: var(--sp-3) 0;
+  }
+  .diag-term pre {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: var(--fs-code);
+    line-height: 1.7;
+    color: var(--snow);
+    white-space: pre-wrap;
+  }
+  .diag-cmd {
+    color: var(--text-muted);
+  }
+  .diag-err {
+    color: var(--ember);
+  }
+</style>
