@@ -5,10 +5,10 @@
 
 use crate::bytecode::Program;
 use crate::debug::{
-    CallFrameInfo, DebugSnapshot, ExecutionState, LocalInfo, PauseFlag, StepContext, StepMode,
-    StepOutcome, ValueInfo,
+    CallFrameInfo, DebugSnapshot, ExecutionState, LocalInfo, PauseFlag, RichValue, StepContext,
+    StepMode, StepOutcome, ValueInfo,
 };
-use crate::fiber::{FiberEvent, Scheduler};
+use crate::fiber::{FiberEvent, FiberState, Scheduler};
 use crate::runtime::Runtime;
 use crate::value::{ChannelId, ClosureData, FiberId, Value};
 use gc::{Gc, GcCell};
@@ -101,6 +101,53 @@ pub struct ChannelSnapshot {
     pub closed: bool,
     pub waiting_receivers: usize,
     pub waiting_senders: usize,
+}
+
+/// Detailed, value-carrying snapshot of the fiber scheduler.
+///
+/// Unlike [`VmSnapshot`] (which only carries counts), this captures every
+/// fiber's and channel's live contents as [`RichValue`]s so a debugger/
+/// playground can render the full concurrent state. Fibers and channels are
+/// ordered by id for deterministic output (the scheduler stores them in
+/// `HashMap`s).
+#[derive(Debug, Clone)]
+pub struct SchedulerSnapshot {
+    pub fibers: Vec<FiberStateSnapshot>,
+    pub channels: Vec<ChannelStateSnapshot>,
+    pub current_fiber_id: Option<FiberId>,
+    pub ready_queue: Vec<FiberId>,
+}
+
+/// Detailed snapshot of a single fiber, including its operand stack and locals.
+#[derive(Debug, Clone)]
+pub struct FiberStateSnapshot {
+    pub id: FiberId,
+    pub state: FiberState,
+    pub ip: usize,
+    pub stack: Vec<RichValue>,
+    pub locals: Vec<RichValue>,
+    pub call_stack: Vec<FiberFrameSnapshot>,
+    pub result: Option<RichValue>,
+}
+
+/// A single call frame within a fiber's snapshot.
+#[derive(Debug, Clone)]
+pub struct FiberFrameSnapshot {
+    pub return_addr: usize,
+    pub locals_base: usize,
+    /// Resolved function name, when the bytecode debug info can recover one.
+    pub function_name: Option<String>,
+}
+
+/// Detailed snapshot of a channel, including buffered values and waiters.
+#[derive(Debug, Clone)]
+pub struct ChannelStateSnapshot {
+    pub id: ChannelId,
+    pub buffer: Vec<RichValue>,
+    pub capacity: usize,
+    pub receivers: Vec<FiberId>,
+    pub senders: Vec<(FiberId, RichValue)>,
+    pub closed: bool,
 }
 
 /// Call frame for function calls
@@ -380,6 +427,64 @@ impl VM {
             fibers,
             channels,
             current_fiber_id: self.scheduler.current,
+        }
+    }
+
+    /// Get a detailed, value-carrying snapshot of the fiber scheduler.
+    ///
+    /// Captures every fiber and channel with their live contents (as
+    /// [`RichValue`]s), for fiber-mode debugging/visualization. Fibers and
+    /// channels are sorted by id so the output is deterministic regardless of
+    /// the scheduler's internal `HashMap` ordering.
+    pub fn scheduler_snapshot(&self) -> SchedulerSnapshot {
+        let mut fibers: Vec<FiberStateSnapshot> = self
+            .scheduler
+            .fibers
+            .values()
+            .map(|f| FiberStateSnapshot {
+                id: f.id,
+                state: f.state.clone(),
+                ip: f.ip,
+                stack: f.stack.iter().map(RichValue::from_value).collect(),
+                locals: f.locals.iter().map(RichValue::from_value).collect(),
+                call_stack: f
+                    .call_stack
+                    .iter()
+                    .map(|frame| FiberFrameSnapshot {
+                        return_addr: frame.return_addr,
+                        locals_base: frame.locals_base,
+                        function_name: None,
+                    })
+                    .collect(),
+                result: f.result.as_ref().map(RichValue::from_value),
+            })
+            .collect();
+        fibers.sort_by_key(|f| f.id);
+
+        let mut channels: Vec<ChannelStateSnapshot> = self
+            .scheduler
+            .channels
+            .values()
+            .map(|c| ChannelStateSnapshot {
+                id: c.id,
+                buffer: c.buffer.iter().map(RichValue::from_value).collect(),
+                capacity: c.capacity,
+                receivers: c.receivers.iter().copied().collect(),
+                senders: c
+                    .senders
+                    .iter()
+                    .map(|(id, v)| (*id, RichValue::from_value(v)))
+                    .collect(),
+                closed: c.closed,
+            })
+            .collect();
+        channels.sort_by_key(|c| c.id);
+
+        SchedulerSnapshot {
+            fibers,
+            channels,
+            current_fiber_id: self.scheduler.current,
+            ready_queue: self.scheduler.ready_queue_ids(),
         }
     }
 
@@ -3856,5 +3961,81 @@ mod tests {
         let code = vm.run().expect("spawn+channel program should run");
         assert_eq!(code, 0);
         assert_eq!(vm.get_output(), &["42".to_string()]);
+    }
+
+    /// After a fiber-mode spawn+channel program runs, the detailed scheduler
+    /// snapshot must expose both fibers (main + worker) and the channel they
+    /// communicated over, with values carried as `RichValue`s. This is the
+    /// VM-side half of the playground fiber-inspection gate.
+    #[test]
+    fn test_scheduler_snapshot_after_spawn_channel() {
+        const W: u16 = 15;
+        let program = make_program(
+            vec![Value::Int(1), Value::Int(42)],
+            vec![
+                // --- main @0 ---
+                Opcode::LoadConst as u8,
+                0,
+                0,
+                Opcode::ChanNew as u8,
+                Opcode::Dup as u8,
+                Opcode::Spawn as u8,
+                (W & 0xff) as u8,
+                (W >> 8) as u8,
+                1,
+                Opcode::Pop as u8,
+                Opcode::Yield as u8,
+                Opcode::ChanRecv as u8,
+                Opcode::Pop as u8,
+                Opcode::Print as u8,
+                Opcode::Halt as u8,
+                // --- worker @15 ---
+                Opcode::LoadLocal as u8,
+                0,
+                0,
+                Opcode::LoadConst as u8,
+                1,
+                0,
+                Opcode::ChanSend as u8,
+                Opcode::LoadConst as u8,
+                0,
+                0,
+                Opcode::Return as u8,
+            ],
+        );
+        let mut vm = VM::new(program);
+        vm.set_fiber_mode(true);
+        vm.set_capture_output(true);
+        vm.run().expect("spawn+channel program should run");
+
+        let snap = vm.scheduler_snapshot();
+        // main (id 1) + worker (id 2) both retained, ordered by id. (Main ends
+        // in `Running` on `Halt` — only the worker's `Return` finishes it.)
+        assert_eq!(
+            snap.fibers.len(),
+            2,
+            "both fibers present: {:?}",
+            snap.fibers
+        );
+        assert_eq!(snap.fibers[0].id, 1);
+        assert_eq!(snap.fibers[1].id, 2);
+        // The worker finished and carried back a result value (proves the
+        // snapshot captures live `RichValue`s, not just counts).
+        let worker = &snap.fibers[1];
+        assert!(
+            matches!(worker.state, FiberState::Finished),
+            "worker finished: {:?}",
+            worker
+        );
+        assert!(worker.result.is_some(), "worker carried a result value");
+        // The channel created by `chan(1)` is retained with capacity 1.
+        assert_eq!(
+            snap.channels.len(),
+            1,
+            "channel present: {:?}",
+            snap.channels
+        );
+        assert_eq!(snap.channels[0].capacity, 1);
+        assert!(!snap.channels[0].closed);
     }
 }

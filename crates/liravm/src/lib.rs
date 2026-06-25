@@ -22,9 +22,12 @@ pub use debug::{
     StepMode, StepOutcome, ValueInfo,
 };
 pub use debug_session::{DebugEvent, DebugSession, SessionState};
-pub use fiber::FiberEvent;
+pub use fiber::{FiberEvent, FiberState};
 pub use value::{ChannelId, FiberId, Value};
-pub use vm::{ChannelSnapshot, FiberSnapshot, RuntimeError, StepResult, VmSnapshot, VM};
+pub use vm::{
+    ChannelSnapshot, ChannelStateSnapshot, FiberFrameSnapshot, FiberSnapshot, FiberStateSnapshot,
+    RuntimeError, SchedulerSnapshot, StepResult, VmSnapshot, VM,
+};
 
 use std::fs;
 

@@ -298,6 +298,15 @@ impl Scheduler {
         self.fibers.get_mut(&id)
     }
 
+    /// Snapshot of the ready-queue fiber ids, front (next to run) first.
+    ///
+    /// The queue itself is private (mutated by scheduling); this read-only copy
+    /// lets debuggers/visualizers show pending fibers without exposing the
+    /// internal `VecDeque`.
+    pub fn ready_queue_ids(&self) -> Vec<FiberId> {
+        self.ready_queue.iter().copied().collect()
+    }
+
     /// Yield the current fiber voluntarily
     pub fn yield_current(&mut self) {
         if let Some(current_id) = self.current {
