@@ -150,7 +150,9 @@ fn env_all_keys_and_exe() {
 
 #[test]
 fn file_seek_repositions_reads() {
-    let path = std::env::temp_dir().join("lira_cov_seek_8421.txt");
+    // Unique per process so concurrent test runs (e.g. cargo test + llvm-cov)
+    // never collide on a shared temp path.
+    let path = std::env::temp_dir().join(format!("lira_cov_seek_{}.txt", std::process::id()));
     let path_str = path.to_str().unwrap();
     let mut rt = Runtime::new();
 
