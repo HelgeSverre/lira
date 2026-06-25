@@ -1,4 +1,7 @@
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
+// react-resizable-panels v4 renamed PanelGroup -> Group, PanelResizeHandle ->
+// Separator, and the group's `direction` prop -> `orientation`. `defaultSize`/
+// `minSize` are still percentages.
+import { Panel, Group, Separator } from 'react-resizable-panels';
 import { ReactNode } from 'react';
 import './PanelLayout.css';
 
@@ -10,22 +13,22 @@ interface PanelLayoutProps {
 
 export function PanelLayout({ editor, ast, output }: PanelLayoutProps) {
   return (
-    <PanelGroup direction="horizontal" className="panel-layout">
+    <Group orientation="horizontal" className="panel-layout">
       <Panel defaultSize={40} minSize={20} className="panel-wrapper">
         {editor}
       </Panel>
 
-      <PanelResizeHandle className="resize-handle" />
+      <Separator className="resize-handle" />
 
       <Panel defaultSize={30} minSize={15} className="panel-wrapper">
         {ast}
       </Panel>
 
-      <PanelResizeHandle className="resize-handle" />
+      <Separator className="resize-handle" />
 
       <Panel defaultSize={30} minSize={20} className="panel-wrapper">
         {output}
       </Panel>
-    </PanelGroup>
+    </Group>
   );
 }
