@@ -582,3 +582,164 @@ fn parse_error_message(error: &str) -> Vec<CompileError> {
 
     errors
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::response::IntoResponse;
+
+    /// Drive a handler's response into a JSON value for assertions. The response
+    /// types are `Serialize`-only, so we decode into a `serde_json::Value`.
+    async fn body_json(resp: impl IntoResponse) -> serde_json::Value {
+        let response = resp.into_response();
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("read body");
+        serde_json::from_slice(&bytes).expect("json body")
+    }
+
+    fn src(s: &str) -> Json<SourceRequest> {
+        Json(SourceRequest {
+            source: s.to_string(),
+        })
+    }
+
+    // ---- pure helpers ----
+
+    #[test]
+    fn parse_breakpoint_error_valid_and_invalid() {
+        let bp = parse_breakpoint_error("Breakpoint hit at line 4, column 5 (ip=12)").unwrap();
+        assert_eq!((bp.line, bp.column, bp.ip), (4, 5, 12));
+        assert!(parse_breakpoint_error("Division by zero").is_none());
+        assert!(parse_breakpoint_error("Breakpoint hit at line x, column 5 (ip=12)").is_none());
+    }
+
+    #[test]
+    fn parse_error_message_formats() {
+        let e = parse_error_message("Error at line 3, column 7: bad thing");
+        assert_eq!((e[0].line, e[0].column), (Some(3), Some(7)));
+        assert_eq!(e[0].message, "bad thing");
+
+        let e = parse_error_message("2:9: unexpected token");
+        assert_eq!((e[0].line, e[0].column), (Some(2), Some(9)));
+
+        // A message with no parseable location still yields one error.
+        let e = parse_error_message("something broke");
+        assert_eq!(e.len(), 1);
+        assert_eq!((e[0].line, e[0].column), (None, None));
+    }
+
+    #[test]
+    fn strip_location_prefix_behaviour() {
+        assert_eq!(
+            strip_location_prefix("4:5: Division by zero", Some(4), Some(5)),
+            "Division by zero"
+        );
+        // No matching prefix -> unchanged.
+        assert_eq!(
+            strip_location_prefix("Division by zero", Some(4), Some(5)),
+            "Division by zero"
+        );
+        assert_eq!(strip_location_prefix("plain", None, None), "plain");
+    }
+
+    #[test]
+    fn compile_source_ok_and_error() {
+        assert!(compile_source("let x = 1\nprintln(x)").is_ok());
+        assert!(compile_source("let x = ").is_err());
+    }
+
+    // ---- async handlers ----
+
+    #[tokio::test]
+    async fn health_returns_ok() {
+        assert_eq!(health().await, "OK");
+    }
+
+    #[tokio::test]
+    async fn compile_handler_success_and_error() {
+        let ok = body_json(compile(src("let x = 1\nprintln(x)")).await).await;
+        assert_eq!(ok["success"], true);
+        assert!(ok["ast"].is_object());
+        assert!(ok["bytecodeSize"].as_u64().unwrap() > 0);
+
+        let err = body_json(compile(src("let x = ")).await).await;
+        assert_eq!(err["success"], false);
+        assert!(!err["errors"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn check_handler_ok_and_error() {
+        let ok = body_json(check(src("let x = 1")).await).await;
+        assert_eq!(ok["success"], true);
+        let err = body_json(check(src("let x = ")).await).await;
+        assert_eq!(err["success"], false);
+        assert!(!err["errors"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn run_handler_success_output() {
+        let req = Json(RunRequest {
+            source: "println(3 + 4)".to_string(),
+            breakpoints: vec![],
+        });
+        let v = body_json(run(req).await).await;
+        assert_eq!(v["success"], true);
+        assert_eq!(v["exitCode"], 0);
+        assert!(v["output"].as_array().unwrap().iter().any(|o| o == "7"));
+    }
+
+    #[tokio::test]
+    async fn run_handler_runtime_error_reports_location() {
+        // `z` avoids any constant-folding so the divide-by-zero is a runtime fault.
+        let req = Json(RunRequest {
+            source: "let z = 0\nprintln(1 / z)".to_string(),
+            breakpoints: vec![],
+        });
+        let v = body_json(run(req).await).await;
+        assert_eq!(v["success"], false);
+        let errs = v["errors"].as_array().unwrap();
+        assert!(!errs.is_empty());
+        assert!(
+            errs[0]["message"]
+                .as_str()
+                .unwrap()
+                .to_lowercase()
+                .contains("zero"),
+            "runtime error surfaced: {:?}",
+            errs[0]
+        );
+    }
+
+    #[tokio::test]
+    async fn run_handler_stops_at_breakpoint() {
+        let req = Json(RunRequest {
+            source: "let a = 1\nlet b = 2\nprintln(a + b)".to_string(),
+            breakpoints: vec![2],
+        });
+        let v = body_json(run(req).await).await;
+        assert_eq!(v["success"], true);
+        assert_eq!(
+            v["breakpoint"]["line"], 2,
+            "paused at the breakpoint: {v:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn step_handler_into_advances_to_next_line() {
+        let req = Json(StepRequest {
+            source: "let a = 1\nlet b = 2\nprintln(a + b)".to_string(),
+            current_line: 1,
+            step_type: StepType::Into,
+            breakpoints: vec![],
+        });
+        let v = body_json(step(req).await).await;
+        // Step-into sets temporary breakpoints on the following lines; it should
+        // pause on the next executable line rather than running to completion.
+        assert_eq!(v["success"], true);
+        assert!(
+            v.get("breakpoint").map(|b| !b.is_null()).unwrap_or(false),
+            "step paused at a line: {v:?}"
+        );
+    }
+}
