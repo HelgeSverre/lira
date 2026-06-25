@@ -1,6 +1,7 @@
 import { useEditorStore } from '../../stores/editorStore';
 import { CompileButton } from './CompileButton';
 import { RunButton } from './RunButton';
+import { FiberModeToggle } from './FiberModeToggle';
 import { DebugControls } from './DebugControls';
 import { SampleSelector } from './SampleSelector';
 import './Header.css';
@@ -23,6 +24,7 @@ export function Header() {
 
       <div className="header-right">
         {isDirty && <span className="unsaved-indicator">Modified</span>}
+        <FiberModeToggle />
         <CompileButton />
         <RunButton />
         <div className="header-divider" />

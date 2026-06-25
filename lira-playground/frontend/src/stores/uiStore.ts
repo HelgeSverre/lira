@@ -18,6 +18,8 @@ export interface UiState {
   fontSize: number;
   /** Selected sample program */
   selectedSample: string;
+  /** Run with the concurrent fiber scheduler enabled (shows live fiber/channel state) */
+  fiberMode: boolean;
 
   // Actions
   setActiveOutputTab: (tab: OutputTab) => void;
@@ -27,6 +29,8 @@ export interface UiState {
   setTheme: (theme: 'dark' | 'light') => void;
   setFontSize: (size: number) => void;
   setSelectedSample: (sample: string) => void;
+  setFiberMode: (enabled: boolean) => void;
+  toggleFiberMode: () => void;
 }
 
 export const useUiStore = create<UiState>()(
@@ -39,8 +43,13 @@ export const useUiStore = create<UiState>()(
       theme: 'dark',
       fontSize: 14,
       selectedSample: 'hello-world',
+      fiberMode: false,
 
       setActiveOutputTab: (tab) => set({ activeOutputTab: tab }),
+
+      setFiberMode: (enabled) => set({ fiberMode: enabled }),
+
+      toggleFiberMode: () => set((state) => ({ fiberMode: !state.fiberMode })),
 
       toggleAstPanel: () => set((state) => ({
         astPanelCollapsed: !state.astPanelCollapsed
@@ -63,6 +72,7 @@ export const useUiStore = create<UiState>()(
         autoScrollOutput: state.autoScrollOutput,
         theme: state.theme,
         fontSize: state.fontSize,
+        fiberMode: state.fiberMode,
       }),
     }
   )

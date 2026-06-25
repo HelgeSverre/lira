@@ -2,6 +2,7 @@ import { useEditorStore } from '../../stores/editorStore';
 import { useCompilerStore } from '../../stores/compilerStore';
 import { useVmStore } from '../../stores/vmStore';
 import { useWebSocketStore } from '../../stores/websocketStore';
+import { useUiStore } from '../../stores/uiStore';
 import { compile as compileCode, run as runCode } from '../../api/client';
 import { useRef } from 'react';
 
@@ -18,6 +19,7 @@ export function RunButton() {
     reset,
   } = useVmStore();
   const { startDebug, stop: wsStop, connectionStatus } = useWebSocketStore();
+  const { fiberMode, setActiveOutputTab } = useUiStore();
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -34,10 +36,15 @@ export function RunButton() {
 
     const breakpointLines = Array.from(breakpoints);
 
-    // Use WebSocket for debug mode (when breakpoints are set)
-    if (hasBreakpoints) {
-      // WebSocket-based debug execution
-      startDebug(sourceCode, breakpointLines);
+    // Use the WebSocket debug path when breakpoints are set OR fiber mode is on.
+    // Fiber mode routes here even without breakpoints so the backend drives the
+    // scheduler and streams the live fiber/channel state (VmStateJson). With
+    // breakpoints, this enables concurrent step debugging.
+    if (hasBreakpoints || fiberMode) {
+      if (fiberMode) {
+        setActiveOutputTab('fibers');
+      }
+      startDebug(sourceCode, breakpointLines, fiberMode);
       return;
     }
 

@@ -4,13 +4,13 @@
  */
 
 import type { Program } from './ast';
-import type { FiberId, ChannelId } from './vm';
+import type { FiberId, ChannelId, FiberState, FiberCallFrame } from './vm';
 
 /** Messages sent from client to server */
 export type ClientMessage =
   | { type: 'check'; source: string }
-  | { type: 'run'; source: string }
-  | { type: 'debug'; source: string; breakpoints: number[] }
+  | { type: 'run'; source: string; fiberMode?: boolean }
+  | { type: 'debug'; source: string; breakpoints: number[]; fiberMode?: boolean }
   | { type: 'setBreakpoints'; breakpoints: number[] }
   | { type: 'continue' }
   | { type: 'stepInstruction' }
@@ -41,6 +41,7 @@ export type ServerMessage =
   | { type: 'stack'; stack: string[] }
   | { type: 'ast'; ast: Program }
   | { type: 'vmStateUpdate'; state: DebugVmState }
+  | { type: 'vmStateJson'; state: VmStateJson }
   | { type: 'fiberSpawned'; fiber: FiberInfo }
   | { type: 'fiberStateChanged'; fiberId: FiberId; newState: string }
   | { type: 'channelCreated'; channel: ChannelInfo }
@@ -123,11 +124,46 @@ export interface ChannelInfo {
   closed: boolean;
 }
 
+/** A single fiber in a full scheduler snapshot (mirrors backend FiberStateJson) */
+export interface FiberStateJson {
+  id: FiberId;
+  state: FiberState;
+  ip: number;
+  stack: ValueJson[];
+  locals: ValueJson[];
+  callStack: FiberCallFrame[];
+  result: ValueJson | null;
+}
+
+/** A single channel in a full scheduler snapshot (mirrors backend ChannelStateJson) */
+export interface ChannelStateJson {
+  id: ChannelId;
+  buffer: ValueJson[];
+  capacity: number;
+  receivers: FiberId[];
+  senders: { fiberId: FiberId; value: ValueJson }[];
+  closed: boolean;
+}
+
+/**
+ * Full fiber/channel scheduler state, emitted after every fiber-mode drive
+ * (initial run, each step/continue, breakpoint pauses). Mirrors the backend
+ * `VmStateJson`. Fibers and channels arrive as arrays (sorted by id).
+ */
+export interface VmStateJson {
+  fibers: FiberStateJson[];
+  channels: ChannelStateJson[];
+  currentFiberId: FiberId | null;
+  readyQueue: FiberId[];
+  output: string[];
+  exitCode: number | null;
+}
+
 /** Helper to create client messages */
 export const createClientMessage = {
   check: (source: string): ClientMessage => ({ type: 'check', source }),
-  run: (source: string): ClientMessage => ({ type: 'run', source }),
-  debug: (source: string, breakpoints: number[] = []): ClientMessage => ({ type: 'debug', source, breakpoints }),
+  run: (source: string, fiberMode = false): ClientMessage => ({ type: 'run', source, fiberMode }),
+  debug: (source: string, breakpoints: number[] = [], fiberMode = false): ClientMessage => ({ type: 'debug', source, breakpoints, fiberMode }),
   setBreakpoints: (breakpoints: number[]): ClientMessage => ({ type: 'setBreakpoints', breakpoints }),
   continue: (): ClientMessage => ({ type: 'continue' }),
   stepInstruction: (): ClientMessage => ({ type: 'stepInstruction' }),

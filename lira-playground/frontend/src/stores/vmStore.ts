@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { VmState, Fiber, Channel, FiberId, ChannelId, ExecutionStatus, FiberState } from '../types/vm';
-import type { FiberInfo, ChannelInfo } from '../types/protocol';
+import type { FiberInfo, ChannelInfo, VmStateJson } from '../types/protocol';
 
 /** Event types for the event history */
 export type FiberChannelEventType =
@@ -47,6 +47,8 @@ export interface VmStoreState {
   setFinished: (exitCode: number, executionTime: number) => void;
   setError: (error: string) => void;
   updateVmState: (state: VmState) => void;
+  /** Apply a full fiber/channel scheduler snapshot from the backend (fiber mode) */
+  applyVmStateJson: (state: VmStateJson) => void;
   appendOutput: (line: string) => void;
   clearOutput: () => void;
   selectFiber: (id: FiberId | null) => void;
@@ -144,6 +146,48 @@ export const useVmStore = create<VmStoreState>((set) => ({
   }),
 
   updateVmState: (state) => set({ vmState: state }),
+
+  applyVmStateJson: (wire: VmStateJson) => set(() => {
+    // Convert the backend's id-sorted arrays into the store's id-keyed records,
+    // carrying each fiber's live stack/locals/call-stack and each channel's
+    // buffer/waiters so the inspectors render real concurrent state.
+    const fibers: Record<FiberId, Fiber> = {};
+    for (const f of wire.fibers) {
+      fibers[f.id] = {
+        id: f.id,
+        state: f.state,
+        ip: f.ip,
+        stack: f.stack,
+        locals: f.locals,
+        callStack: f.callStack,
+        fiberLocals: {},
+        result: f.result,
+      };
+    }
+
+    const channels: Record<ChannelId, Channel> = {};
+    for (const c of wire.channels) {
+      channels[c.id] = {
+        id: c.id,
+        buffer: c.buffer,
+        capacity: c.capacity,
+        receivers: c.receivers,
+        senders: c.senders,
+        closed: c.closed,
+      };
+    }
+
+    return {
+      vmState: {
+        fibers,
+        channels,
+        currentFiberId: wire.currentFiberId,
+        readyQueue: wire.readyQueue,
+        output: wire.output,
+        exitCode: wire.exitCode,
+      },
+    };
+  }),
 
   appendOutput: (line) => set((state) => ({
     output: [...state.output, line],

@@ -33,7 +33,7 @@ export interface WebSocketStoreState {
   disconnect: () => void;
   send: (message: ClientMessage) => void;
   /** Start a debug session with source code */
-  startDebug: (source: string, breakpoints: number[]) => void;
+  startDebug: (source: string, breakpoints: number[], fiberMode?: boolean) => void;
   /** Continue execution */
   continueExecution: () => void;
   /** Step operations */
@@ -125,7 +125,7 @@ export const useWebSocketStore = create<WebSocketStoreState>((set, get) => ({
     }
   },
 
-  startDebug: (source: string, breakpoints: number[]) => {
+  startDebug: (source: string, breakpoints: number[], fiberMode = false) => {
     const { send, connect, connectionStatus } = get();
 
     // Ensure we're connected
@@ -136,7 +136,7 @@ export const useWebSocketStore = create<WebSocketStoreState>((set, get) => ({
         const { connectionStatus: status, send: sendFn } = get();
         if (status === 'connected') {
           // Send debug message with breakpoints included (no race condition)
-          sendFn({ type: 'debug', source, breakpoints });
+          sendFn({ type: 'debug', source, breakpoints, fiberMode });
         } else if (status === 'connecting') {
           setTimeout(checkAndSend, 100);
         }
@@ -144,7 +144,7 @@ export const useWebSocketStore = create<WebSocketStoreState>((set, get) => ({
       setTimeout(checkAndSend, 100);
     } else {
       // Already connected - send debug message with breakpoints included
-      send({ type: 'debug', source, breakpoints });
+      send({ type: 'debug', source, breakpoints, fiberMode });
     }
   },
 
@@ -261,6 +261,12 @@ function handleServerMessage(
       if (message.state.line !== null) {
         editorStore.setHighlightedLine(message.state.line);
       }
+      break;
+
+    case 'vmStateJson':
+      // Full fiber/channel scheduler snapshot (fiber mode). Populate the rich
+      // VM state so the Fibers/Channels inspectors render live concurrent state.
+      vmStore.applyVmStateJson(message.state);
       break;
 
     case 'locals':
