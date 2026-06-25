@@ -7,7 +7,7 @@
 use crate::bytecode::load;
 use crate::debug::{DebugSnapshot, PauseFlag, StepOutcome};
 use crate::fiber::FiberEvent;
-use crate::vm::VM;
+use crate::vm::{SchedulerSnapshot, VM};
 use std::sync::{Mutex, RwLock};
 
 /// Session state for tracking what phase we're in
@@ -66,6 +66,11 @@ pub struct DebugSession {
     pause_flag: PauseFlag,
     /// Accumulated output
     output: RwLock<Vec<String>>,
+    /// Whether to run the VM in fiber (concurrent) mode. When enabled, the
+    /// program is driven to completion via the scheduler-aware `run()` path
+    /// (the stepping path does not drive fibers), and the final scheduler state
+    /// is exposed via [`DebugSession::scheduler_snapshot`].
+    fiber_mode: RwLock<bool>,
 }
 
 impl DebugSession {
@@ -79,7 +84,25 @@ impl DebugSession {
             breakpoints: RwLock::new(Vec::new()),
             pause_flag: PauseFlag::new(),
             output: RwLock::new(Vec::new()),
+            fiber_mode: RwLock::new(false),
         }
+    }
+
+    /// Enable or disable fiber (concurrent) mode for subsequently loaded/started
+    /// programs. Takes effect on the next `load`/`start`.
+    pub fn set_fiber_mode(&self, enabled: bool) {
+        *self.fiber_mode.write().unwrap() = enabled;
+
+        // Apply to an already-loaded VM so a toggle before the first run takes
+        // effect without requiring a reload.
+        if let Some(ref mut vm) = *self.vm.lock().unwrap() {
+            vm.set_fiber_mode(enabled);
+        }
+    }
+
+    /// Whether fiber mode is currently enabled.
+    pub fn is_fiber_mode(&self) -> bool {
+        *self.fiber_mode.read().unwrap()
     }
 
     /// Load source code and compile to bytecode
@@ -96,6 +119,7 @@ impl DebugSession {
         let mut vm = VM::new(program);
         vm.prepare();
         vm.set_capture_output(true);
+        vm.set_fiber_mode(*self.fiber_mode.read().unwrap());
 
         // Apply breakpoints
         let breakpoints = self.breakpoints.read().unwrap().clone();
@@ -118,6 +142,7 @@ impl DebugSession {
         let mut vm = VM::new(program);
         vm.prepare();
         vm.set_capture_output(true);
+        vm.set_fiber_mode(*self.fiber_mode.read().unwrap());
 
         // Apply breakpoints
         let breakpoints = self.breakpoints.read().unwrap().clone();
@@ -153,6 +178,40 @@ impl DebugSession {
         self.capture_output(vm);
 
         Ok(event)
+    }
+
+    /// Run the program to completion via the scheduler-aware `run()` path.
+    ///
+    /// This is the fiber-mode execution path: unlike `continue_execution` (which
+    /// loops the single-context stepping machinery), `run()` spawns `main` as a
+    /// fiber and drives the scheduler, so `spawn`/channel/`select` programs
+    /// actually run their fibers. On return, the final scheduler state is
+    /// available via [`DebugSession::scheduler_snapshot`].
+    pub fn run_to_completion(&self) -> Result<DebugEvent, String> {
+        let mut vm_guard = self.vm.lock().unwrap();
+        let vm = vm_guard.as_mut().ok_or("No program loaded")?;
+
+        *self.state.write().unwrap() = SessionState::Running;
+
+        let event = match vm.run() {
+            Ok(exit_code) => DebugEvent::Finished { exit_code },
+            Err(message) => DebugEvent::Error {
+                message,
+                location: vm.get_current_location(),
+            },
+        };
+
+        self.update_state_from_event(&event);
+        self.capture_output(vm);
+
+        Ok(event)
+    }
+
+    /// Get a detailed, value-carrying snapshot of the fiber scheduler (fibers,
+    /// channels, ready queue). `None` when no program is loaded.
+    pub fn scheduler_snapshot(&self) -> Option<SchedulerSnapshot> {
+        let vm_guard = self.vm.lock().unwrap();
+        vm_guard.as_ref().map(|vm| vm.scheduler_snapshot())
     }
 
     /// Execute a single bytecode instruction
