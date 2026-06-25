@@ -991,4 +991,200 @@ select {
             resp2.messages
         );
     }
+
+    // ===================================================================
+    // ADVERSARIAL VERIFIER PROBES (added by independent verification).
+    // These are INDEPENDENT of the capstone/test_step_instruction_drives_fibers.
+    // Keep any that reveal a real defect; otherwise harmless extra coverage.
+    // ===================================================================
+
+    /// PROBE C: a DIFFERENT concurrent program (two workers feeding one channel,
+    /// summed by main) driven PURELY via repeated `step_instruction()` — never
+    /// run() and never continue(). Asserts: (1) same output as run() ("30"),
+    /// (2) >= 2 distinct fibers visited (here 3: main + 2 workers).
+    const TWO_WORKERS_PROG: &str = "\
+fn worker(ch: Channel<int>, v: int) {
+    select {
+        v -> ch => {}
+    }
+}
+
+let ch = chan(2)
+spawn worker(ch, 10)
+spawn worker(ch, 20)
+var total = 0
+select {
+    a = <-ch => { total = total + a }
+}
+select {
+    b = <-ch => { total = total + b }
+}
+println(total)
+";
+
+    #[test]
+    fn probe_c_pure_step_instruction_two_workers() {
+        use std::collections::HashSet;
+
+        let session = DebugSession::new();
+        session.set_fiber_mode(true);
+        let (_ast, bytecode) = compile_source(TWO_WORKERS_PROG).expect("compiles");
+        session.load(TWO_WORKERS_PROG, bytecode).expect("loads");
+        session.start().expect("starts");
+
+        let mut seen_fibers: HashSet<u64> = HashSet::new();
+        let mut output = String::new();
+        let mut exit = None;
+        for _ in 0..5000 {
+            if let Some(snap) = session.scheduler_snapshot() {
+                if let Some(id) = snap.current_fiber_id {
+                    seen_fibers.insert(id);
+                }
+            }
+            match session.step_instruction().expect("step ok") {
+                DebugEvent::Finished { exit_code } => {
+                    exit = Some(exit_code);
+                    break;
+                }
+                DebugEvent::Output(text) => output.push_str(&text),
+                DebugEvent::Error { message, .. } => panic!("stepping errored: {}", message),
+                _ => {}
+            }
+        }
+        // Output may also be captured into session output buffer; pull both.
+        let captured = session.get_output().join("");
+        let combined = format!("{}{}", output, captured);
+
+        assert_eq!(exit, Some(0), "finished via pure stepping");
+        assert!(
+            combined.contains("30"),
+            "pure-stepping output must equal run() output (30), got {:?}",
+            combined
+        );
+        assert!(
+            seen_fibers.len() >= 2,
+            "pure stepping must visit >= 2 distinct fibers, saw {:?}",
+            seen_fibers
+        );
+    }
+
+    /// PROBE D1 (DEADLOCK while stepping): main receives on a channel that no
+    /// one ever sends to. Driven via stepping/continue in fiber mode, does it
+    /// surface a deadlock error like run() does, or hang/loop/panic?
+    const DEADLOCK_PROG: &str = "\
+let ch = chan(1)
+select {
+    v = <-ch => println(v)
+}
+println(\"unreached\")
+";
+
+    #[test]
+    fn probe_d1_deadlock_while_stepping() {
+        let session = DebugSession::new();
+        session.set_fiber_mode(true);
+        let (_ast, bytecode) = compile_source(DEADLOCK_PROG).expect("compiles");
+        session.load(DEADLOCK_PROG, bytecode).expect("loads");
+        session.start().expect("starts");
+
+        let mut result = String::from("NEITHER (ran out of iterations -> HANG/LOOP)");
+        for _ in 0..20000 {
+            match session.step_instruction().expect("step ok") {
+                DebugEvent::Finished { exit_code } => {
+                    result = format!("FINISHED exit={} (NO deadlock surfaced!)", exit_code);
+                    break;
+                }
+                DebugEvent::Error { message, .. } => {
+                    result = format!("ERROR: {}", message);
+                    break;
+                }
+                _ => {}
+            }
+        }
+        // Record the actual behavior; the verifier reads this via the message.
+        eprintln!("DEADLOCK-WHILE-STEPPING ACTUAL BEHAVIOR: {}", result);
+        assert!(
+            result.contains("deadlock"),
+            "DEADLOCK-WHILE-STEPPING ACTUAL BEHAVIOR: {}",
+            result
+        );
+    }
+
+    /// PROBE D2 (breakpoint dedup across fibers): TWO workers both execute
+    /// `let x = base` on line 2. A breakpoint on line 2 should fire ONCE PER
+    /// FIBER (twice total) if per-fiber, or be suppressed for the second fiber
+    /// by the single VM-global `last_breakpoint_line`. This probe RECORDS the
+    /// actual count; it does not force a particular answer.
+    const SAME_LINE_BP_PROG: &str = "\
+fn worker(ch: Channel<int>, base: int) {
+    let x = base
+    select {
+        x -> ch => {}
+    }
+}
+
+let ch = chan(2)
+spawn worker(ch, 10)
+spawn worker(ch, 20)
+var total = 0
+select {
+    a = <-ch => { total = total + a }
+}
+select {
+    b = <-ch => { total = total + b }
+}
+println(total)
+";
+
+    #[test]
+    fn probe_d2_breakpoint_dedup_across_fibers() {
+        let session = DebugSession::new();
+        session.set_fiber_mode(true);
+        session.set_breakpoints(vec![2]);
+        let (_ast, bytecode) = compile_source(SAME_LINE_BP_PROG).expect("compiles");
+        session.load(SAME_LINE_BP_PROG, bytecode).expect("loads");
+        session.start().expect("starts");
+
+        // Drive the initial run to the first stop, then keep continuing,
+        // counting distinct breakpoint pauses and which fiber was current.
+        let mut bp_hits = 0;
+        let mut bp_fibers: Vec<u64> = Vec::new();
+        let mut finished = false;
+
+        let mut event = session.continue_execution().expect("first drive");
+        for _ in 0..1000 {
+            match event {
+                DebugEvent::BreakpointHit { .. } => {
+                    bp_hits += 1;
+                    if let Some(snap) = session.scheduler_snapshot() {
+                        if let Some(id) = snap.current_fiber_id {
+                            bp_fibers.push(id);
+                        }
+                    }
+                    event = session.continue_execution().expect("continue after bp");
+                }
+                DebugEvent::Finished { .. } => {
+                    finished = true;
+                    break;
+                }
+                DebugEvent::Error { message, .. } => {
+                    panic!("unexpected error during bp dedup probe: {}", message);
+                }
+                _ => {
+                    event = session.continue_execution().expect("continue");
+                }
+            }
+        }
+
+        eprintln!(
+            "BREAKPOINT-DEDUP ACROSS FIBERS: line-2 breakpoint fired {} time(s) on fibers {:?}; finished={}",
+            bp_hits, bp_fibers, finished
+        );
+        // We do not assert a count here — this documents real behavior. We only
+        // require the program eventually completes (no hang) regardless.
+        assert!(
+            finished,
+            "program with same-line breakpoints must still complete"
+        );
+    }
 }

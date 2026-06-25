@@ -4228,4 +4228,98 @@ mod tests {
             "observed a parked (yielded/blocked) fiber at some step (real concurrency)"
         );
     }
+
+    /// ADVERSARIAL PROBE (mixing run() and stepping on the same VM): step a few
+    /// instructions in fiber mode (which bootstraps main as a fiber + sets the
+    /// `fiber_runtime_started` guard), THEN call run() on the SAME VM. The guard
+    /// must prevent a second main-fiber spawn. We record the fiber count before
+    /// and after run() and whether output is duplicated/corrupted.
+    #[test]
+    fn probe_mix_step_then_run_no_double_spawn() {
+        const W: u16 = 15;
+        let make = || {
+            make_program(
+                vec![Value::Int(1), Value::Int(42)],
+                vec![
+                    // --- main @0 ---
+                    Opcode::LoadConst as u8,
+                    0,
+                    0,
+                    Opcode::ChanNew as u8,
+                    Opcode::Dup as u8,
+                    Opcode::Spawn as u8,
+                    (W & 0xff) as u8,
+                    (W >> 8) as u8,
+                    1,
+                    Opcode::Pop as u8,
+                    Opcode::Yield as u8,
+                    Opcode::ChanRecv as u8,
+                    Opcode::Pop as u8,
+                    Opcode::Print as u8,
+                    Opcode::Halt as u8,
+                    // --- worker @15 ---
+                    Opcode::LoadLocal as u8,
+                    0,
+                    0,
+                    Opcode::LoadConst as u8,
+                    1,
+                    0,
+                    Opcode::ChanSend as u8,
+                    Opcode::LoadConst as u8,
+                    0,
+                    0,
+                    Opcode::Return as u8,
+                ],
+            )
+        };
+
+        let mut vm = VM::new(make());
+        vm.set_fiber_mode(true);
+        vm.set_capture_output(true);
+        vm.prepare();
+
+        // Step a handful of instructions (bootstraps main fiber + guard).
+        for _ in 0..3 {
+            let _ = vm.step_instruction();
+        }
+        let fibers_after_stepping = vm.scheduler.fibers.len();
+        assert!(
+            vm.fiber_runtime_started,
+            "guard set after stepping bootstrapped the runtime"
+        );
+
+        // Now drive run() on the SAME VM. ensure_fiber_runtime_started must be a
+        // no-op (guard already true), so no second main spawn.
+        let result = vm.run();
+        let fibers_after_run = vm.scheduler.fibers.len();
+
+        eprintln!(
+            "MIX step-then-run: fibers_after_stepping={}, fibers_after_run={}, result={:?}, output={:?}",
+            fibers_after_stepping,
+            fibers_after_run,
+            result,
+            vm.get_output()
+        );
+
+        // Anti-double-spawn invariant: the guard means run() does NOT bootstrap
+        // a SECOND main fiber. With this program, fibers_after_stepping==1 (main
+        // only; Spawn not yet executed at step 3) and fibers_after_run==2 (the
+        // legitimate worker spawned by the Spawn opcode). The program completes
+        // with the correct, non-duplicated output and exit 0 — proving no
+        // double-main-spawn / no state corruption from mixing the two paths.
+        assert_eq!(result, Ok(0), "mixed step-then-run completes cleanly");
+        assert_eq!(
+            vm.get_output(),
+            &["42".to_string()],
+            "mixed step-then-run output is correct and not duplicated"
+        );
+        // Exactly one fiber carries the main id (no second main bootstrap).
+        let main_count = vm
+            .scheduler
+            .fibers
+            .keys()
+            .filter(|&&id| id == vm.main_fiber_id)
+            .count();
+        assert_eq!(main_count, 1, "exactly one main fiber (no double-spawn)");
+    }
 }
