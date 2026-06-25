@@ -871,6 +871,27 @@ select {
         );
     }
 
+    /// The client's camelCase `fiberMode` field must deserialize onto the
+    /// snake_case Rust field. The enum's `rename_all = "camelCase"` only renames
+    /// variants, not struct-variant fields, so this guards the explicit
+    /// `#[serde(rename = "fiberMode")]` the WebSocket protocol depends on.
+    #[test]
+    fn debug_message_deserializes_camelcase_fiber_mode() {
+        let json = r#"{"type":"debug","source":"x","breakpoints":[],"fiberMode":true}"#;
+        match serde_json::from_str::<ClientMessage>(json).expect("parses debug") {
+            ClientMessage::Debug { fiber_mode, .. } => {
+                assert!(fiber_mode, "fiberMode must map to fiber_mode")
+            }
+            other => panic!("expected Debug, got {:?}", other),
+        }
+
+        let run_json = r#"{"type":"run","source":"x","fiberMode":true}"#;
+        match serde_json::from_str::<ClientMessage>(run_json).expect("parses run") {
+            ClientMessage::Run { fiber_mode, .. } => assert!(fiber_mode),
+            other => panic!("expected Run, got {:?}", other),
+        }
+    }
+
     /// The fiber-mode toggle is honored: a plain (non-fiber) run does not enable
     /// fiber mode and emits no VmStateJson.
     #[test]

@@ -24,7 +24,11 @@ pub enum ClientMessage {
         /// Run with the concurrent fiber scheduler enabled. When true, the
         /// program is driven to completion and a `VmStateJson` with the final
         /// fiber/channel state is returned.
-        #[serde(default)]
+        ///
+        /// `rename` is required: the enum's `rename_all = "camelCase"` only
+        /// renames variants, not struct-variant fields, so without this the wire
+        /// name stays `fiber_mode` and the client's `fiberMode` is dropped.
+        #[serde(default, rename = "fiberMode")]
         fiber_mode: bool,
     },
     /// Compile and run in debug mode (breakpoints included to avoid race condition)
@@ -33,7 +37,7 @@ pub enum ClientMessage {
         #[serde(default)]
         breakpoints: Vec<u32>,
         /// Enable the concurrent fiber scheduler (see `Run::fiber_mode`).
-        #[serde(default)]
+        #[serde(default, rename = "fiberMode")]
         fiber_mode: bool,
     },
     /// Set breakpoints (for updating during debug session)
