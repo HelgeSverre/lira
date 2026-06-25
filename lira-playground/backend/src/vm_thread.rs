@@ -14,7 +14,7 @@ use tokio::sync::{mpsc, oneshot};
 use crate::handlers::compile_source;
 use crate::protocol::{
     ChannelInfo, ClientMessage, CompileError, ErrorSeverity, FiberInfo, ServerMessage,
-    VariableInfo, VmState,
+    VariableInfo, VmState, VmStateJson,
 };
 
 /// Channel buffer size for commands
@@ -208,12 +208,15 @@ fn handle_client_message(session: &mut DebugSession, msg: ClientMessage) -> VmRe
 
         ClientMessage::GetAst { source } => handle_get_ast(&source),
 
-        ClientMessage::Run { source } => handle_run(session, &source, false, &[]),
+        ClientMessage::Run { source, fiber_mode } => {
+            handle_run(session, &source, false, &[], fiber_mode)
+        }
 
         ClientMessage::Debug {
             source,
             breakpoints,
-        } => handle_run(session, &source, true, &breakpoints),
+            fiber_mode,
+        } => handle_run(session, &source, true, &breakpoints, fiber_mode),
 
         ClientMessage::Stop => {
             session.stop();
@@ -309,9 +312,13 @@ fn handle_run(
     source: &str,
     debug_mode: bool,
     breakpoints: &[u32],
+    fiber_mode: bool,
 ) -> VmResponse {
     let mut messages = Vec::new();
     let start = std::time::Instant::now();
+
+    // Enable fiber mode BEFORE loading so the VM is created in the right mode.
+    session.set_fiber_mode(fiber_mode);
 
     // Set breakpoints BEFORE compilation/loading to ensure they're applied
     if !breakpoints.is_empty() {
@@ -371,8 +378,17 @@ fn handle_run(
         });
     }
 
-    // Continue execution until breakpoint or completion
-    match session.continue_execution() {
+    // Drive execution. Fiber-mode programs must run via the scheduler-aware
+    // `run()` path (stepping does not drive fibers), so they run to completion
+    // and report the final fiber/channel state instead of stopping at
+    // breakpoints.
+    let execution = if fiber_mode {
+        session.run_to_completion()
+    } else {
+        session.continue_execution()
+    };
+
+    match execution {
         Ok(event) => {
             messages.extend(debug_event_to_messages(event, session, start));
         }
@@ -380,6 +396,16 @@ fn handle_run(
             messages.push(ServerMessage::RuntimeError {
                 message: e,
                 location: None,
+            });
+        }
+    }
+
+    // After a fiber-mode run, append the full scheduler state so the client can
+    // render fibers and channels.
+    if fiber_mode {
+        if let Some(snapshot) = session.scheduler_snapshot() {
+            messages.push(ServerMessage::VmStateJson {
+                state: VmStateJson::from_snapshot(&snapshot),
             });
         }
     }
@@ -772,4 +798,89 @@ fn parse_error(error: &str) -> Vec<CompileError> {
         column: None,
         severity: ErrorSeverity::Error,
     }]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::{ClientMessage, ServerMessage, VmStateJson};
+
+    /// A concurrent program: the top-level fiber spawns a `worker`, and they
+    /// hand a value over a channel via `select`. Top-level form (no `main`
+    /// wrapper) so exactly two fibers and one channel are created. Mirrors the
+    /// proven `select` arm forms in `tests/samples/ping-pong.li`.
+    const CONCURRENT_PROG: &str = "\
+fn worker(ch: Channel<int>) {
+    select {
+        42 -> ch => {}
+    }
+}
+
+let ch = chan(1)
+spawn worker(ch)
+select {
+    <-ch => println(\"got\")
+}
+";
+
+    fn find_vm_state_json(messages: &[ServerMessage]) -> Option<&VmStateJson> {
+        messages.iter().find_map(|m| match m {
+            ServerMessage::VmStateJson { state } => Some(state),
+            _ => None,
+        })
+    }
+
+    /// Acceptance gate: a fiber-mode debug session running a spawn/chan/select
+    /// program returns populated `fibers[]` and `channels[]` over the protocol.
+    #[test]
+    fn fiber_mode_debug_returns_populated_fibers_and_channels() {
+        let mut session = DebugSession::new();
+        let resp = handle_client_message(
+            &mut session,
+            ClientMessage::Debug {
+                source: CONCURRENT_PROG.to_string(),
+                breakpoints: vec![],
+                fiber_mode: true,
+            },
+        );
+
+        assert!(
+            !resp
+                .messages
+                .iter()
+                .any(|m| matches!(m, ServerMessage::CompileError { .. })),
+            "program should compile: {:?}",
+            resp.messages
+        );
+
+        let state = find_vm_state_json(&resp.messages)
+            .expect("a VmStateJson message must be emitted in fiber mode");
+        assert!(
+            state.fibers.len() >= 2,
+            "expected main + worker fibers, got {:?}",
+            state.fibers
+        );
+        assert!(
+            !state.channels.is_empty(),
+            "expected at least one channel, got {:?}",
+            state.channels
+        );
+    }
+
+    /// The fiber-mode toggle is honored: a plain (non-fiber) run does not enable
+    /// fiber mode and emits no VmStateJson.
+    #[test]
+    fn non_fiber_run_leaves_toggle_off_and_emits_no_vm_state_json() {
+        let mut session = DebugSession::new();
+        let resp = handle_client_message(
+            &mut session,
+            ClientMessage::Run {
+                source: "fn main() { println(1) }\nmain()".to_string(),
+                fiber_mode: false,
+            },
+        );
+
+        assert!(find_vm_state_json(&resp.messages).is_none());
+        assert!(!session.is_fiber_mode());
+    }
 }

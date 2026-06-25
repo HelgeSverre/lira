@@ -7,7 +7,9 @@
 
 #![allow(dead_code)]
 
-use liravm::{RichValue, Value};
+use liravm::{
+    ChannelStateSnapshot, FiberState, FiberStateSnapshot, RichValue, SchedulerSnapshot, Value,
+};
 use serde::{Deserialize, Serialize};
 
 /// Messages sent from client to server
@@ -17,12 +19,22 @@ pub enum ClientMessage {
     /// Type check source code
     Check { source: String },
     /// Compile and run source code
-    Run { source: String },
+    Run {
+        source: String,
+        /// Run with the concurrent fiber scheduler enabled. When true, the
+        /// program is driven to completion and a `VmStateJson` with the final
+        /// fiber/channel state is returned.
+        #[serde(default)]
+        fiber_mode: bool,
+    },
     /// Compile and run in debug mode (breakpoints included to avoid race condition)
     Debug {
         source: String,
         #[serde(default)]
         breakpoints: Vec<u32>,
+        /// Enable the concurrent fiber scheduler (see `Run::fiber_mode`).
+        #[serde(default)]
+        fiber_mode: bool,
     },
     /// Set breakpoints (for updating during debug session)
     SetBreakpoints { breakpoints: Vec<u32> },
@@ -99,6 +111,8 @@ pub enum ServerMessage {
     Ast { ast: serde_json::Value },
     /// VM state update
     VmStateUpdate { state: VmState },
+    /// Full fiber/channel scheduler state (fiber-mode runs)
+    VmStateJson { state: VmStateJson },
     /// Fiber spawned
     FiberSpawned { fiber: FiberInfo },
     /// Fiber state changed
@@ -298,6 +312,88 @@ pub struct SenderJson {
     #[serde(rename = "fiberId")]
     pub fiber_id: u64,
     pub value: ValueJson,
+}
+
+impl VmStateJson {
+    /// Build the wire-format VM state from a liravm [`SchedulerSnapshot`].
+    ///
+    /// `output` and `exit_code` are left empty here; they are delivered via the
+    /// separate `Output`/`Finished` messages.
+    pub fn from_snapshot(snap: &SchedulerSnapshot) -> Self {
+        VmStateJson {
+            fibers: snap
+                .fibers
+                .iter()
+                .map(FiberStateJson::from_snapshot)
+                .collect(),
+            channels: snap
+                .channels
+                .iter()
+                .map(ChannelStateJson::from_snapshot)
+                .collect(),
+            current_fiber_id: snap.current_fiber_id,
+            ready_queue: snap.ready_queue.clone(),
+            output: Vec::new(),
+            exit_code: None,
+        }
+    }
+}
+
+impl FiberStateJson {
+    fn from_snapshot(f: &FiberStateSnapshot) -> Self {
+        FiberStateJson {
+            id: f.id,
+            state: FiberStateValue::from_fiber_state(&f.state),
+            ip: f.ip,
+            stack: f.stack.iter().map(ValueJson::from_rich_value).collect(),
+            locals: f.locals.iter().map(ValueJson::from_rich_value).collect(),
+            call_stack: f
+                .call_stack
+                .iter()
+                .map(|fr| FiberCallFrameJson {
+                    return_addr: fr.return_addr,
+                    locals_base: fr.locals_base,
+                    function_name: fr.function_name.clone(),
+                })
+                .collect(),
+            result: f.result.as_ref().map(ValueJson::from_rich_value),
+        }
+    }
+}
+
+impl ChannelStateJson {
+    fn from_snapshot(c: &ChannelStateSnapshot) -> Self {
+        ChannelStateJson {
+            id: c.id,
+            buffer: c.buffer.iter().map(ValueJson::from_rich_value).collect(),
+            capacity: c.capacity,
+            receivers: c.receivers.clone(),
+            senders: c
+                .senders
+                .iter()
+                .map(|(id, v)| SenderJson {
+                    fiber_id: *id,
+                    value: ValueJson::from_rich_value(v),
+                })
+                .collect(),
+            closed: c.closed,
+        }
+    }
+}
+
+impl FiberStateValue {
+    fn from_fiber_state(state: &FiberState) -> Self {
+        match state {
+            FiberState::Ready => FiberStateValue::Ready,
+            FiberState::Running => FiberStateValue::Running,
+            FiberState::BlockedReceive(ch) => FiberStateValue::BlockedReceive { channel_id: *ch },
+            FiberState::BlockedSend(ch) => FiberStateValue::BlockedSend { channel_id: *ch },
+            FiberState::BlockedSelect => FiberStateValue::BlockedSelect,
+            FiberState::Yielded => FiberStateValue::Yielded,
+            FiberState::Finished => FiberStateValue::Finished,
+            FiberState::Failed(e) => FiberStateValue::Failed { error: e.clone() },
+        }
+    }
 }
 
 /// Value in JSON format
