@@ -80,7 +80,8 @@ Findings from a deep code review comparing Lira to Sema. Items to address before
 
 ### Stdlib — test coverage added; still thin wrappers
 - **DONE (2026-06-23):** deterministic test coverage added for the pure modules (core, io, deep collections, plus pre-existing strings/math/json/hash/base64/url/uuid/path). Fixed a real compiler bug found while testing: chained `self.x().y()` method calls inside `impl` blocks crashed (`Cannot get field from array`) — codegen now tracks impl-method return types to dispatch chained calls.
-- Remaining: most I/O modules (fs, env, os, net, http) are still thin syscall wrappers; nondeterministic modules (random/uuid/time/fs) have only structural coverage.
+- **Runtime builtins — hermetic coverage added (2026-06-25):** an llvm-cov audit found 18 effectful `Runtime` builtins with **zero** test execution (http_get/post/request, tcp_read/write/read_line/close, env_all/keys/exe, file_seek, os_chdir, random_bytes, …). `crates/liravm/tests/runtime_builtins.rs` now exercises them hermetically (HTTP/TCP against a localhost server on an ephemeral port, temp-file seek, unique-key env round-trip). This lifted `runtime.rs` from 70%→**87.5%** region / 72%→**89%** line coverage; only `print`/`println` (covered functionally via `@expect` on a different VM path) and `read_line` (stdin, would block) remain unexecuted.
+- Remaining: the **stdlib `.li` wrappers** for fs/env/os/net/http aren't run at the `.li` level (the underlying Rust builtins are now covered); nondeterministic modules (uuid/time) have only structural coverage.
 
 ### Playground Backend
 - Backend exists (1,806 lines) but no WASM compilation — runs VM server-side
