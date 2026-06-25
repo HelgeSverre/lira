@@ -210,6 +210,10 @@ pub struct VM {
     fiber_event_rx: Option<Receiver<FiberEvent>>,
     /// Fiber id of the main program (when running in fiber mode)
     main_fiber_id: FiberId,
+    /// Whether the fiber runtime has been bootstrapped (main registered as a
+    /// fiber and first-scheduled). Shared by `run_inner` and the stepping path
+    /// so the bootstrap happens exactly once per execution.
+    fiber_runtime_started: bool,
     /// Exit code captured when the main fiber finishes
     main_exit_code: i32,
     /// Saved native call stacks per fiber. The VM-native `CallFrame` carries
@@ -256,6 +260,7 @@ impl VM {
             debug: false,
             scheduler,
             fiber_mode: false,
+            fiber_runtime_started: false,
             runtime: Runtime::new(),
             output: Vec::new(),
             capture_output: false,
@@ -437,26 +442,58 @@ impl VM {
     /// channels are sorted by id so the output is deterministic regardless of
     /// the scheduler's internal `HashMap` ordering.
     pub fn scheduler_snapshot(&self) -> SchedulerSnapshot {
+        // The currently-running fiber's live context lives in `self.{ip,stack,
+        // locals,call_stack}`, not in its parked `Fiber` struct (which holds the
+        // last-saved state). Surface the live state for it so a mid-step
+        // snapshot is accurate, and resolve its frame function names from debug
+        // info. Parked fibers are read straight from their `Fiber`.
+        let current = self.scheduler.current;
         let mut fibers: Vec<FiberStateSnapshot> = self
             .scheduler
             .fibers
             .values()
-            .map(|f| FiberStateSnapshot {
-                id: f.id,
-                state: f.state.clone(),
-                ip: f.ip,
-                stack: f.stack.iter().map(RichValue::from_value).collect(),
-                locals: f.locals.iter().map(RichValue::from_value).collect(),
-                call_stack: f
-                    .call_stack
-                    .iter()
-                    .map(|frame| FiberFrameSnapshot {
-                        return_addr: frame.return_addr,
-                        locals_base: frame.locals_base,
-                        function_name: None,
-                    })
-                    .collect(),
-                result: f.result.as_ref().map(RichValue::from_value),
+            .map(|f| {
+                if Some(f.id) == current {
+                    FiberStateSnapshot {
+                        id: f.id,
+                        state: f.state.clone(),
+                        ip: self.ip,
+                        stack: self.stack.iter().map(RichValue::from_value).collect(),
+                        locals: self.locals.iter().map(RichValue::from_value).collect(),
+                        call_stack: self
+                            .call_stack
+                            .iter()
+                            .map(|frame| FiberFrameSnapshot {
+                                return_addr: frame.return_addr,
+                                locals_base: frame.locals_base,
+                                function_name: self
+                                    .program
+                                    .debug_info
+                                    .function_name_at(frame.func_offset as u32)
+                                    .map(|s| s.to_string()),
+                            })
+                            .collect(),
+                        result: f.result.as_ref().map(RichValue::from_value),
+                    }
+                } else {
+                    FiberStateSnapshot {
+                        id: f.id,
+                        state: f.state.clone(),
+                        ip: f.ip,
+                        stack: f.stack.iter().map(RichValue::from_value).collect(),
+                        locals: f.locals.iter().map(RichValue::from_value).collect(),
+                        call_stack: f
+                            .call_stack
+                            .iter()
+                            .map(|frame| FiberFrameSnapshot {
+                                return_addr: frame.return_addr,
+                                locals_base: frame.locals_base,
+                                function_name: None,
+                            })
+                            .collect(),
+                        result: f.result.as_ref().map(RichValue::from_value),
+                    }
+                }
             })
             .collect();
         fibers.sort_by_key(|f| f.id);
@@ -496,6 +533,52 @@ impl VM {
         self.execution_state = ExecutionState::Ready;
         self.step_context.clear();
         self.last_breakpoint_line = None;
+        self.fiber_runtime_started = false;
+    }
+
+    /// Bootstrap the fiber runtime exactly once: register the main program as a
+    /// real fiber and schedule it as the running fiber, so its context is
+    /// saved/restored across context switches. Idempotent and shared by both
+    /// `run_inner` and the stepping path (`step_instruction`). A no-op outside
+    /// fiber mode.
+    fn ensure_fiber_runtime_started(&mut self) {
+        if self.fiber_mode && !self.fiber_runtime_started {
+            let main_id = self.scheduler.spawn(self.program.entry_point);
+            self.main_fiber_id = main_id;
+            // Pop main straight into the Running state and make it current.
+            self.scheduler.schedule();
+            self.ip = self.program.entry_point;
+            self.fiber_runtime_started = true;
+        }
+    }
+
+    /// If the current fiber has parked/finished (`scheduler.current` is `None`),
+    /// pick the next runnable fiber and load its execution context. Returns
+    /// `Some(terminal)` when the program is done (no runnable fibers, exit with
+    /// the main fiber's code) or deadlocked; `None` when execution may proceed.
+    /// A no-op (returns `None`) outside fiber mode or while a fiber is running.
+    ///
+    /// This mirrors the reschedule branch at the top of `run_inner`'s loop, so
+    /// the stepping path drives the scheduler identically.
+    fn pump_scheduler(&mut self) -> Option<StepOutcome> {
+        if self.fiber_mode && self.scheduler.current.is_none() {
+            match self.scheduler.schedule() {
+                Some(_) => self.load_fiber_state(),
+                None => {
+                    if self.scheduler.is_deadlocked() {
+                        return Some(StepOutcome::Error {
+                            message: "deadlock: all fibers are blocked".to_string(),
+                        });
+                    }
+                    if !self.scheduler.has_runnable() {
+                        return Some(StepOutcome::Finished {
+                            exit_code: self.main_exit_code,
+                        });
+                    }
+                }
+            }
+        }
+        None
     }
 
     /// Get the current execution state
@@ -528,6 +611,25 @@ impl VM {
                 column,
                 ip: self.ip,
             };
+        }
+
+        // Fiber mode: bootstrap the runtime on the first step, then (if the
+        // current fiber has parked/finished) switch to the next runnable fiber
+        // before checking breakpoints/executing. This is what makes stepping
+        // drive the scheduler across fibers exactly as `run_inner` does.
+        self.ensure_fiber_runtime_started();
+        if let Some(terminal) = self.pump_scheduler() {
+            self.execution_state = match &terminal {
+                StepOutcome::Finished { exit_code } => ExecutionState::Finished {
+                    exit_code: *exit_code,
+                },
+                StepOutcome::Error { message } => ExecutionState::Error {
+                    message: message.clone(),
+                    location: self.get_current_location(),
+                },
+                _ => self.execution_state.clone(),
+            };
+            return terminal;
         }
 
         // Check cooperative stop
@@ -805,14 +907,8 @@ impl VM {
         // In fiber mode, register the main program as a real fiber so its
         // context is saved/restored across context switches. Without this,
         // save_fiber_state/load_fiber_state silently drop main's state because
-        // there is no "current" fiber.
-        if self.fiber_mode {
-            let main_id = self.scheduler.spawn(self.program.entry_point);
-            self.main_fiber_id = main_id;
-            // Pop main straight into the Running state and make it current.
-            self.scheduler.schedule();
-            self.ip = self.program.entry_point;
-        }
+        // there is no "current" fiber. Shared with the stepping path; runs once.
+        self.ensure_fiber_runtime_started();
 
         loop {
             // When the current fiber has parked or finished, re-enter the
@@ -4037,5 +4133,99 @@ mod tests {
         );
         assert_eq!(snap.channels[0].capacity, 1);
         assert!(!snap.channels[0].closed);
+    }
+
+    /// Concurrent STEP debugging: driving a fiber-mode spawn+channel program
+    /// purely via `step_instruction()` (never `run()`) must drive the scheduler
+    /// across fibers — switching between main and the worker — and complete with
+    /// the same output as `run()`. Proves the stepping path is fiber-aware.
+    #[test]
+    fn test_step_instruction_drives_fibers() {
+        const W: u16 = 15;
+        let program = make_program(
+            vec![Value::Int(1), Value::Int(42)],
+            vec![
+                // --- main @0 ---
+                Opcode::LoadConst as u8,
+                0,
+                0,
+                Opcode::ChanNew as u8,
+                Opcode::Dup as u8,
+                Opcode::Spawn as u8,
+                (W & 0xff) as u8,
+                (W >> 8) as u8,
+                1,
+                Opcode::Pop as u8,
+                Opcode::Yield as u8,
+                Opcode::ChanRecv as u8,
+                Opcode::Pop as u8,
+                Opcode::Print as u8,
+                Opcode::Halt as u8,
+                // --- worker @15 ---
+                Opcode::LoadLocal as u8,
+                0,
+                0,
+                Opcode::LoadConst as u8,
+                1,
+                0,
+                Opcode::ChanSend as u8,
+                Opcode::LoadConst as u8,
+                0,
+                0,
+                Opcode::Return as u8,
+            ],
+        );
+        let mut vm = VM::new(program);
+        vm.set_fiber_mode(true);
+        vm.set_capture_output(true);
+        vm.prepare();
+
+        // Step until finished (never call run()). Record which fibers ran and
+        // whether we ever observed a blocked fiber mid-execution.
+        let mut seen_fibers = std::collections::HashSet::new();
+        let mut saw_parked = false;
+        let mut exit = None;
+        for _ in 0..1000 {
+            if let Some(id) = vm.scheduler.current {
+                seen_fibers.insert(id);
+            }
+            // A fiber that has yielded or blocked while another runs is direct
+            // evidence the scheduler parked one fiber and switched to another.
+            if vm.scheduler.fibers.values().any(|f| {
+                matches!(
+                    f.state,
+                    FiberState::Yielded
+                        | FiberState::BlockedReceive(_)
+                        | FiberState::BlockedSend(_)
+                        | FiberState::BlockedSelect
+                )
+            }) {
+                saw_parked = true;
+            }
+            match vm.step_instruction() {
+                StepOutcome::Finished { exit_code } => {
+                    exit = Some(exit_code);
+                    break;
+                }
+                StepOutcome::Error { message } => panic!("stepping errored: {}", message),
+                _ => {}
+            }
+        }
+
+        assert_eq!(exit, Some(0), "program finished via stepping");
+        assert_eq!(
+            vm.get_output(),
+            &["42".to_string()],
+            "correct output via stepping"
+        );
+        assert!(
+            seen_fibers.len() >= 2,
+            "stepping switched across >= 2 fibers, saw {:?}",
+            seen_fibers
+        );
+        assert!(
+            saw_parked,
+            "observed a parked (yielded/blocked) fiber at some step (real concurrency)"
+        );
     }
 }
