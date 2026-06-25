@@ -378,11 +378,14 @@ fn handle_run(
         });
     }
 
-    // Drive execution. Fiber-mode programs must run via the scheduler-aware
-    // `run()` path (stepping does not drive fibers), so they run to completion
-    // and report the final fiber/channel state instead of stopping at
-    // breakpoints.
-    let execution = if fiber_mode {
+    // Drive the initial execution.
+    // - Plain fiber-mode `Run` (no debugging): run straight to completion via
+    //   the scheduler and report the final fiber/channel state.
+    // - Fiber-mode `Debug` (and all non-fiber runs): drive via the stepping
+    //   path so execution stops at the first breakpoint and the client can then
+    //   step/continue. The stepping path is now fiber-aware, so concurrent
+    //   programs can be step-debugged.
+    let execution = if fiber_mode && !debug_mode {
         session.run_to_completion()
     } else {
         session.continue_execution()
@@ -396,16 +399,6 @@ fn handle_run(
             messages.push(ServerMessage::RuntimeError {
                 message: e,
                 location: None,
-            });
-        }
-    }
-
-    // After a fiber-mode run, append the full scheduler state so the client can
-    // render fibers and channels.
-    if fiber_mode {
-        if let Some(snapshot) = session.scheduler_snapshot() {
-            messages.push(ServerMessage::VmStateJson {
-                state: VmStateJson::from_snapshot(&snapshot),
             });
         }
     }
@@ -722,6 +715,17 @@ fn debug_event_to_messages(
         }
     }
 
+    // In fiber mode, append the full scheduler state (fibers/channels) after
+    // every drive — initial run, each step, each continue, and on breakpoint
+    // pauses — so the client can render live concurrent state while stepping.
+    if session.is_fiber_mode() {
+        if let Some(snapshot) = session.scheduler_snapshot() {
+            messages.push(ServerMessage::VmStateJson {
+                state: VmStateJson::from_snapshot(&snapshot),
+            });
+        }
+    }
+
     messages
 }
 
@@ -882,5 +886,109 @@ select {
 
         assert!(find_vm_state_json(&resp.messages).is_none());
         assert!(!session.is_fiber_mode());
+    }
+
+    /// Concurrent program with a breakpointable statement (`let x = 42`) inside
+    /// the spawned worker, at line 2.
+    const STEP_PROG: &str = "\
+fn worker(ch: Channel<int>) {
+    let x = 42
+    select {
+        x -> ch => {}
+    }
+}
+
+let ch = chan(1)
+spawn worker(ch)
+select {
+    <-ch => println(\"got\")
+}
+";
+
+    fn has_breakpoint_hit(messages: &[ServerMessage]) -> bool {
+        messages
+            .iter()
+            .any(|m| matches!(m, ServerMessage::BreakpointHit { .. }))
+    }
+
+    fn has_output(messages: &[ServerMessage], needle: &str) -> bool {
+        messages
+            .iter()
+            .any(|m| matches!(m, ServerMessage::Output { text } if text.contains(needle)))
+    }
+
+    /// CAPSTONE (concurrent step debugging end to end): a breakpoint set inside
+    /// the spawned `worker` is hit while the main fiber is blocked, observed over
+    /// the protocol with live per-fiber state; then `Continue` runs the program
+    /// to completion with correct output. This only works if the stepping/
+    /// continue path drives the fiber scheduler.
+    #[test]
+    fn concurrent_step_debugging_breakpoint_in_spawned_fiber() {
+        use crate::protocol::FiberStateValue;
+
+        let mut session = DebugSession::new();
+
+        // Breakpoint on line 2 (`let x = 42`), which only exists inside `worker`.
+        let resp = handle_client_message(
+            &mut session,
+            ClientMessage::Debug {
+                source: STEP_PROG.to_string(),
+                breakpoints: vec![2],
+                fiber_mode: true,
+            },
+        );
+        assert!(
+            !resp
+                .messages
+                .iter()
+                .any(|m| matches!(m, ServerMessage::CompileError { .. })),
+            "program should compile: {:?}",
+            resp.messages
+        );
+        assert!(
+            has_breakpoint_hit(&resp.messages),
+            "breakpoint inside the spawned worker must be hit: {:?}",
+            resp.messages
+        );
+
+        // At the pause, the running fiber is the worker (id 2), and the main
+        // fiber (id 1) is parked on its `select` receive.
+        let state =
+            find_vm_state_json(&resp.messages).expect("VmStateJson at the breakpoint pause");
+        assert_eq!(
+            state.current_fiber_id,
+            Some(2),
+            "paused inside the worker fiber, state = {:?}",
+            state
+        );
+        let main = state
+            .fibers
+            .iter()
+            .find(|f| f.id == 1)
+            .expect("main fiber present");
+        assert!(
+            matches!(
+                main.state,
+                FiberStateValue::BlockedSelect | FiberStateValue::BlockedReceive { .. }
+            ),
+            "main fiber blocked while worker runs, got {:?}",
+            main.state
+        );
+
+        // Continue to completion: the handoff happens and the program prints.
+        let resp2 = handle_client_message(&mut session, ClientMessage::Continue);
+        assert!(
+            resp2
+                .messages
+                .iter()
+                .any(|m| matches!(m, ServerMessage::Finished { .. })),
+            "program finishes after continue: {:?}",
+            resp2.messages
+        );
+        assert!(
+            has_output(&resp2.messages, "got"),
+            "program produced its output after continue: {:?}",
+            resp2.messages
+        );
     }
 }
