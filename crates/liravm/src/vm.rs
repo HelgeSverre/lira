@@ -369,53 +369,46 @@ impl VM {
             .fibers
             .values()
             .map(|f| {
-                // The running fiber's live context lives in `self.*` (with
-                // resolvable frame names); parked fibers are read from the
-                // `Fiber` struct (their frames carry no func offset).
-                let (ip, stack, locals, call_stack): (
-                    usize,
-                    Vec<RichValue>,
-                    Vec<RichValue>,
-                    Vec<FiberFrameSnapshot>,
-                ) = if Some(f.id) == current {
-                    (
-                        self.ip,
-                        self.stack.iter().map(RichValue::from_value).collect(),
-                        self.locals.iter().map(RichValue::from_value).collect(),
-                        self.call_stack
-                            .iter()
-                            .map(|frame| FiberFrameSnapshot {
-                                return_addr: frame.return_addr,
-                                locals_base: frame.locals_base,
-                                function_name: self
-                                    .program
-                                    .debug_info
-                                    .function_name_at(frame.func_offset as u32)
-                                    .map(|s| s.to_string()),
-                            })
-                            .collect(),
-                    )
+                let is_current = Some(f.id) == current;
+                // The running fiber's live operand stack/locals/ip live in
+                // `self.*`; parked fibers are read from their `Fiber` struct.
+                let (ip, stack_src, locals_src) = if is_current {
+                    (self.ip, &self.stack, &self.locals)
                 } else {
-                    (
-                        f.ip,
-                        f.stack.iter().map(RichValue::from_value).collect(),
-                        f.locals.iter().map(RichValue::from_value).collect(),
-                        f.call_stack
-                            .iter()
-                            .map(|frame| FiberFrameSnapshot {
-                                return_addr: frame.return_addr,
-                                locals_base: frame.locals_base,
-                                function_name: None,
-                            })
-                            .collect(),
-                    )
+                    (f.ip, &f.stack, &f.locals)
+                };
+                // Only the running fiber has native call frames (with a func
+                // offset we can resolve to a name); parked fibers expose just
+                // the return/base addresses.
+                let call_stack = if is_current {
+                    self.call_stack
+                        .iter()
+                        .map(|frame| FiberFrameSnapshot {
+                            return_addr: frame.return_addr,
+                            locals_base: frame.locals_base,
+                            function_name: self
+                                .program
+                                .debug_info
+                                .function_name_at(frame.func_offset as u32)
+                                .map(|s| s.to_string()),
+                        })
+                        .collect()
+                } else {
+                    f.call_stack
+                        .iter()
+                        .map(|frame| FiberFrameSnapshot {
+                            return_addr: frame.return_addr,
+                            locals_base: frame.locals_base,
+                            function_name: None,
+                        })
+                        .collect()
                 };
                 FiberStateSnapshot {
                     id: f.id,
                     state: f.state.clone(),
                     ip,
-                    stack,
-                    locals,
+                    stack: stack_src.iter().map(RichValue::from_value).collect(),
+                    locals: locals_src.iter().map(RichValue::from_value).collect(),
                     call_stack,
                     result: f.result.as_ref().map(RichValue::from_value),
                 }
