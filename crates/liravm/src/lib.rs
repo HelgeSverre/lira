@@ -15,6 +15,7 @@ pub mod fiber;
 pub mod runtime;
 pub mod value;
 pub mod vm;
+pub mod vm_snapshot;
 
 // Re-export commonly used types
 pub use debug::{
@@ -24,9 +25,9 @@ pub use debug::{
 pub use debug_session::{DebugEvent, DebugSession, SessionState};
 pub use fiber::{FiberEvent, FiberState};
 pub use value::{ChannelId, FiberId, Value};
-pub use vm::{
-    ChannelStateSnapshot, FiberFrameSnapshot, FiberStateSnapshot, RuntimeError, SchedulerSnapshot,
-    StepResult, VM,
+pub use vm::{RuntimeError, StepResult, VM};
+pub use vm_snapshot::{
+    ChannelStateSnapshot, FiberFrameSnapshot, FiberStateSnapshot, SchedulerSnapshot,
 };
 
 use std::fs;

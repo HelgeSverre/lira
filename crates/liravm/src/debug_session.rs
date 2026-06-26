@@ -7,7 +7,8 @@
 use crate::bytecode::load;
 use crate::debug::{DebugSnapshot, PauseFlag, StepOutcome};
 use crate::fiber::FiberEvent;
-use crate::vm::{SchedulerSnapshot, VM};
+use crate::vm::VM;
+use crate::vm_snapshot::SchedulerSnapshot;
 use std::sync::{Mutex, RwLock};
 
 /// Session state for tracking what phase we're in
