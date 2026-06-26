@@ -1061,27 +1061,39 @@ impl Runtime {
     // HTTP Client Operations
     // ========================================================================
 
+    /// A blocking HTTP agent configured so non-2xx responses come back as `Ok`
+    /// (the builtins surface the status code + body to the caller rather than
+    /// treating 4xx/5xx as transport errors).
+    fn http_agent() -> ureq::Agent {
+        ureq::Agent::new_with_config(
+            ureq::Agent::config_builder()
+                .http_status_as_error(false)
+                .build(),
+        )
+    }
+
+    /// Render response headers as `Name: value` lines.
+    fn format_headers(headers: &ureq::http::HeaderMap) -> String {
+        headers
+            .iter()
+            .map(|(name, value)| format!("{}: {}", name, value.to_str().unwrap_or("")))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     /// HTTP GET request
     /// Returns (status_code, headers, body) or error
     pub fn http_get(&self, url: &str) -> Result<(i64, String, String), String> {
-        match ureq::get(url).call() {
-            Ok(response) => {
-                let status = response.status() as i64;
-                let headers = response
-                    .headers_names()
-                    .iter()
-                    .map(|name| format!("{}: {}", name, response.header(name).unwrap_or("")))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                let body = response.into_string().unwrap_or_default();
-                Ok((status, headers, body))
-            }
-            Err(ureq::Error::Status(code, response)) => {
-                let body = response.into_string().unwrap_or_default();
-                Ok((code as i64, String::new(), body))
-            }
-            Err(e) => Err(format!("HTTP error: {}", e)),
-        }
+        let req = ureq::http::Request::get(url)
+            .body(())
+            .map_err(|e| format!("Invalid request: {}", e))?;
+        let mut resp = Self::http_agent()
+            .run(req)
+            .map_err(|e| format!("HTTP error: {}", e))?;
+        let status = resp.status().as_u16() as i64;
+        let headers = Self::format_headers(resp.headers());
+        let body = resp.body_mut().read_to_string().unwrap_or_default();
+        Ok((status, headers, body))
     }
 
     /// HTTP POST request
@@ -1092,22 +1104,17 @@ impl Runtime {
         body: &str,
         content_type: &str,
     ) -> Result<(i64, String, String), String> {
-        match ureq::post(url)
-            .set("Content-Type", content_type)
-            .send_string(body)
-        {
-            Ok(response) => {
-                let status = response.status() as i64;
-                let headers = String::new();
-                let body = response.into_string().unwrap_or_default();
-                Ok((status, headers, body))
-            }
-            Err(ureq::Error::Status(code, response)) => {
-                let body = response.into_string().unwrap_or_default();
-                Ok((code as i64, String::new(), body))
-            }
-            Err(e) => Err(format!("HTTP error: {}", e)),
-        }
+        let req = ureq::http::Request::post(url)
+            .header("Content-Type", content_type)
+            .body(body.to_string())
+            .map_err(|e| format!("Invalid request: {}", e))?;
+        let mut resp = Self::http_agent()
+            .run(req)
+            .map_err(|e| format!("HTTP error: {}", e))?;
+        let status = resp.status().as_u16() as i64;
+        let headers = Self::format_headers(resp.headers());
+        let resp_body = resp.body_mut().read_to_string().unwrap_or_default();
+        Ok((status, headers, resp_body))
     }
 
     /// HTTP request with custom method and headers
@@ -1119,41 +1126,21 @@ impl Runtime {
         headers_str: &str,
         body: &str,
     ) -> Result<(i64, String), String> {
-        let mut request = match method.to_uppercase().as_str() {
-            "GET" => ureq::get(url),
-            "POST" => ureq::post(url),
-            "PUT" => ureq::put(url),
-            "DELETE" => ureq::delete(url),
-            "PATCH" => ureq::patch(url),
-            "HEAD" => ureq::head(url),
-            _ => return Err(format!("Unsupported method: {}", method)),
-        };
-
-        // Parse and add headers
+        let mut builder = ureq::http::Request::builder().method(method).uri(url);
         for line in headers_str.lines() {
             if let Some((name, value)) = line.split_once(':') {
-                request = request.set(name.trim(), value.trim());
+                builder = builder.header(name.trim(), value.trim());
             }
         }
-
-        let response = if body.is_empty() {
-            request.call()
-        } else {
-            request.send_string(body)
-        };
-
-        match response {
-            Ok(resp) => {
-                let status = resp.status() as i64;
-                let body = resp.into_string().unwrap_or_default();
-                Ok((status, body))
-            }
-            Err(ureq::Error::Status(code, resp)) => {
-                let body = resp.into_string().unwrap_or_default();
-                Ok((code as i64, body))
-            }
-            Err(e) => Err(format!("HTTP error: {}", e)),
-        }
+        let req = builder
+            .body(body.to_string())
+            .map_err(|e| format!("Invalid request: {}", e))?;
+        let mut resp = Self::http_agent()
+            .run(req)
+            .map_err(|e| format!("HTTP error: {}", e))?;
+        let status = resp.status().as_u16() as i64;
+        let resp_body = resp.body_mut().read_to_string().unwrap_or_default();
+        Ok((status, resp_body))
     }
 
     // ========================================================================
