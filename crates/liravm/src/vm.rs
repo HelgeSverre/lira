@@ -61,55 +61,12 @@ pub struct RuntimeError {
     pub stack: Vec<String>,
 }
 
-/// Snapshot of VM state for debugging/visualization
-#[derive(Debug, Clone)]
-pub struct VmSnapshot {
-    /// Current instruction pointer
-    pub ip: usize,
-    /// Current stack values (formatted as strings)
-    pub stack: Vec<String>,
-    /// Local variable values (formatted as strings)
-    pub locals: Vec<String>,
-    /// Call stack depth
-    pub call_stack_depth: usize,
-    /// Program output so far
-    pub output: Vec<String>,
-    /// All fibers with their states
-    pub fibers: Vec<FiberSnapshot>,
-    /// All channels with their states
-    pub channels: Vec<ChannelSnapshot>,
-    /// Current fiber ID (if in fiber mode)
-    pub current_fiber_id: Option<FiberId>,
-}
-
-/// Snapshot of a single fiber
-#[derive(Debug, Clone)]
-pub struct FiberSnapshot {
-    pub id: FiberId,
-    pub state: String,
-    pub ip: usize,
-    pub stack_size: usize,
-    pub locals_count: usize,
-}
-
-/// Snapshot of a channel
-#[derive(Debug, Clone)]
-pub struct ChannelSnapshot {
-    pub id: ChannelId,
-    pub capacity: usize,
-    pub buffer_size: usize,
-    pub closed: bool,
-    pub waiting_receivers: usize,
-    pub waiting_senders: usize,
-}
-
 /// Detailed, value-carrying snapshot of the fiber scheduler.
 ///
-/// Unlike [`VmSnapshot`] (which only carries counts), this captures every
-/// fiber's and channel's live contents as [`RichValue`]s so a debugger/
-/// playground can render the full concurrent state. Fibers and channels are
-/// ordered by id for deterministic output (the scheduler stores them in
-/// `HashMap`s).
+/// Captures every fiber's and channel's live contents as [`RichValue`]s so a
+/// debugger/playground can render the full concurrent state. Fibers and
+/// channels are ordered by id for deterministic output (the scheduler stores
+/// them in `HashMap`s).
 #[derive(Debug, Clone)]
 pub struct SchedulerSnapshot {
     pub fibers: Vec<FiberStateSnapshot>,
@@ -392,47 +349,6 @@ impl VM {
                     .map(|s| s.to_string())
             })
             .collect()
-    }
-
-    /// Get a snapshot of the current VM state
-    pub fn get_snapshot(&self) -> VmSnapshot {
-        let fibers: Vec<FiberSnapshot> = self
-            .scheduler
-            .fibers
-            .values()
-            .map(|f| FiberSnapshot {
-                id: f.id,
-                state: format!("{:?}", f.state),
-                ip: f.ip,
-                stack_size: f.stack.len(),
-                locals_count: f.locals.len(),
-            })
-            .collect();
-
-        let channels: Vec<ChannelSnapshot> = self
-            .scheduler
-            .channels
-            .values()
-            .map(|c| ChannelSnapshot {
-                id: c.id,
-                capacity: c.capacity,
-                buffer_size: c.buffer.len(),
-                closed: c.closed,
-                waiting_receivers: c.receivers.len(),
-                waiting_senders: c.senders.len(),
-            })
-            .collect();
-
-        VmSnapshot {
-            ip: self.ip,
-            stack: self.stack.iter().map(|v| format!("{:?}", v)).collect(),
-            locals: self.locals.iter().map(|v| format!("{:?}", v)).collect(),
-            call_stack_depth: self.call_stack.len(),
-            output: self.output.clone(),
-            fibers,
-            channels,
-            current_fiber_id: self.scheduler.current,
-        }
     }
 
     /// Get a detailed, value-carrying snapshot of the fiber scheduler.

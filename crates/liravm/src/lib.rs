@@ -25,8 +25,8 @@ pub use debug_session::{DebugEvent, DebugSession, SessionState};
 pub use fiber::{FiberEvent, FiberState};
 pub use value::{ChannelId, FiberId, Value};
 pub use vm::{
-    ChannelSnapshot, ChannelStateSnapshot, FiberFrameSnapshot, FiberSnapshot, FiberStateSnapshot,
-    RuntimeError, SchedulerSnapshot, StepResult, VmSnapshot, VM,
+    ChannelStateSnapshot, FiberFrameSnapshot, FiberStateSnapshot, RuntimeError, SchedulerSnapshot,
+    StepResult, VM,
 };
 
 use std::fs;
@@ -129,30 +129,6 @@ pub fn run_with_debug(bytecode: &[u8]) -> Result<i32, String> {
 
     // Execute
     vm.run()
-}
-
-/// Run bytecode with output streaming callback
-/// Returns (exit_code, final_snapshot)
-pub fn run_with_streaming<F>(bytecode: &[u8], on_output: F) -> Result<(i32, VmSnapshot), String>
-where
-    F: FnMut(&str) + Send + 'static,
-{
-    // Load bytecode
-    let program = bytecode::load(bytecode)?;
-
-    // Create VM with output callback
-    let mut vm = vm::VM::new(program);
-    vm.set_fiber_mode(true);
-    vm.set_capture_output(true);
-    vm.set_output_callback(on_output);
-
-    // Execute
-    let exit_code = vm.run()?;
-
-    // Get final snapshot
-    let snapshot = vm.get_snapshot();
-
-    Ok((exit_code, snapshot))
 }
 
 /// Create a VM for manual stepping/control
