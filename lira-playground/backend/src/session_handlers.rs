@@ -372,7 +372,6 @@ fn debug_event_to_messages(
             FiberEvent::FiberStateChanged {
                 fiber_id,
                 new_state,
-                ..
             } => {
                 messages.push(ServerMessage::FiberStateChanged {
                     fiber_id,

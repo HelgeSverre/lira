@@ -12,10 +12,10 @@ use std::sync::mpsc::Sender;
 pub enum FiberEvent {
     /// A new fiber was spawned
     FiberSpawned { fiber_id: FiberId, ip: usize },
-    /// A fiber's state changed
+    /// A fiber's state changed (`new_state` is a human display label for the
+    /// timeline; the typed state is delivered separately via the snapshot).
     FiberStateChanged {
         fiber_id: FiberId,
-        old_state: String,
         new_state: String,
     },
     /// A new channel was created
@@ -228,20 +228,6 @@ impl Scheduler {
         }
     }
 
-    /// Helper to format fiber state as string
-    fn format_state(state: &FiberState) -> String {
-        match state {
-            FiberState::Ready => "Ready".to_string(),
-            FiberState::Running => "Running".to_string(),
-            FiberState::BlockedReceive(ch) => format!("BlockedReceive({})", ch),
-            FiberState::BlockedSend(ch) => format!("BlockedSend({})", ch),
-            FiberState::BlockedSelect => "BlockedSelect".to_string(),
-            FiberState::Yielded => "Yielded".to_string(),
-            FiberState::Finished => "Finished".to_string(),
-            FiberState::Failed(msg) => format!("Failed({})", msg),
-        }
-    }
-
     /// Set the time slice (instructions per fiber before yielding)
     pub fn set_time_slice(&mut self, slice: usize) {
         self.default_time_slice = slice;
@@ -312,11 +298,9 @@ impl Scheduler {
         if let Some(current_id) = self.current {
             if let Some(fiber) = self.fibers.get_mut(&current_id) {
                 if fiber.state == FiberState::Running {
-                    let old_state = Self::format_state(&fiber.state);
                     fiber.state = FiberState::Yielded;
                     self.emit_event(FiberEvent::FiberStateChanged {
                         fiber_id: current_id,
-                        old_state,
                         new_state: "Yielded".to_string(),
                     });
                     self.ready_queue.push_back(current_id);
@@ -347,11 +331,9 @@ impl Scheduler {
             if let Some(fiber) = self.fibers.get_mut(&id) {
                 match fiber.state {
                     FiberState::Ready | FiberState::Yielded => {
-                        let old_state = Self::format_state(&fiber.state);
                         fiber.state = FiberState::Running;
                         self.emit_event(FiberEvent::FiberStateChanged {
                             fiber_id: id,
-                            old_state,
                             new_state: "Running".to_string(),
                         });
                         self.current = Some(id);
@@ -370,12 +352,10 @@ impl Scheduler {
     pub fn finish_current(&mut self, result: Value) {
         if let Some(current_id) = self.current {
             if let Some(fiber) = self.fibers.get_mut(&current_id) {
-                let old_state = Self::format_state(&fiber.state);
                 fiber.state = FiberState::Finished;
                 fiber.result = Some(result);
                 self.emit_event(FiberEvent::FiberStateChanged {
                     fiber_id: current_id,
-                    old_state,
                     new_state: "Finished".to_string(),
                 });
             }
@@ -387,11 +367,9 @@ impl Scheduler {
     pub fn fail_current(&mut self, error: String) {
         if let Some(current_id) = self.current {
             if let Some(fiber) = self.fibers.get_mut(&current_id) {
-                let old_state = Self::format_state(&fiber.state);
                 fiber.state = FiberState::Failed(error.clone());
                 self.emit_event(FiberEvent::FiberStateChanged {
                     fiber_id: current_id,
-                    old_state,
                     new_state: format!("Failed({})", error),
                 });
             }
@@ -490,11 +468,9 @@ impl Scheduler {
             if let Some(receiver) = self.fibers.get_mut(&receiver_id) {
                 receiver.stack.push(value);
                 receiver.stack.push(Value::Bool(true)); // ok = true
-                let old_state = Self::format_state(&receiver.state);
                 receiver.state = FiberState::Ready;
                 self.emit_event(FiberEvent::FiberStateChanged {
                     fiber_id: receiver_id,
-                    old_state,
                     new_state: "Ready".to_string(),
                 });
                 self.ready_queue.push_back(receiver_id);
@@ -518,11 +494,9 @@ impl Scheduler {
         // pull the value via `try_select`.
         if !woken_selectors.is_empty() {
             if let Some(fiber) = self.fibers.get_mut(&current_id) {
-                let old_state = Self::format_state(&fiber.state);
                 fiber.state = FiberState::BlockedSend(channel_id);
                 self.emit_event(FiberEvent::FiberStateChanged {
                     fiber_id: current_id,
-                    old_state,
                     new_state: format!("BlockedSend({})", channel_id),
                 });
             }
@@ -531,11 +505,9 @@ impl Scheduler {
             }
             for receiver_id in woken_selectors {
                 if let Some(receiver) = self.fibers.get_mut(&receiver_id) {
-                    let old_state = Self::format_state(&receiver.state);
                     receiver.state = FiberState::Ready;
                     self.emit_event(FiberEvent::FiberStateChanged {
                         fiber_id: receiver_id,
-                        old_state,
                         new_state: "Ready".to_string(),
                     });
                     self.ready_queue.push_back(receiver_id);
@@ -558,11 +530,9 @@ impl Scheduler {
 
         // Need to block
         if let Some(fiber) = self.fibers.get_mut(&current_id) {
-            let old_state = Self::format_state(&fiber.state);
             fiber.state = FiberState::BlockedSend(channel_id);
             self.emit_event(FiberEvent::FiberStateChanged {
                 fiber_id: current_id,
-                old_state,
                 new_state: format!("BlockedSend({})", channel_id),
             });
         }
@@ -601,11 +571,9 @@ impl Scheduler {
                             recv: None,
                         });
                     }
-                    let old_state = Self::format_state(&sender.state);
                     sender.state = FiberState::Ready;
                     self.emit_event(FiberEvent::FiberStateChanged {
                         fiber_id: sender_id,
-                        old_state,
                         new_state: "Ready".to_string(),
                     });
                     self.ready_queue.push_back(sender_id);
@@ -632,11 +600,9 @@ impl Scheduler {
                         recv: None,
                     });
                 }
-                let old_state = Self::format_state(&sender.state);
                 sender.state = FiberState::Ready;
                 self.emit_event(FiberEvent::FiberStateChanged {
                     fiber_id: sender_id,
-                    old_state,
                     new_state: "Ready".to_string(),
                 });
                 self.ready_queue.push_back(sender_id);
@@ -661,11 +627,9 @@ impl Scheduler {
 
         // Need to block
         if let Some(fiber) = self.fibers.get_mut(&current_id) {
-            let old_state = Self::format_state(&fiber.state);
             fiber.state = FiberState::BlockedReceive(channel_id);
             self.emit_event(FiberEvent::FiberStateChanged {
                 fiber_id: current_id,
-                old_state,
                 new_state: format!("BlockedReceive({})", channel_id),
             });
         }
@@ -708,11 +672,9 @@ impl Scheduler {
                     receiver.stack.push(Value::Null);
                     receiver.stack.push(Value::Bool(false)); // ok = false
                 }
-                let old_state = Self::format_state(&receiver.state);
                 receiver.state = FiberState::Ready;
                 self.emit_event(FiberEvent::FiberStateChanged {
                     fiber_id: receiver_id,
-                    old_state,
                     new_state: "Ready".to_string(),
                 });
                 self.ready_queue.push_back(receiver_id);
@@ -722,11 +684,9 @@ impl Scheduler {
         // Wake all blocked senders with error
         for (sender_id, _) in sender_ids {
             if let Some(sender) = self.fibers.get_mut(&sender_id) {
-                let old_state = Self::format_state(&sender.state);
                 sender.state = FiberState::Failed("send on closed channel".to_string());
                 self.emit_event(FiberEvent::FiberStateChanged {
                     fiber_id: sender_id,
-                    old_state,
                     new_state: "Failed(send on closed channel)".to_string(),
                 });
             }
@@ -809,11 +769,9 @@ impl Scheduler {
                     receiver.stack.push(value);
                     receiver.stack.push(Value::Bool(true)); // ok = true
                 }
-                let old_state = Self::format_state(&receiver.state);
                 receiver.state = FiberState::Ready;
                 self.emit_event(FiberEvent::FiberStateChanged {
                     fiber_id: receiver_id,
-                    old_state,
                     new_state: "Ready".to_string(),
                 });
                 self.ready_queue.push_back(receiver_id);
@@ -861,11 +819,9 @@ impl Scheduler {
         // de-register it from the losing arms.
         let mut registered: Vec<ChannelId> = Vec::with_capacity(recv_ids.len() + send_specs.len());
         if let Some(fiber) = self.fibers.get_mut(&current_id) {
-            let old_state = Self::format_state(&fiber.state);
             fiber.state = FiberState::BlockedSelect;
             self.emit_event(FiberEvent::FiberStateChanged {
                 fiber_id: current_id,
-                old_state,
                 new_state: "BlockedSelect".to_string(),
             });
         }
