@@ -130,121 +130,112 @@ pub async fn compile(Json(req): Json<SourceRequest>) -> impl IntoResponse {
     }
 }
 
+impl RunResponse {
+    /// Program ran to completion.
+    fn finished(output: Vec<String>, exit_code: i32, start: Instant) -> Self {
+        Self {
+            success: true,
+            output,
+            exit_code: Some(exit_code),
+            errors: vec![],
+            execution_time_ms: elapsed_ms(start),
+            breakpoint: None,
+        }
+    }
+
+    /// Execution paused at a breakpoint (not an error).
+    fn paused(output: Vec<String>, breakpoint: BreakpointInfo, start: Instant) -> Self {
+        Self {
+            success: true,
+            output,
+            exit_code: None,
+            errors: vec![],
+            execution_time_ms: elapsed_ms(start),
+            breakpoint: Some(breakpoint),
+        }
+    }
+
+    /// Compilation or runtime failure (carries any output produced first).
+    fn failed(output: Vec<String>, errors: Vec<CompileError>, start: Instant) -> Self {
+        Self {
+            success: false,
+            output,
+            exit_code: None,
+            errors,
+            execution_time_ms: elapsed_ms(start),
+            breakpoint: None,
+        }
+    }
+}
+
+fn elapsed_ms(start: Instant) -> u64 {
+    start.elapsed().as_millis() as u64
+}
+
+/// Wrap a single message + optional location as a one-element error list.
+fn one_error(message: String, line: Option<u32>, column: Option<u32>) -> Vec<CompileError> {
+    vec![CompileError {
+        message,
+        line,
+        column,
+        severity: ErrorSeverity::Error,
+    }]
+}
+
+/// Create a VM, run it with the given breakpoints, and classify the outcome:
+/// completion, a breakpoint pause, a runtime error (with recovered location),
+/// or a VM-construction failure. Shared by the `run` and `step` endpoints.
+fn run_with_breakpoints(bytecode: &[u8], breakpoints: Vec<u32>, start: Instant) -> RunResponse {
+    let mut vm = match liravm::create_vm(bytecode) {
+        Ok(vm) => vm,
+        Err(e) => return RunResponse::failed(vec![], one_error(e, None, None), start),
+    };
+    vm.set_capture_output(true);
+    vm.set_breakpoints(breakpoints);
+
+    match vm.run() {
+        Ok(exit_code) => RunResponse::finished(vm.get_output().to_vec(), exit_code, start),
+        Err(e) => {
+            if let Some(bp) = parse_breakpoint_error(&e) {
+                RunResponse::paused(vm.get_output().to_vec(), bp, start)
+            } else {
+                // Recover the source location and drop run()'s "line:col: " prefix.
+                let (line, column) = vm
+                    .get_current_location()
+                    .map_or((None, None), |(l, c)| (Some(l), Some(c)));
+                let message = strip_location_prefix(&e, line, column);
+                RunResponse::failed(
+                    vm.get_output().to_vec(),
+                    one_error(message, line, column),
+                    start,
+                )
+            }
+        }
+    }
+}
+
 /// Run endpoint - compiles and executes, returns output
 pub async fn run(Json(req): Json<RunRequest>) -> impl IntoResponse {
     let start = Instant::now();
 
-    // Compile
     let bytecode = match compile_source(&req.source) {
         Ok((_, bytecode)) => bytecode,
-        Err(errors) => {
-            return Json(RunResponse {
-                success: false,
-                output: vec![],
-                exit_code: None,
-                errors,
-                execution_time_ms: start.elapsed().as_millis() as u64,
-                breakpoint: None,
-            });
-        }
+        Err(errors) => return Json(RunResponse::failed(vec![], errors, start)),
     };
 
-    // Execute with optional breakpoints
     if req.breakpoints.is_empty() {
-        // Fast path: no breakpoints, use simple run. The structured variant
-        // surfaces the real source location (and any output produced before
-        // the failure) instead of `None`.
+        // Fast path: no breakpoints. The structured variant surfaces the real
+        // source location and any output produced before a failure.
         match liravm::run_with_capture_structured(&bytecode) {
-            Ok((exit_code, output)) => Json(RunResponse {
-                success: true,
+            Ok((exit_code, output)) => Json(RunResponse::finished(output, exit_code, start)),
+            Err((output, err)) => Json(RunResponse::failed(
                 output,
-                exit_code: Some(exit_code),
-                errors: vec![],
-                execution_time_ms: start.elapsed().as_millis() as u64,
-                breakpoint: None,
-            }),
-            Err((output, err)) => Json(RunResponse {
-                success: false,
-                output,
-                exit_code: None,
-                errors: vec![CompileError {
-                    message: err.message,
-                    line: err.line,
-                    column: err.column,
-                    severity: ErrorSeverity::Error,
-                }],
-                execution_time_ms: start.elapsed().as_millis() as u64,
-                breakpoint: None,
-            }),
+                one_error(err.message, err.line, err.column),
+                start,
+            )),
         }
     } else {
-        // With breakpoints: create VM manually and set them
-        match liravm::create_vm(&bytecode) {
-            Ok(mut vm) => {
-                vm.set_capture_output(true);
-                vm.set_breakpoints(req.breakpoints);
-
-                match vm.run() {
-                    Ok(exit_code) => Json(RunResponse {
-                        success: true,
-                        output: vm.get_output().to_vec(),
-                        exit_code: Some(exit_code),
-                        errors: vec![],
-                        execution_time_ms: start.elapsed().as_millis() as u64,
-                        breakpoint: None,
-                    }),
-                    Err(e) => {
-                        // Check if this is a breakpoint hit
-                        if let Some(bp) = parse_breakpoint_error(&e) {
-                            // Breakpoint hit - return output so far and breakpoint info
-                            Json(RunResponse {
-                                success: true, // Not an error, just paused
-                                output: vm.get_output().to_vec(),
-                                exit_code: None,
-                                errors: vec![],
-                                execution_time_ms: start.elapsed().as_millis() as u64,
-                                breakpoint: Some(bp),
-                            })
-                        } else {
-                            // Actual runtime error: recover the source location
-                            // from the VM and drop the "line:col: " prefix that
-                            // run() attaches to the message.
-                            let (line, column) = match vm.get_current_location() {
-                                Some((line, column)) => (Some(line), Some(column)),
-                                None => (None, None),
-                            };
-                            let message = strip_location_prefix(&e, line, column);
-                            Json(RunResponse {
-                                success: false,
-                                output: vm.get_output().to_vec(),
-                                exit_code: None,
-                                errors: vec![CompileError {
-                                    message,
-                                    line,
-                                    column,
-                                    severity: ErrorSeverity::Error,
-                                }],
-                                execution_time_ms: start.elapsed().as_millis() as u64,
-                                breakpoint: None,
-                            })
-                        }
-                    }
-                }
-            }
-            Err(e) => Json(RunResponse {
-                success: false,
-                output: vec![],
-                exit_code: None,
-                errors: vec![CompileError {
-                    message: e,
-                    line: None,
-                    column: None,
-                    severity: ErrorSeverity::Error,
-                }],
-                execution_time_ms: start.elapsed().as_millis() as u64,
-                breakpoint: None,
-            }),
-        }
+        Json(run_with_breakpoints(&bytecode, req.breakpoints, start))
     }
 }
 
@@ -280,19 +271,9 @@ pub async fn check(Json(req): Json<SourceRequest>) -> impl IntoResponse {
 pub async fn step(Json(req): Json<StepRequest>) -> impl IntoResponse {
     let start = Instant::now();
 
-    // Compile
     let bytecode = match compile_source(&req.source) {
         Ok((_, bytecode)) => bytecode,
-        Err(errors) => {
-            return Json(RunResponse {
-                success: false,
-                output: vec![],
-                exit_code: None,
-                errors,
-                execution_time_ms: start.elapsed().as_millis() as u64,
-                breakpoint: None,
-            });
-        }
+        Err(errors) => return Json(RunResponse::failed(vec![], errors, start)),
     };
 
     // Calculate effective breakpoints based on step type
@@ -334,63 +315,11 @@ pub async fn step(Json(req): Json<StepRequest>) -> impl IntoResponse {
         }
     };
 
-    // Run with calculated breakpoints
-    match liravm::create_vm(&bytecode) {
-        Ok(mut vm) => {
-            vm.set_capture_output(true);
-            vm.set_breakpoints(effective_breakpoints);
-
-            match vm.run() {
-                Ok(exit_code) => Json(RunResponse {
-                    success: true,
-                    output: vm.get_output().to_vec(),
-                    exit_code: Some(exit_code),
-                    errors: vec![],
-                    execution_time_ms: start.elapsed().as_millis() as u64,
-                    breakpoint: None,
-                }),
-                Err(e) => {
-                    if let Some(bp) = parse_breakpoint_error(&e) {
-                        Json(RunResponse {
-                            success: true,
-                            output: vm.get_output().to_vec(),
-                            exit_code: None,
-                            errors: vec![],
-                            execution_time_ms: start.elapsed().as_millis() as u64,
-                            breakpoint: Some(bp),
-                        })
-                    } else {
-                        Json(RunResponse {
-                            success: false,
-                            output: vm.get_output().to_vec(),
-                            exit_code: None,
-                            errors: vec![CompileError {
-                                message: e,
-                                line: None,
-                                column: None,
-                                severity: ErrorSeverity::Error,
-                            }],
-                            execution_time_ms: start.elapsed().as_millis() as u64,
-                            breakpoint: None,
-                        })
-                    }
-                }
-            }
-        }
-        Err(e) => Json(RunResponse {
-            success: false,
-            output: vec![],
-            exit_code: None,
-            errors: vec![CompileError {
-                message: e,
-                line: None,
-                column: None,
-                severity: ErrorSeverity::Error,
-            }],
-            execution_time_ms: start.elapsed().as_millis() as u64,
-            breakpoint: None,
-        }),
-    }
+    Json(run_with_breakpoints(
+        &bytecode,
+        effective_breakpoints,
+        start,
+    ))
 }
 
 /// WebSocket upgrade handler
