@@ -234,17 +234,35 @@ fn handle_client_message(session: &mut DebugSession, msg: ClientMessage) -> VmRe
             }
         }
 
-        ClientMessage::Continue => handle_continue(session),
+        ClientMessage::Continue => {
+            let r = session.continue_execution();
+            step_response(session, r)
+        }
 
-        ClientMessage::StepInstruction => handle_step_instruction(session),
+        ClientMessage::StepInstruction => {
+            let r = session.step_instruction();
+            step_response(session, r)
+        }
 
-        ClientMessage::StepLine => handle_step_line(session),
+        ClientMessage::StepLine => {
+            let r = session.step_line();
+            step_response(session, r)
+        }
 
-        ClientMessage::StepInto => handle_step_into(session),
+        ClientMessage::StepInto => {
+            let r = session.step_into();
+            step_response(session, r)
+        }
 
-        ClientMessage::StepOver => handle_step_over(session),
+        ClientMessage::StepOver => {
+            let r = session.step_over();
+            step_response(session, r)
+        }
 
-        ClientMessage::StepOut => handle_step_out(session),
+        ClientMessage::StepOut => {
+            let r = session.step_out();
+            step_response(session, r)
+        }
 
         ClientMessage::SetBreakpoints { breakpoints } => {
             session.set_breakpoints(breakpoints.clone());
@@ -409,107 +427,20 @@ fn handle_run(
     }
 }
 
-/// Handle continue execution
-fn handle_continue(session: &mut DebugSession) -> VmResponse {
-    let start = std::time::Instant::now();
-
-    match session.continue_execution() {
-        Ok(event) => VmResponse {
-            messages: debug_event_to_messages(event, session, start),
-            terminate: false,
-        },
-        Err(e) => VmResponse {
-            messages: vec![ServerMessage::RuntimeError {
-                message: e,
-                location: None,
-            }],
-            terminate: false,
-        },
-    }
-}
-
-/// Handle step instruction
-fn handle_step_instruction(session: &mut DebugSession) -> VmResponse {
-    match session.step_instruction() {
-        Ok(event) => VmResponse {
-            messages: debug_event_to_messages(event, session, std::time::Instant::now()),
-            terminate: false,
-        },
-        Err(e) => VmResponse {
-            messages: vec![ServerMessage::RuntimeError {
-                message: e,
-                location: None,
-            }],
-            terminate: false,
-        },
-    }
-}
-
-/// Handle step line
-fn handle_step_line(session: &mut DebugSession) -> VmResponse {
-    match session.step_line() {
-        Ok(event) => VmResponse {
-            messages: debug_event_to_messages(event, session, std::time::Instant::now()),
-            terminate: false,
-        },
-        Err(e) => VmResponse {
-            messages: vec![ServerMessage::RuntimeError {
-                message: e,
-                location: None,
-            }],
-            terminate: false,
-        },
-    }
-}
-
-/// Handle step into
-fn handle_step_into(session: &mut DebugSession) -> VmResponse {
-    match session.step_into() {
-        Ok(event) => VmResponse {
-            messages: debug_event_to_messages(event, session, std::time::Instant::now()),
-            terminate: false,
-        },
-        Err(e) => VmResponse {
-            messages: vec![ServerMessage::RuntimeError {
-                message: e,
-                location: None,
-            }],
-            terminate: false,
-        },
-    }
-}
-
-/// Handle step over
-fn handle_step_over(session: &mut DebugSession) -> VmResponse {
-    match session.step_over() {
-        Ok(event) => VmResponse {
-            messages: debug_event_to_messages(event, session, std::time::Instant::now()),
-            terminate: false,
-        },
-        Err(e) => VmResponse {
-            messages: vec![ServerMessage::RuntimeError {
-                message: e,
-                location: None,
-            }],
-            terminate: false,
-        },
-    }
-}
-
-/// Handle step out
-fn handle_step_out(session: &mut DebugSession) -> VmResponse {
-    match session.step_out() {
-        Ok(event) => VmResponse {
-            messages: debug_event_to_messages(event, session, std::time::Instant::now()),
-            terminate: false,
-        },
-        Err(e) => VmResponse {
-            messages: vec![ServerMessage::RuntimeError {
-                message: e,
-                location: None,
-            }],
-            terminate: false,
-        },
+/// Map a continue/step outcome to a `VmResponse`. Shared by `Continue` and all
+/// `Step*` commands, which differ only in which `DebugSession` method produced
+/// the result.
+fn step_response(session: &DebugSession, result: Result<DebugEvent, String>) -> VmResponse {
+    let messages = match result {
+        Ok(event) => debug_event_to_messages(event, session, std::time::Instant::now()),
+        Err(e) => vec![ServerMessage::RuntimeError {
+            message: e,
+            location: None,
+        }],
+    };
+    VmResponse {
+        messages,
+        terminate: false,
     }
 }
 
