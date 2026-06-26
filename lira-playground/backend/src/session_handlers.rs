@@ -1,0 +1,954 @@
+//! Per-session message handling: maps `ClientMessage`s to `VmResponse`s by
+//! driving the `DebugSession`, and converts debug events/snapshots into the
+//! WebSocket `ServerMessage` protocol. Split out of `vm_thread` (which keeps the
+//! dedicated-thread machinery) to keep each file focused and under ~1k lines.
+
+use liravm::{DebugEvent, DebugSession, DebugSnapshot, FiberEvent};
+
+use crate::handlers::compile_source;
+use crate::protocol::{
+    ChannelInfo, ClientMessage, CompileError, ErrorSeverity, FiberInfo, ServerMessage,
+    VariableInfo, VmState, VmStateJson,
+};
+use crate::vm_thread::VmResponse;
+
+pub(crate) fn handle_client_message(session: &mut DebugSession, msg: ClientMessage) -> VmResponse {
+    match msg {
+        ClientMessage::Ping => VmResponse {
+            messages: vec![ServerMessage::Pong],
+            terminate: false,
+        },
+
+        ClientMessage::Check { source } => handle_check(&source),
+
+        ClientMessage::GetAst { source } => handle_get_ast(&source),
+
+        ClientMessage::Run { source, fiber_mode } => {
+            handle_run(session, &source, false, &[], fiber_mode)
+        }
+
+        ClientMessage::Debug {
+            source,
+            breakpoints,
+            fiber_mode,
+        } => handle_run(session, &source, true, &breakpoints, fiber_mode),
+
+        ClientMessage::Stop => {
+            session.stop();
+            VmResponse {
+                messages: vec![ServerMessage::Stopped],
+                terminate: false,
+            }
+        }
+
+        ClientMessage::Pause => {
+            session.pause();
+            VmResponse {
+                messages: vec![], // Pause is async - response comes when VM actually pauses
+                terminate: false,
+            }
+        }
+
+        ClientMessage::Continue => {
+            let r = session.continue_execution();
+            step_response(session, r)
+        }
+
+        ClientMessage::StepInstruction => {
+            let r = session.step_instruction();
+            step_response(session, r)
+        }
+
+        ClientMessage::StepLine => {
+            let r = session.step_line();
+            step_response(session, r)
+        }
+
+        ClientMessage::StepInto => {
+            let r = session.step_into();
+            step_response(session, r)
+        }
+
+        ClientMessage::StepOver => {
+            let r = session.step_over();
+            step_response(session, r)
+        }
+
+        ClientMessage::StepOut => {
+            let r = session.step_out();
+            step_response(session, r)
+        }
+
+        ClientMessage::SetBreakpoints { breakpoints } => {
+            session.set_breakpoints(breakpoints.clone());
+            VmResponse {
+                messages: vec![ServerMessage::BreakpointsSet { breakpoints }],
+                terminate: false,
+            }
+        }
+
+        ClientMessage::InspectVariable { name } => handle_inspect_variable(session, &name),
+
+        ClientMessage::InspectLocals => handle_inspect_locals(session),
+
+        ClientMessage::InspectStack => handle_inspect_stack(session),
+    }
+}
+
+/// Handle type check request
+fn handle_check(source: &str) -> VmResponse {
+    match lirac::check(source) {
+        Ok(()) => VmResponse {
+            messages: vec![ServerMessage::CompileSuccess {
+                ast: None,
+                bytecode_size: 0,
+            }],
+            terminate: false,
+        },
+        Err(e) => VmResponse {
+            messages: vec![ServerMessage::CompileError {
+                errors: parse_error(&e),
+            }],
+            terminate: false,
+        },
+    }
+}
+
+/// Handle get AST request
+fn handle_get_ast(source: &str) -> VmResponse {
+    match compile_source(source) {
+        Ok((ast, bytecode)) => {
+            let ast_json = serde_json::to_value(&ast).ok();
+            VmResponse {
+                messages: vec![
+                    ServerMessage::CompileSuccess {
+                        ast: ast_json.clone(),
+                        bytecode_size: bytecode.len(),
+                    },
+                    ServerMessage::Ast {
+                        ast: ast_json.unwrap_or(serde_json::Value::Null),
+                    },
+                ],
+                terminate: false,
+            }
+        }
+        Err(errors) => VmResponse {
+            messages: vec![ServerMessage::CompileError { errors }],
+            terminate: false,
+        },
+    }
+}
+
+/// Handle run/debug request
+fn handle_run(
+    session: &mut DebugSession,
+    source: &str,
+    debug_mode: bool,
+    breakpoints: &[u32],
+    fiber_mode: bool,
+) -> VmResponse {
+    let mut messages = Vec::new();
+    let start = std::time::Instant::now();
+
+    // Enable fiber mode BEFORE loading so the VM is created in the right mode.
+    session.set_fiber_mode(fiber_mode);
+
+    // Set breakpoints BEFORE compilation/loading to ensure they're applied
+    if !breakpoints.is_empty() {
+        session.set_breakpoints(breakpoints.to_vec());
+        messages.push(ServerMessage::BreakpointsSet {
+            breakpoints: breakpoints.to_vec(),
+        });
+    }
+
+    // Compile source
+    let bytecode = match compile_source(source) {
+        Ok((ast, bytecode)) => {
+            let ast_json = serde_json::to_value(&ast).ok();
+            messages.push(ServerMessage::CompileSuccess {
+                ast: if debug_mode { ast_json } else { None },
+                bytecode_size: bytecode.len(),
+            });
+            bytecode
+        }
+        Err(errors) => {
+            return VmResponse {
+                messages: vec![ServerMessage::CompileError { errors }],
+                terminate: false,
+            };
+        }
+    };
+
+    // Load bytecode into session (this will also apply the breakpoints)
+    if let Err(e) = session.load(source, bytecode) {
+        return VmResponse {
+            messages: vec![ServerMessage::RuntimeError {
+                message: e,
+                location: None,
+            }],
+            terminate: false,
+        };
+    }
+
+    // Start execution
+    let snapshot = match session.start() {
+        Ok(snapshot) => snapshot,
+        Err(e) => {
+            return VmResponse {
+                messages: vec![ServerMessage::RuntimeError {
+                    message: e,
+                    location: None,
+                }],
+                terminate: false,
+            };
+        }
+    };
+
+    // Send initial state if in debug mode
+    if debug_mode {
+        messages.push(ServerMessage::VmStateUpdate {
+            state: snapshot_to_vm_state(&snapshot),
+        });
+    }
+
+    // Drive the initial execution.
+    // - Plain fiber-mode `Run` (no debugging): run straight to completion via
+    //   the scheduler and report the final fiber/channel state.
+    // - Fiber-mode `Debug` (and all non-fiber runs): drive via the stepping
+    //   path so execution stops at the first breakpoint and the client can then
+    //   step/continue. The stepping path is now fiber-aware, so concurrent
+    //   programs can be step-debugged.
+    let execution = if fiber_mode && !debug_mode {
+        session.run_to_completion()
+    } else {
+        session.continue_execution()
+    };
+
+    match execution {
+        Ok(event) => {
+            messages.extend(debug_event_to_messages(event, session, start));
+        }
+        Err(e) => {
+            messages.push(ServerMessage::RuntimeError {
+                message: e,
+                location: None,
+            });
+        }
+    }
+
+    VmResponse {
+        messages,
+        terminate: false,
+    }
+}
+
+/// Map a continue/step outcome to a `VmResponse`. Shared by `Continue` and all
+/// `Step*` commands, which differ only in which `DebugSession` method produced
+/// the result.
+fn step_response(session: &DebugSession, result: Result<DebugEvent, String>) -> VmResponse {
+    let messages = match result {
+        Ok(event) => debug_event_to_messages(event, session, std::time::Instant::now()),
+        Err(e) => vec![ServerMessage::RuntimeError {
+            message: e,
+            location: None,
+        }],
+    };
+    VmResponse {
+        messages,
+        terminate: false,
+    }
+}
+
+/// Handle variable inspection
+fn handle_inspect_variable(session: &DebugSession, name: &str) -> VmResponse {
+    if let Some(snapshot) = session.get_snapshot() {
+        // Look for variable in locals
+        for local in &snapshot.locals {
+            if local.name.as_deref() == Some(name) {
+                return VmResponse {
+                    messages: vec![ServerMessage::VariableValue {
+                        name: name.to_string(),
+                        value: local.value.display.clone(),
+                        type_name: local.value.type_name.clone(),
+                    }],
+                    terminate: false,
+                };
+            }
+        }
+    }
+
+    VmResponse {
+        messages: vec![ServerMessage::VariableValue {
+            name: name.to_string(),
+            value: "<not found>".to_string(),
+            type_name: "unknown".to_string(),
+        }],
+        terminate: false,
+    }
+}
+
+/// Handle locals inspection
+fn handle_inspect_locals(session: &DebugSession) -> VmResponse {
+    use crate::protocol::ValueJson;
+
+    let locals = if let Some(snapshot) = session.get_snapshot() {
+        snapshot
+            .locals
+            .iter()
+            .map(|l| {
+                let value = l
+                    .value
+                    .rich_value
+                    .as_ref()
+                    .map(ValueJson::from_rich_value)
+                    .unwrap_or_else(|| ValueJson::String {
+                        value: l.value.display.clone(),
+                    });
+                VariableInfo {
+                    name: l
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| format!("local_{}", l.slot)),
+                    value,
+                    type_name: l.value.type_name.clone(),
+                }
+            })
+            .collect()
+    } else {
+        vec![]
+    };
+
+    VmResponse {
+        messages: vec![ServerMessage::Locals { locals }],
+        terminate: false,
+    }
+}
+
+/// Handle stack inspection
+fn handle_inspect_stack(session: &DebugSession) -> VmResponse {
+    let stack = if let Some(snapshot) = session.get_snapshot() {
+        snapshot.stack.iter().map(|v| v.display.clone()).collect()
+    } else {
+        vec![]
+    };
+
+    VmResponse {
+        messages: vec![ServerMessage::Stack { stack }],
+        terminate: false,
+    }
+}
+
+/// Convert DebugEvent to ServerMessages
+fn debug_event_to_messages(
+    event: DebugEvent,
+    session: &DebugSession,
+    start: std::time::Instant,
+) -> Vec<ServerMessage> {
+    let mut messages = Vec::new();
+
+    // Drain and convert fiber/channel events first
+    for fiber_event in session.drain_fiber_events() {
+        match fiber_event {
+            FiberEvent::FiberSpawned { fiber_id, ip } => {
+                messages.push(ServerMessage::FiberSpawned {
+                    fiber: FiberInfo {
+                        id: fiber_id,
+                        state: "Ready".to_string(),
+                        ip,
+                    },
+                });
+            }
+            FiberEvent::FiberStateChanged {
+                fiber_id,
+                new_state,
+                ..
+            } => {
+                messages.push(ServerMessage::FiberStateChanged {
+                    fiber_id,
+                    new_state,
+                });
+            }
+            FiberEvent::ChannelCreated {
+                channel_id,
+                capacity,
+            } => {
+                messages.push(ServerMessage::ChannelCreated {
+                    channel: ChannelInfo {
+                        id: channel_id,
+                        capacity,
+                        buffer_size: 0,
+                        closed: false,
+                    },
+                });
+            }
+            FiberEvent::ChannelMessage {
+                channel_id,
+                operation,
+                value,
+            } => {
+                messages.push(ServerMessage::ChannelMessage {
+                    channel_id,
+                    operation,
+                    value,
+                });
+            }
+            FiberEvent::ChannelClosed { channel_id } => {
+                // Send as a channel message with "close" operation
+                messages.push(ServerMessage::ChannelMessage {
+                    channel_id,
+                    operation: "close".to_string(),
+                    value: String::new(),
+                });
+            }
+        }
+    }
+
+    // Always send any accumulated output
+    for line in session.get_output() {
+        messages.push(ServerMessage::Output { text: line });
+    }
+
+    match event {
+        DebugEvent::StateChanged(snapshot) => {
+            messages.push(ServerMessage::VmStateUpdate {
+                state: snapshot_to_vm_state(&snapshot),
+            });
+        }
+        DebugEvent::Output(text) => {
+            messages.push(ServerMessage::Output { text });
+        }
+        DebugEvent::BreakpointHit { line, column, ip } => {
+            messages.push(ServerMessage::BreakpointHit { line, column, ip });
+            push_current_vm_state(&mut messages, session);
+        }
+        DebugEvent::StepCompleted { line, column, ip } => {
+            messages.push(ServerMessage::StepCompleted { line, column, ip });
+            push_current_vm_state(&mut messages, session);
+        }
+        DebugEvent::Paused { line, column, ip } => {
+            messages.push(ServerMessage::Paused { line, column, ip });
+            push_current_vm_state(&mut messages, session);
+        }
+        DebugEvent::Finished { exit_code } => {
+            messages.push(ServerMessage::Finished {
+                exit_code,
+                duration_ms: start.elapsed().as_millis() as u64,
+            });
+        }
+        DebugEvent::Error { message, location } => {
+            messages.push(ServerMessage::RuntimeError {
+                message,
+                location: location.map(|(line, column)| crate::protocol::SourceLocation {
+                    line,
+                    column,
+                    file: None,
+                }),
+            });
+        }
+    }
+
+    // In fiber mode, append the full scheduler state (fibers/channels) after
+    // every drive — initial run, each step, each continue, and on breakpoint
+    // pauses — so the client can render live concurrent state while stepping.
+    if session.is_fiber_mode() {
+        if let Some(snapshot) = session.scheduler_snapshot() {
+            messages.push(ServerMessage::VmStateJson {
+                state: VmStateJson::from_snapshot(&snapshot),
+            });
+        }
+    }
+
+    messages
+}
+
+/// Append the current single-context VM state (locals/stack/call-stack) as a
+/// `VmStateUpdate`, if a snapshot is available. Used by the pause/step/
+/// breakpoint events that should refresh the inspector.
+fn push_current_vm_state(messages: &mut Vec<ServerMessage>, session: &DebugSession) {
+    if let Some(snapshot) = session.get_snapshot() {
+        messages.push(ServerMessage::VmStateUpdate {
+            state: snapshot_to_vm_state(&snapshot),
+        });
+    }
+}
+
+/// Convert DebugSnapshot to VmState for protocol
+fn snapshot_to_vm_state(snapshot: &DebugSnapshot) -> VmState {
+    use crate::protocol::ValueJson;
+
+    let (line, column) = snapshot.location.unzip();
+    VmState {
+        execution_state: format!("{:?}", snapshot.state),
+        ip: snapshot.ip,
+        line,
+        column,
+        stack: snapshot
+            .stack
+            .iter()
+            .map(|v| {
+                // Use rich_value if available, otherwise create a simple string value
+                v.rich_value
+                    .as_ref()
+                    .map(ValueJson::from_rich_value)
+                    .unwrap_or_else(|| ValueJson::String {
+                        value: v.display.clone(),
+                    })
+            })
+            .collect(),
+        locals: snapshot
+            .locals
+            .iter()
+            .map(|l| {
+                let value = l
+                    .value
+                    .rich_value
+                    .as_ref()
+                    .map(ValueJson::from_rich_value)
+                    .unwrap_or_else(|| ValueJson::String {
+                        value: l.value.display.clone(),
+                    });
+                VariableInfo {
+                    name: l
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| format!("local_{}", l.slot)),
+                    value,
+                    type_name: l.value.type_name.clone(),
+                }
+            })
+            .collect(),
+        call_stack: snapshot
+            .call_stack
+            .iter()
+            .map(|f| {
+                format!(
+                    "{}@{}",
+                    f.function_name.as_deref().unwrap_or("<anonymous>"),
+                    f.return_addr
+                )
+            })
+            .collect(),
+        output: session_output_placeholder(),
+    }
+}
+
+/// Placeholder for output - actual output is sent separately
+fn session_output_placeholder() -> Vec<String> {
+    vec![]
+}
+
+/// Parse error string into CompileError list
+fn parse_error(error: &str) -> Vec<CompileError> {
+    vec![CompileError {
+        message: error.to_string(),
+        line: None,
+        column: None,
+        severity: ErrorSeverity::Error,
+    }]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::{ClientMessage, ServerMessage, VmStateJson};
+
+    /// A concurrent program: the top-level fiber spawns a `worker`, and they
+    /// hand a value over a channel via `select`. Top-level form (no `main`
+    /// wrapper) so exactly two fibers and one channel are created. Mirrors the
+    /// proven `select` arm forms in `tests/samples/ping-pong.li`.
+    const CONCURRENT_PROG: &str = "\
+fn worker(ch: Channel<int>) {
+    select {
+        42 -> ch => {}
+    }
+}
+
+let ch = chan(1)
+spawn worker(ch)
+select {
+    <-ch => println(\"got\")
+}
+";
+
+    fn find_vm_state_json(messages: &[ServerMessage]) -> Option<&VmStateJson> {
+        messages.iter().find_map(|m| match m {
+            ServerMessage::VmStateJson { state } => Some(state),
+            _ => None,
+        })
+    }
+
+    /// Acceptance gate: a fiber-mode debug session running a spawn/chan/select
+    /// program returns populated `fibers[]` and `channels[]` over the protocol.
+    #[test]
+    fn fiber_mode_debug_returns_populated_fibers_and_channels() {
+        let mut session = DebugSession::new();
+        let resp = handle_client_message(
+            &mut session,
+            ClientMessage::Debug {
+                source: CONCURRENT_PROG.to_string(),
+                breakpoints: vec![],
+                fiber_mode: true,
+            },
+        );
+
+        assert!(
+            !resp
+                .messages
+                .iter()
+                .any(|m| matches!(m, ServerMessage::CompileError { .. })),
+            "program should compile: {:?}",
+            resp.messages
+        );
+
+        let state = find_vm_state_json(&resp.messages)
+            .expect("a VmStateJson message must be emitted in fiber mode");
+        assert!(
+            state.fibers.len() >= 2,
+            "expected main + worker fibers, got {:?}",
+            state.fibers
+        );
+        assert!(
+            !state.channels.is_empty(),
+            "expected at least one channel, got {:?}",
+            state.channels
+        );
+    }
+
+    /// The client's camelCase `fiberMode` field must deserialize onto the
+    /// snake_case Rust field. The enum's `rename_all = "camelCase"` only renames
+    /// variants, not struct-variant fields, so this guards the explicit
+    /// `#[serde(rename = "fiberMode")]` the WebSocket protocol depends on.
+    #[test]
+    fn debug_message_deserializes_camelcase_fiber_mode() {
+        let json = r#"{"type":"debug","source":"x","breakpoints":[],"fiberMode":true}"#;
+        match serde_json::from_str::<ClientMessage>(json).expect("parses debug") {
+            ClientMessage::Debug { fiber_mode, .. } => {
+                assert!(fiber_mode, "fiberMode must map to fiber_mode")
+            }
+            other => panic!("expected Debug, got {:?}", other),
+        }
+
+        let run_json = r#"{"type":"run","source":"x","fiberMode":true}"#;
+        match serde_json::from_str::<ClientMessage>(run_json).expect("parses run") {
+            ClientMessage::Run { fiber_mode, .. } => assert!(fiber_mode),
+            other => panic!("expected Run, got {:?}", other),
+        }
+    }
+
+    /// The fiber-mode toggle is honored: a plain (non-fiber) run does not enable
+    /// fiber mode and emits no VmStateJson.
+    #[test]
+    fn non_fiber_run_leaves_toggle_off_and_emits_no_vm_state_json() {
+        let mut session = DebugSession::new();
+        let resp = handle_client_message(
+            &mut session,
+            ClientMessage::Run {
+                source: "fn main() { println(1) }\nmain()".to_string(),
+                fiber_mode: false,
+            },
+        );
+
+        assert!(find_vm_state_json(&resp.messages).is_none());
+        assert!(!session.is_fiber_mode());
+    }
+
+    /// Concurrent program with a breakpointable statement (`let x = 42`) inside
+    /// the spawned worker, at line 2.
+    const STEP_PROG: &str = "\
+fn worker(ch: Channel<int>) {
+    let x = 42
+    select {
+        x -> ch => {}
+    }
+}
+
+let ch = chan(1)
+spawn worker(ch)
+select {
+    <-ch => println(\"got\")
+}
+";
+
+    fn has_breakpoint_hit(messages: &[ServerMessage]) -> bool {
+        messages
+            .iter()
+            .any(|m| matches!(m, ServerMessage::BreakpointHit { .. }))
+    }
+
+    fn has_output(messages: &[ServerMessage], needle: &str) -> bool {
+        messages
+            .iter()
+            .any(|m| matches!(m, ServerMessage::Output { text } if text.contains(needle)))
+    }
+
+    /// CAPSTONE (concurrent step debugging end to end): a breakpoint set inside
+    /// the spawned `worker` is hit while the main fiber is blocked, observed over
+    /// the protocol with live per-fiber state; then `Continue` runs the program
+    /// to completion with correct output. This only works if the stepping/
+    /// continue path drives the fiber scheduler.
+    #[test]
+    fn concurrent_step_debugging_breakpoint_in_spawned_fiber() {
+        use crate::protocol::FiberStateValue;
+
+        let mut session = DebugSession::new();
+
+        // Breakpoint on line 2 (`let x = 42`), which only exists inside `worker`.
+        let resp = handle_client_message(
+            &mut session,
+            ClientMessage::Debug {
+                source: STEP_PROG.to_string(),
+                breakpoints: vec![2],
+                fiber_mode: true,
+            },
+        );
+        assert!(
+            !resp
+                .messages
+                .iter()
+                .any(|m| matches!(m, ServerMessage::CompileError { .. })),
+            "program should compile: {:?}",
+            resp.messages
+        );
+        assert!(
+            has_breakpoint_hit(&resp.messages),
+            "breakpoint inside the spawned worker must be hit: {:?}",
+            resp.messages
+        );
+
+        // At the pause, the running fiber is the worker (id 2), and the main
+        // fiber (id 1) is parked on its `select` receive.
+        let state =
+            find_vm_state_json(&resp.messages).expect("VmStateJson at the breakpoint pause");
+        assert_eq!(
+            state.current_fiber_id,
+            Some(2),
+            "paused inside the worker fiber, state = {:?}",
+            state
+        );
+        let main = state
+            .fibers
+            .iter()
+            .find(|f| f.id == 1)
+            .expect("main fiber present");
+        assert!(
+            matches!(
+                main.state,
+                FiberStateValue::BlockedSelect | FiberStateValue::BlockedReceive { .. }
+            ),
+            "main fiber blocked while worker runs, got {:?}",
+            main.state
+        );
+
+        // Continue to completion: the handoff happens and the program prints.
+        let resp2 = handle_client_message(&mut session, ClientMessage::Continue);
+        assert!(
+            resp2
+                .messages
+                .iter()
+                .any(|m| matches!(m, ServerMessage::Finished { .. })),
+            "program finishes after continue: {:?}",
+            resp2.messages
+        );
+        assert!(
+            has_output(&resp2.messages, "got"),
+            "program produced its output after continue: {:?}",
+            resp2.messages
+        );
+    }
+
+    // ===================================================================
+    // ADVERSARIAL VERIFIER PROBES (added by independent verification).
+    // These are INDEPENDENT of the capstone/test_step_instruction_drives_fibers.
+    // Keep any that reveal a real defect; otherwise harmless extra coverage.
+    // ===================================================================
+
+    /// PROBE C: a DIFFERENT concurrent program (two workers feeding one channel,
+    /// summed by main) driven PURELY via repeated `step_instruction()` — never
+    /// run() and never continue(). Asserts: (1) same output as run() ("30"),
+    /// (2) >= 2 distinct fibers visited (here 3: main + 2 workers).
+    const TWO_WORKERS_PROG: &str = "\
+fn worker(ch: Channel<int>, v: int) {
+    select {
+        v -> ch => {}
+    }
+}
+
+let ch = chan(2)
+spawn worker(ch, 10)
+spawn worker(ch, 20)
+var total = 0
+select {
+    a = <-ch => { total = total + a }
+}
+select {
+    b = <-ch => { total = total + b }
+}
+println(total)
+";
+
+    #[test]
+    fn probe_c_pure_step_instruction_two_workers() {
+        use std::collections::HashSet;
+
+        let session = DebugSession::new();
+        session.set_fiber_mode(true);
+        let (_ast, bytecode) = compile_source(TWO_WORKERS_PROG).expect("compiles");
+        session.load(TWO_WORKERS_PROG, bytecode).expect("loads");
+        session.start().expect("starts");
+
+        let mut seen_fibers: HashSet<u64> = HashSet::new();
+        let mut output = String::new();
+        let mut exit = None;
+        for _ in 0..5000 {
+            if let Some(snap) = session.scheduler_snapshot() {
+                if let Some(id) = snap.current_fiber_id {
+                    seen_fibers.insert(id);
+                }
+            }
+            match session.step_instruction().expect("step ok") {
+                DebugEvent::Finished { exit_code } => {
+                    exit = Some(exit_code);
+                    break;
+                }
+                DebugEvent::Output(text) => output.push_str(&text),
+                DebugEvent::Error { message, .. } => panic!("stepping errored: {}", message),
+                _ => {}
+            }
+        }
+        // Output may also be captured into session output buffer; pull both.
+        let captured = session.get_output().join("");
+        let combined = format!("{}{}", output, captured);
+
+        assert_eq!(exit, Some(0), "finished via pure stepping");
+        assert!(
+            combined.contains("30"),
+            "pure-stepping output must equal run() output (30), got {:?}",
+            combined
+        );
+        assert!(
+            seen_fibers.len() >= 2,
+            "pure stepping must visit >= 2 distinct fibers, saw {:?}",
+            seen_fibers
+        );
+    }
+
+    /// PROBE D1 (DEADLOCK while stepping): main receives on a channel that no
+    /// one ever sends to. Driven via stepping/continue in fiber mode, does it
+    /// surface a deadlock error like run() does, or hang/loop/panic?
+    const DEADLOCK_PROG: &str = "\
+let ch = chan(1)
+select {
+    v = <-ch => println(v)
+}
+println(\"unreached\")
+";
+
+    #[test]
+    fn probe_d1_deadlock_while_stepping() {
+        let session = DebugSession::new();
+        session.set_fiber_mode(true);
+        let (_ast, bytecode) = compile_source(DEADLOCK_PROG).expect("compiles");
+        session.load(DEADLOCK_PROG, bytecode).expect("loads");
+        session.start().expect("starts");
+
+        let mut result = String::from("NEITHER (ran out of iterations -> HANG/LOOP)");
+        for _ in 0..20000 {
+            match session.step_instruction().expect("step ok") {
+                DebugEvent::Finished { exit_code } => {
+                    result = format!("FINISHED exit={} (NO deadlock surfaced!)", exit_code);
+                    break;
+                }
+                DebugEvent::Error { message, .. } => {
+                    result = format!("ERROR: {}", message);
+                    break;
+                }
+                _ => {}
+            }
+        }
+        // Record the actual behavior; the verifier reads this via the message.
+        eprintln!("DEADLOCK-WHILE-STEPPING ACTUAL BEHAVIOR: {}", result);
+        assert!(
+            result.contains("deadlock"),
+            "DEADLOCK-WHILE-STEPPING ACTUAL BEHAVIOR: {}",
+            result
+        );
+    }
+
+    /// PROBE D2 (breakpoint dedup across fibers): TWO workers both execute
+    /// `let x = base` on line 2. A breakpoint on line 2 should fire ONCE PER
+    /// FIBER (twice total) if per-fiber, or be suppressed for the second fiber
+    /// by the single VM-global `last_breakpoint_line`. This probe RECORDS the
+    /// actual count; it does not force a particular answer.
+    const SAME_LINE_BP_PROG: &str = "\
+fn worker(ch: Channel<int>, base: int) {
+    let x = base
+    select {
+        x -> ch => {}
+    }
+}
+
+let ch = chan(2)
+spawn worker(ch, 10)
+spawn worker(ch, 20)
+var total = 0
+select {
+    a = <-ch => { total = total + a }
+}
+select {
+    b = <-ch => { total = total + b }
+}
+println(total)
+";
+
+    #[test]
+    fn probe_d2_breakpoint_dedup_across_fibers() {
+        let session = DebugSession::new();
+        session.set_fiber_mode(true);
+        session.set_breakpoints(vec![2]);
+        let (_ast, bytecode) = compile_source(SAME_LINE_BP_PROG).expect("compiles");
+        session.load(SAME_LINE_BP_PROG, bytecode).expect("loads");
+        session.start().expect("starts");
+
+        // Drive the initial run to the first stop, then keep continuing,
+        // counting distinct breakpoint pauses and which fiber was current.
+        let mut bp_hits = 0;
+        let mut bp_fibers: Vec<u64> = Vec::new();
+        let mut finished = false;
+
+        let mut event = session.continue_execution().expect("first drive");
+        for _ in 0..1000 {
+            match event {
+                DebugEvent::BreakpointHit { .. } => {
+                    bp_hits += 1;
+                    if let Some(snap) = session.scheduler_snapshot() {
+                        if let Some(id) = snap.current_fiber_id {
+                            bp_fibers.push(id);
+                        }
+                    }
+                    event = session.continue_execution().expect("continue after bp");
+                }
+                DebugEvent::Finished { .. } => {
+                    finished = true;
+                    break;
+                }
+                DebugEvent::Error { message, .. } => {
+                    panic!("unexpected error during bp dedup probe: {}", message);
+                }
+                _ => {
+                    event = session.continue_execution().expect("continue");
+                }
+            }
+        }
+
+        eprintln!(
+            "BREAKPOINT-DEDUP ACROSS FIBERS: line-2 breakpoint fired {} time(s) on fibers {:?}; finished={}",
+            bp_hits, bp_fibers, finished
+        );
+        // We do not assert a count here — this documents real behavior. We only
+        // require the program eventually completes (no hang) regardless.
+        assert!(
+            finished,
+            "program with same-line breakpoints must still complete"
+        );
+    }
+}
