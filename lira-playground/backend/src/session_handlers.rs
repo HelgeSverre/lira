@@ -50,33 +50,39 @@ pub(crate) fn handle_client_message(session: &mut DebugSession, msg: ClientMessa
         }
 
         ClientMessage::Continue => {
+            let start = std::time::Instant::now();
             let r = session.continue_execution();
-            step_response(session, r)
+            step_response(session, r, start)
         }
 
         ClientMessage::StepInstruction => {
+            let start = std::time::Instant::now();
             let r = session.step_instruction();
-            step_response(session, r)
+            step_response(session, r, start)
         }
 
         ClientMessage::StepLine => {
+            let start = std::time::Instant::now();
             let r = session.step_line();
-            step_response(session, r)
+            step_response(session, r, start)
         }
 
         ClientMessage::StepInto => {
+            let start = std::time::Instant::now();
             let r = session.step_into();
-            step_response(session, r)
+            step_response(session, r, start)
         }
 
         ClientMessage::StepOver => {
+            let start = std::time::Instant::now();
             let r = session.step_over();
-            step_response(session, r)
+            step_response(session, r, start)
         }
 
         ClientMessage::StepOut => {
+            let start = std::time::Instant::now();
             let r = session.step_out();
-            step_response(session, r)
+            step_response(session, r, start)
         }
 
         ClientMessage::SetBreakpoints { breakpoints } => {
@@ -244,10 +250,15 @@ fn handle_run(
 
 /// Map a continue/step outcome to a `VmResponse`. Shared by `Continue` and all
 /// `Step*` commands, which differ only in which `DebugSession` method produced
-/// the result.
-fn step_response(session: &DebugSession, result: Result<DebugEvent, String>) -> VmResponse {
+/// the result. `start` must be captured *before* driving execution so a
+/// run-to-completion reports the real elapsed time in `duration_ms`.
+fn step_response(
+    session: &DebugSession,
+    result: Result<DebugEvent, String>,
+    start: std::time::Instant,
+) -> VmResponse {
     let messages = match result {
-        Ok(event) => debug_event_to_messages(event, session, std::time::Instant::now()),
+        Ok(event) => debug_event_to_messages(event, session, start),
         Err(e) => vec![ServerMessage::RuntimeError {
             message: e,
             location: None,
