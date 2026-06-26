@@ -25,8 +25,11 @@ fn spawn_http_server(count: usize, body: &'static str) -> u16 {
             // completes before we respond.
             let mut buf = [0u8; 4096];
             let _ = stream.read(&mut buf);
+            // `Connection: close` so the client opens a fresh connection per
+            // request, matching this one-request-per-connection server (avoids a
+            // keep-alive reuse race under concurrent test load).
             let resp = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
                 body.len(),
                 body
             );
