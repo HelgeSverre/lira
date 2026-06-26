@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { VmState, Fiber, Channel, FiberId, ChannelId, ExecutionStatus, FiberState } from '../types/vm';
+import type { VmState, Fiber, Channel, FiberId, ChannelId, ExecutionStatus } from '../types/vm';
 import type { FiberInfo, ChannelInfo, VmStateJson } from '../types/protocol';
 
 /** Event types for the event history */
@@ -61,33 +61,6 @@ export interface VmStoreState {
   recordChannelMessage: (channelId: ChannelId, operation: string, value: string) => void;
   clearEventHistory: () => void;
   reset: () => void;
-}
-
-/** Parse a fiber state string into the FiberState type */
-function parseFiberState(stateStr: string): FiberState {
-  if (stateStr === 'Ready') return { type: 'Ready' };
-  if (stateStr === 'Running') return { type: 'Running' };
-  if (stateStr === 'Yielded') return { type: 'Yielded' };
-  if (stateStr === 'Finished') return { type: 'Finished' };
-  if (stateStr === 'BlockedSelect') return { type: 'BlockedSelect' };
-
-  const blockedReceiveMatch = stateStr.match(/BlockedReceive\((\d+)\)/);
-  if (blockedReceiveMatch) {
-    return { type: 'BlockedReceive', channelId: parseInt(blockedReceiveMatch[1], 10) };
-  }
-
-  const blockedSendMatch = stateStr.match(/BlockedSend\((\d+)\)/);
-  if (blockedSendMatch) {
-    return { type: 'BlockedSend', channelId: parseInt(blockedSendMatch[1], 10) };
-  }
-
-  const failedMatch = stateStr.match(/Failed\((.*)\)/);
-  if (failedMatch) {
-    return { type: 'Failed', error: failedMatch[1] };
-  }
-
-  // Default to Ready if we can't parse
-  return { type: 'Ready' };
 }
 
 /** Add an event to history, keeping max size */
@@ -201,74 +174,34 @@ export const useVmStore = create<VmStoreState>((set) => ({
 
   setTimeoutWarning: (seconds) => set({ timeoutWarning: seconds }),
 
-  addFiber: (fiber: FiberInfo) => set((state) => {
-    const fibers = { ...state.vmState?.fibers ?? {} };
-    fibers[fiber.id] = {
-      id: fiber.id,
-      state: parseFiberState(fiber.state),
-      ip: fiber.ip,
-      stack: [],
-      locals: [],
-      callStack: [],
-      fiberLocals: {},
-      result: null,
-    };
+  // Streaming fiber/channel events feed only the timeline. The authoritative
+  // fiber/channel state (with real stacks, locals, buffers) is owned by
+  // `applyVmStateJson` from the typed `vmStateJson` snapshot, so these no longer
+  // write `vmState` (which previously produced empty-stack placeholders and a
+  // second, lossier source of truth).
+  addFiber: (fiber: FiberInfo) => set((state) => ({
+    eventHistory: addEvent(state.eventHistory, {
+      timestamp: Date.now(),
+      type: 'fiberSpawned',
+      details: `Fiber #${fiber.id} spawned at IP ${fiber.ip}`,
+    }),
+  })),
 
-    return {
-      vmState: state.vmState
-        ? { ...state.vmState, fibers }
-        : { ...initialVmState, fibers },
-      eventHistory: addEvent(state.eventHistory, {
-        timestamp: Date.now(),
-        type: 'fiberSpawned',
-        details: `Fiber #${fiber.id} spawned at IP ${fiber.ip}`,
-      }),
-    };
-  }),
+  updateFiberState: (fiberId: FiberId, newState: string) => set((state) => ({
+    eventHistory: addEvent(state.eventHistory, {
+      timestamp: Date.now(),
+      type: 'fiberStateChanged',
+      details: `Fiber #${fiberId} -> ${newState}`,
+    }),
+  })),
 
-  updateFiberState: (fiberId: FiberId, newState: string) => set((state) => {
-    if (!state.vmState) return state;
-
-    const fibers = { ...state.vmState.fibers };
-    if (fibers[fiberId]) {
-      fibers[fiberId] = {
-        ...fibers[fiberId],
-        state: parseFiberState(newState),
-      };
-    }
-
-    return {
-      vmState: { ...state.vmState, fibers },
-      eventHistory: addEvent(state.eventHistory, {
-        timestamp: Date.now(),
-        type: 'fiberStateChanged',
-        details: `Fiber #${fiberId} -> ${newState}`,
-      }),
-    };
-  }),
-
-  addChannel: (channel: ChannelInfo) => set((state) => {
-    const channels = { ...state.vmState?.channels ?? {} };
-    channels[channel.id] = {
-      id: channel.id,
-      buffer: [],
-      capacity: channel.capacity,
-      receivers: [],
-      senders: [],
-      closed: channel.closed,
-    };
-
-    return {
-      vmState: state.vmState
-        ? { ...state.vmState, channels }
-        : { ...initialVmState, channels },
-      eventHistory: addEvent(state.eventHistory, {
-        timestamp: Date.now(),
-        type: 'channelCreated',
-        details: `Channel #${channel.id} created (capacity: ${channel.capacity})`,
-      }),
-    };
-  }),
+  addChannel: (channel: ChannelInfo) => set((state) => ({
+    eventHistory: addEvent(state.eventHistory, {
+      timestamp: Date.now(),
+      type: 'channelCreated',
+      details: `Channel #${channel.id} created (capacity: ${channel.capacity})`,
+    }),
+  })),
 
   recordChannelMessage: (channelId: ChannelId, operation: string, value: string) => set((state) => ({
     eventHistory: addEvent(state.eventHistory, {
