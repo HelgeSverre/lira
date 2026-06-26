@@ -673,29 +673,15 @@ fn debug_event_to_messages(
         }
         DebugEvent::BreakpointHit { line, column, ip } => {
             messages.push(ServerMessage::BreakpointHit { line, column, ip });
-            // Also send current state
-            if let Some(snapshot) = session.get_snapshot() {
-                messages.push(ServerMessage::VmStateUpdate {
-                    state: snapshot_to_vm_state(&snapshot),
-                });
-            }
+            push_current_vm_state(&mut messages, session);
         }
         DebugEvent::StepCompleted { line, column, ip } => {
             messages.push(ServerMessage::StepCompleted { line, column, ip });
-            // Also send current state
-            if let Some(snapshot) = session.get_snapshot() {
-                messages.push(ServerMessage::VmStateUpdate {
-                    state: snapshot_to_vm_state(&snapshot),
-                });
-            }
+            push_current_vm_state(&mut messages, session);
         }
         DebugEvent::Paused { line, column, ip } => {
             messages.push(ServerMessage::Paused { line, column, ip });
-            if let Some(snapshot) = session.get_snapshot() {
-                messages.push(ServerMessage::VmStateUpdate {
-                    state: snapshot_to_vm_state(&snapshot),
-                });
-            }
+            push_current_vm_state(&mut messages, session);
         }
         DebugEvent::Finished { exit_code } => {
             messages.push(ServerMessage::Finished {
@@ -727,6 +713,17 @@ fn debug_event_to_messages(
     }
 
     messages
+}
+
+/// Append the current single-context VM state (locals/stack/call-stack) as a
+/// `VmStateUpdate`, if a snapshot is available. Used by the pause/step/
+/// breakpoint events that should refresh the inspector.
+fn push_current_vm_state(messages: &mut Vec<ServerMessage>, session: &DebugSession) {
+    if let Some(snapshot) = session.get_snapshot() {
+        messages.push(ServerMessage::VmStateUpdate {
+            state: snapshot_to_vm_state(&snapshot),
+        });
+    }
 }
 
 /// Convert DebugSnapshot to VmState for protocol
