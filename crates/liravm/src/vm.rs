@@ -369,15 +369,20 @@ impl VM {
             .fibers
             .values()
             .map(|f| {
-                if Some(f.id) == current {
-                    FiberStateSnapshot {
-                        id: f.id,
-                        state: f.state.clone(),
-                        ip: self.ip,
-                        stack: self.stack.iter().map(RichValue::from_value).collect(),
-                        locals: self.locals.iter().map(RichValue::from_value).collect(),
-                        call_stack: self
-                            .call_stack
+                // The running fiber's live context lives in `self.*` (with
+                // resolvable frame names); parked fibers are read from the
+                // `Fiber` struct (their frames carry no func offset).
+                let (ip, stack, locals, call_stack): (
+                    usize,
+                    Vec<RichValue>,
+                    Vec<RichValue>,
+                    Vec<FiberFrameSnapshot>,
+                ) = if Some(f.id) == current {
+                    (
+                        self.ip,
+                        self.stack.iter().map(RichValue::from_value).collect(),
+                        self.locals.iter().map(RichValue::from_value).collect(),
+                        self.call_stack
                             .iter()
                             .map(|frame| FiberFrameSnapshot {
                                 return_addr: frame.return_addr,
@@ -389,17 +394,13 @@ impl VM {
                                     .map(|s| s.to_string()),
                             })
                             .collect(),
-                        result: f.result.as_ref().map(RichValue::from_value),
-                    }
+                    )
                 } else {
-                    FiberStateSnapshot {
-                        id: f.id,
-                        state: f.state.clone(),
-                        ip: f.ip,
-                        stack: f.stack.iter().map(RichValue::from_value).collect(),
-                        locals: f.locals.iter().map(RichValue::from_value).collect(),
-                        call_stack: f
-                            .call_stack
+                    (
+                        f.ip,
+                        f.stack.iter().map(RichValue::from_value).collect(),
+                        f.locals.iter().map(RichValue::from_value).collect(),
+                        f.call_stack
                             .iter()
                             .map(|frame| FiberFrameSnapshot {
                                 return_addr: frame.return_addr,
@@ -407,8 +408,16 @@ impl VM {
                                 function_name: None,
                             })
                             .collect(),
-                        result: f.result.as_ref().map(RichValue::from_value),
-                    }
+                    )
+                };
+                FiberStateSnapshot {
+                    id: f.id,
+                    state: f.state.clone(),
+                    ip,
+                    stack,
+                    locals,
+                    call_stack,
+                    result: f.result.as_ref().map(RichValue::from_value),
                 }
             })
             .collect();
