@@ -1,11 +1,11 @@
 //! Differential / metamorphic property fuzzer.
 //!
 //! Generates random *well-typed* Lira programs over a small all-`int` subset
-//! (variables, a fixed array, a two-field struct, `+ - *`, plain and compound
-//! assignment, `println`) and checks Lira's actual output against a trivial
-//! Rust oracle that evaluates the same program. Any divergence is a real
-//! compiler/VM bug — this is the class of silent-wrong-output bug that
-//! crash-fuzzing (cargo-fuzz) cannot catch.
+//! (variables, a fixed array, a two-field struct, `+ - *`, comparisons and
+//! booleans, `if`/`else`, bounded `while`, plain and compound assignment,
+//! `println`) and checks Lira's actual output against a trivial Rust oracle
+//! that evaluates the same program. Any divergence is a real compiler/VM bug —
+//! the silent-wrong-output class that crash-fuzzing cannot catch.
 //!
 //! It would have caught both bugs found by hand:
 //!   * `main()` double-invocation — each program is rendered three ways
@@ -17,8 +17,9 @@
 //! Divergence sources are engineered out so a failure means a bug, not a
 //! subset gap: no division/modulo (no div-by-zero), only in-range literal
 //! indices (no out-of-bounds), small literals + wrapping arithmetic (integer
-//! semantics match), and fully-parenthesized rendering (evaluation order
-//! matches the oracle tree).
+//! semantics match), fully-parenthesized rendering (evaluation order matches
+//! the oracle tree), and `while` loops run a fixed number of iterations via a
+//! hidden counter (guaranteed termination on both sides).
 
 use proptest::prelude::*;
 
@@ -51,12 +52,54 @@ impl BinOp {
 }
 
 #[derive(Clone, Debug)]
+enum CmpOp {
+    Lt,
+    Gt,
+    Le,
+    Ge,
+    Eq,
+    Ne,
+}
+
+impl CmpOp {
+    fn eval(&self, a: i64, b: i64) -> bool {
+        match self {
+            CmpOp::Lt => a < b,
+            CmpOp::Gt => a > b,
+            CmpOp::Le => a <= b,
+            CmpOp::Ge => a >= b,
+            CmpOp::Eq => a == b,
+            CmpOp::Ne => a != b,
+        }
+    }
+    fn sym(&self) -> &'static str {
+        match self {
+            CmpOp::Lt => "<",
+            CmpOp::Gt => ">",
+            CmpOp::Le => "<=",
+            CmpOp::Ge => ">=",
+            CmpOp::Eq => "==",
+            CmpOp::Ne => "!=",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 enum Expr {
     Lit(i64),
     Var(usize),
     Arr(usize),
     Field(usize),
     Bin(BinOp, Box<Expr>, Box<Expr>),
+}
+
+#[derive(Clone, Debug)]
+enum Bool {
+    Lit(bool),
+    Cmp(CmpOp, Expr, Expr),
+    And(Box<Bool>, Box<Bool>),
+    Or(Box<Bool>, Box<Bool>),
+    Not(Box<Bool>),
 }
 
 #[derive(Clone, Debug)]
@@ -71,6 +114,8 @@ enum Stmt {
     Assign(LVal, Expr),
     Compound(LVal, BinOp, Expr),
     Print(Expr),
+    If(Bool, Vec<Stmt>, Vec<Stmt>),
+    While(u32, Vec<Stmt>),
 }
 
 #[derive(Clone, Debug)]
@@ -100,17 +145,21 @@ fn eval(e: &Expr, s: &State) -> i64 {
     }
 }
 
-fn oracle(prog: &Program) -> Vec<i64> {
-    let mut s = State {
-        vars: [0; NVARS],
-        arr: [0; NARR],
-        fields: [0; NFIELDS],
-    };
-    let mut out = Vec::new();
-    for stmt in &prog.stmts {
+fn eval_bool(b: &Bool, s: &State) -> bool {
+    match b {
+        Bool::Lit(v) => *v,
+        Bool::Cmp(op, a, b) => op.eval(eval(a, s), eval(b, s)),
+        Bool::And(a, b) => eval_bool(a, s) && eval_bool(b, s),
+        Bool::Or(a, b) => eval_bool(a, s) || eval_bool(b, s),
+        Bool::Not(a) => !eval_bool(a, s),
+    }
+}
+
+fn exec(stmts: &[Stmt], s: &mut State, out: &mut Vec<i64>) {
+    for stmt in stmts {
         match stmt {
             Stmt::Assign(lv, e) => {
-                let v = eval(e, &s);
+                let v = eval(e, s);
                 match lv {
                     LVal::Var(i) => s.vars[*i] = v,
                     LVal::Arr(i) => s.arr[*i] = v,
@@ -118,7 +167,7 @@ fn oracle(prog: &Program) -> Vec<i64> {
                 }
             }
             Stmt::Compound(lv, op, e) => {
-                let rhs = eval(e, &s);
+                let rhs = eval(e, s);
                 let slot = match lv {
                     LVal::Var(i) => &mut s.vars[*i],
                     LVal::Arr(i) => &mut s.arr[*i],
@@ -126,9 +175,31 @@ fn oracle(prog: &Program) -> Vec<i64> {
                 };
                 *slot = op.eval(*slot, rhs);
             }
-            Stmt::Print(e) => out.push(eval(e, &s)),
+            Stmt::Print(e) => out.push(eval(e, s)),
+            Stmt::If(cond, then_b, else_b) => {
+                if eval_bool(cond, s) {
+                    exec(then_b, s, out);
+                } else {
+                    exec(else_b, s, out);
+                }
+            }
+            Stmt::While(bound, body) => {
+                for _ in 0..*bound {
+                    exec(body, s, out);
+                }
+            }
         }
     }
+}
+
+fn oracle(prog: &Program) -> Vec<i64> {
+    let mut s = State {
+        vars: [0; NVARS],
+        arr: [0; NARR],
+        fields: [0; NFIELDS],
+    };
+    let mut out = Vec::new();
+    exec(&prog.stmts, &mut s, &mut out);
     out
 }
 
@@ -154,6 +225,16 @@ fn render_expr(e: &Expr) -> String {
     }
 }
 
+fn render_bool(b: &Bool) -> String {
+    match b {
+        Bool::Lit(v) => v.to_string(),
+        Bool::Cmp(op, a, b) => format!("({} {} {})", render_expr(a), op.sym(), render_expr(b)),
+        Bool::And(a, b) => format!("({} && {})", render_bool(a), render_bool(b)),
+        Bool::Or(a, b) => format!("({} || {})", render_bool(a), render_bool(b)),
+        Bool::Not(a) => format!("(!{})", render_bool(a)),
+    }
+}
+
 fn render_lval(lv: &LVal) -> String {
     match lv {
         LVal::Var(i) => format!("v{}", i),
@@ -162,32 +243,59 @@ fn render_lval(lv: &LVal) -> String {
     }
 }
 
-fn render(prog: &Program) -> String {
-    let mut body = String::new();
-    // Initialize all state to zero.
-    for i in 0..NVARS {
-        body.push_str(&format!("var v{} = 0\n", i));
-    }
-    body.push_str("var arr = [0, 0, 0, 0]\n");
-    body.push_str("var s = S { f0: 0, f1: 0 }\n");
-    for stmt in &prog.stmts {
+/// Render a statement list. `loop_id` hands out unique hidden loop-counter
+/// names so nested `while`s don't collide.
+fn render_stmts(stmts: &[Stmt], out: &mut String, indent: usize, loop_id: &mut usize) {
+    let pad = "    ".repeat(indent);
+    for stmt in stmts {
         match stmt {
             Stmt::Assign(lv, e) => {
-                body.push_str(&format!("{} = {}\n", render_lval(lv), render_expr(e)));
+                out.push_str(&format!("{}{} = {}\n", pad, render_lval(lv), render_expr(e)));
             }
             Stmt::Compound(lv, op, e) => {
-                body.push_str(&format!(
-                    "{} {}= {}\n",
+                out.push_str(&format!(
+                    "{}{} {}= {}\n",
+                    pad,
                     render_lval(lv),
                     op.sym(),
                     render_expr(e)
                 ));
             }
             Stmt::Print(e) => {
-                body.push_str(&format!("println({})\n", render_expr(e)));
+                out.push_str(&format!("{}println({})\n", pad, render_expr(e)));
+            }
+            Stmt::If(cond, then_b, else_b) => {
+                out.push_str(&format!("{}if {} {{\n", pad, render_bool(cond)));
+                render_stmts(then_b, out, indent + 1, loop_id);
+                out.push_str(&format!("{}}} else {{\n", pad));
+                render_stmts(else_b, out, indent + 1, loop_id);
+                out.push_str(&format!("{}}}\n", pad));
+            }
+            Stmt::While(bound, body) => {
+                // Bounded loop via a fresh hidden counter the body can't touch.
+                let id = *loop_id;
+                *loop_id += 1;
+                out.push_str(&format!("{}var __i{} = 0\n", pad, id));
+                out.push_str(&format!("{}while __i{} < {} {{\n", pad, id, bound));
+                render_stmts(body, out, indent + 1, loop_id);
+                out.push_str(&format!("{}    __i{} = __i{} + 1\n", pad, id, id));
+                out.push_str(&format!("{}}}\n", pad));
             }
         }
     }
+}
+
+fn render(prog: &Program) -> String {
+    let mut body = String::new();
+    let indent = if prog.wrap_in_main { 1 } else { 0 };
+    let pad = "    ".repeat(indent);
+    for i in 0..NVARS {
+        body.push_str(&format!("{}var v{} = 0\n", pad, i));
+    }
+    body.push_str(&format!("{}var arr = [0, 0, 0, 0]\n", pad));
+    body.push_str(&format!("{}var s = S {{ f0: 0, f1: 0 }}\n", pad));
+    let mut loop_id = 0usize;
+    render_stmts(&prog.stmts, &mut body, indent, &mut loop_id);
 
     let mut src = String::from("struct S { f0: int, f1: int }\n");
     if prog.wrap_in_main {
@@ -211,6 +319,17 @@ fn binop() -> impl Strategy<Value = BinOp> {
     prop_oneof![Just(BinOp::Add), Just(BinOp::Sub), Just(BinOp::Mul)]
 }
 
+fn cmpop() -> impl Strategy<Value = CmpOp> {
+    prop_oneof![
+        Just(CmpOp::Lt),
+        Just(CmpOp::Gt),
+        Just(CmpOp::Le),
+        Just(CmpOp::Ge),
+        Just(CmpOp::Eq),
+        Just(CmpOp::Ne),
+    ]
+}
+
 fn expr() -> impl Strategy<Value = Expr> {
     let leaf = prop_oneof![
         (-20i64..20).prop_map(Expr::Lit),
@@ -224,6 +343,21 @@ fn expr() -> impl Strategy<Value = Expr> {
     })
 }
 
+fn bool_expr() -> impl Strategy<Value = Bool> {
+    let leaf = prop_oneof![
+        any::<bool>().prop_map(Bool::Lit),
+        (cmpop(), expr(), expr()).prop_map(|(op, a, b)| Bool::Cmp(op, a, b)),
+    ];
+    leaf.prop_recursive(2, 8, 2, |inner| {
+        prop_oneof![
+            (inner.clone(), inner.clone())
+                .prop_map(|(a, b)| Bool::And(Box::new(a), Box::new(b))),
+            (inner.clone(), inner.clone()).prop_map(|(a, b)| Bool::Or(Box::new(a), Box::new(b))),
+            inner.prop_map(|a| Bool::Not(Box::new(a))),
+        ]
+    })
+}
+
 fn lval() -> impl Strategy<Value = LVal> {
     prop_oneof![
         (0usize..NVARS).prop_map(LVal::Var),
@@ -233,16 +367,27 @@ fn lval() -> impl Strategy<Value = LVal> {
 }
 
 fn stmt() -> impl Strategy<Value = Stmt> {
-    prop_oneof![
+    let leaf = prop_oneof![
         (lval(), expr()).prop_map(|(l, e)| Stmt::Assign(l, e)),
         (lval(), binop(), expr()).prop_map(|(l, o, e)| Stmt::Compound(l, o, e)),
         expr().prop_map(Stmt::Print),
-    ]
+    ];
+    leaf.prop_recursive(3, 40, 3, |inner| {
+        prop_oneof![
+            (
+                bool_expr(),
+                prop::collection::vec(inner.clone(), 1..4),
+                prop::collection::vec(inner.clone(), 1..4),
+            )
+                .prop_map(|(c, t, e)| Stmt::If(c, t, e)),
+            (1u32..5, prop::collection::vec(inner, 1..4)).prop_map(|(n, b)| Stmt::While(n, b)),
+        ]
+    })
 }
 
 fn program() -> impl Strategy<Value = Program> {
     (
-        prop::collection::vec(stmt(), 1..12),
+        prop::collection::vec(stmt(), 1..10),
         any::<bool>(),
         any::<bool>(),
     )

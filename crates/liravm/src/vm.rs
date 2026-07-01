@@ -1173,7 +1173,7 @@ impl VM {
                 let b = self.pop()?;
                 let a = self.pop()?;
                 let result = match (&a, &b) {
-                    (Value::Int(a), Value::Int(b)) => Value::Int(a + b),
+                    (Value::Int(a), Value::Int(b)) => Value::Int(a.wrapping_add(*b)),
                     (Value::Float(a), Value::Float(b)) => Value::Float(a + b),
                     (Value::Int(a), Value::Float(b)) => Value::Float(*a as f64 + b),
                     (Value::Float(a), Value::Int(b)) => Value::Float(a + *b as f64),
@@ -1197,7 +1197,7 @@ impl VM {
                 let b = self.pop()?;
                 let a = self.pop()?;
                 let result = match (&a, &b) {
-                    (Value::Int(a), Value::Int(b)) => Value::Int(a - b),
+                    (Value::Int(a), Value::Int(b)) => Value::Int(a.wrapping_sub(*b)),
                     (Value::Float(a), Value::Float(b)) => Value::Float(a - b),
                     (Value::Int(a), Value::Float(b)) => Value::Float(*a as f64 - b),
                     (Value::Float(a), Value::Int(b)) => Value::Float(a - *b as f64),
@@ -1216,7 +1216,7 @@ impl VM {
                 let b = self.pop()?;
                 let a = self.pop()?;
                 let result = match (&a, &b) {
-                    (Value::Int(a), Value::Int(b)) => Value::Int(a * b),
+                    (Value::Int(a), Value::Int(b)) => Value::Int(a.wrapping_mul(*b)),
                     (Value::Float(a), Value::Float(b)) => Value::Float(a * b),
                     (Value::Int(a), Value::Float(b)) => Value::Float(*a as f64 * b),
                     (Value::Float(a), Value::Int(b)) => Value::Float(a * *b as f64),
@@ -1280,7 +1280,7 @@ impl VM {
             Opcode::Neg => {
                 let a = self.pop()?;
                 let result = match a {
-                    Value::Int(n) => Value::Int(-n),
+                    Value::Int(n) => Value::Int(n.wrapping_neg()),
                     Value::Float(f) => Value::Float(-f),
                     _ => return Err(format!("Cannot negate {}", a.type_name())),
                 };
@@ -1295,7 +1295,7 @@ impl VM {
                         if *exp < 0 {
                             return Err("Negative exponent not supported for integers".to_string());
                         }
-                        Value::Int(base.pow(*exp as u32))
+                        Value::Int(base.wrapping_pow(*exp as u32))
                     }
                     (Value::Float(base), Value::Float(exp)) => Value::Float(base.powf(*exp)),
                     (Value::Int(base), Value::Float(exp)) => {
