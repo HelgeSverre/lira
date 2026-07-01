@@ -1,0 +1,33 @@
+# cargo-mutants configuration.
+#
+# Mutation testing: cargo-mutants edits the compiler/VM source (e.g. turns a
+# `+` into `-`, replaces a function body with a no-op) and re-runs the tests.
+# A *surviving* mutant means no test noticed the change — i.e. that logic is
+# untested. Both hand-found bugs (main() double-invoke, field/element
+# assignment no-op) lived in exactly such untested code.
+#
+# Full run:      cargo mutants
+# Scoped/fast:   cargo mutants --file crates/lirac/src/codegen.rs
+# Survivors:     cargo mutants -o mutants.out   (see mutants.out/outcomes.json)
+#
+# A full run is slow (~14s/mutant × thousands). Prefer scoping by --file, or run
+# it as a nightly CI job. Exclude the non-semantic crates so effort concentrates
+# on the language core (lira-core, lirac, liravm).
+
+exclude_globs = [
+    "lira-playground/**",
+    "crates/lira-lsp/**",
+    "crates/lira-doc/**",
+    "crates/lira-spec/**",
+]
+
+# Generated/boilerplate mutations that are noise rather than signal.
+exclude_re = [
+    "impl Debug",
+    "impl Display",
+    "replace .* with String::new\\(\\)",
+]
+
+# The suite is fast, but give slow mutants headroom over the baseline.
+timeout_multiplier = 3.0
+minimum_test_timeout = 60
