@@ -72,7 +72,7 @@ import Code from "../components/Code.astro";
 
     <h2>Why receiving uses select</h2>
     <p>
-      Here is the one gotcha worth internalizing early.
+      There is one gotcha to learn early.
       <code>recv(ch)</code> <strong>blocks</strong> until a value arrives — but
       as an <em>expression</em> it evaluates to an <strong>ok-bool</strong>
       (true while the channel is open), not to the value you received. So

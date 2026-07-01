@@ -196,7 +196,7 @@ const groups = [
     id: "system",
     title: "System & I/O",
     intro:
-      "Thin, honest wrappers around runtime builtins: file handles, the system clock, the filesystem, and environment variables. Output depends on the host, so these are listed by signature.",
+      "Thin wrappers around runtime builtins: file handles, the system clock, the filesystem, and environment variables. Output depends on the host, so these are listed by signature.",
     modules: [
       {
         name: "io",
@@ -328,7 +328,7 @@ const groups = [
     </p>
 
     <aside class="callout callout--note">
-      <span class="callout__label">Honest by construction</span>
+      <span class="callout__label">Read from the source</span>
       <p>
         There is no <code>std.crypto</code> and no <code>std.process</code> — if
         you saw those elsewhere, they don't exist. The modules and signatures on
@@ -394,8 +394,8 @@ const groups = [
       Every module below imports cleanly today. The <span class="tag tag--pure"
         >pure</span
       > ones are self-contained Lira you can read end to end (and the examples in
-      this page run them); the <span class="tag tag--io">I/O</span> ones are thin,
-      honest wrappers around runtime builtins — file handles, sockets, the system
+      this page run them); the <span class="tag tag--io">I/O</span> ones are thin
+      wrappers around runtime builtins — file handles, sockets, the system
       clock, env vars — so they are documented by signature.
     </p>
 
@@ -483,7 +483,7 @@ const groups = [
                   and atomics are deliberately omitted — they need{" "}
                   <code>Drop</code> or have no meaningful semantics on a
                   cooperative VM. <code>std.sync</code> ships only what it can
-                  implement honestly: <code>IntMutex</code>,{" "}
+                  implement cleanly: <code>IntMutex</code>,{" "}
                   <code>StringMutex</code>, <code>WaitGroup</code>, and{" "}
                   <code>Semaphore</code>.
                 </p>
