@@ -10,14 +10,11 @@
 // Target is https://quotes.toscrape.com — a sandbox site built for scraping
 // practice, so crawling it is expected and polite.
 //
-// NOTE ON PARALLELISM: fibers are cooperative green threads on a single OS
-// thread. This program exercises the full concurrency *model* — worker pool,
-// `spawn`, channels, `select`, fan-out/fan-in — correctly. But `http_get` is
-// today a *blocking* syscall that does not yield to the scheduler, so the
-// fetches do not actually overlap: wall-clock time is ~the same as fetching
-// sequentially. True I/O parallelism needs an async-I/O / netpoller layer that
-// parks a fiber while its request is in flight (a known gap). This example is
-// still the right way to *structure* concurrent work in Lira.
+// PARALLELISM: fibers are cooperative green threads on one VM thread, but
+// blocking syscalls like `http_get` are offloaded to an I/O thread pool and the
+// calling fiber is parked until the result arrives — so the fetches genuinely
+// overlap. With 8 workers this crawl runs several times faster than fetching
+// sequentially.
 //
 // Makes real network requests, so it is skipped by the test suite. Run it with:
 //   lira run examples/concurrent_crawler.li

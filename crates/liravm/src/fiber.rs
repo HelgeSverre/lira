@@ -46,6 +46,9 @@ pub enum FiberState {
     BlockedSend(ChannelId),
     /// Blocked on select
     BlockedSelect,
+    /// Blocked waiting on an offloaded blocking syscall (e.g. an HTTP request
+    /// running on the I/O thread pool). Woken when the pool delivers the result.
+    BlockedIo,
     /// Yielded voluntarily
     Yielded,
     /// Finished execution
@@ -309,6 +312,37 @@ impl Scheduler {
             self.current = None;
         }
         self.time_slice = self.default_time_slice;
+    }
+
+    /// Park the current fiber on an offloaded blocking syscall. The caller has
+    /// already `save_fiber_state`d it and submitted the job to the I/O pool;
+    /// clearing `current` hands control back to the outer scheduler loop, which
+    /// runs other fibers (or waits on the pool) until this one is woken.
+    pub fn block_current_on_io(&mut self) {
+        if let Some(current_id) = self.current.take() {
+            if let Some(fiber) = self.fibers.get_mut(&current_id) {
+                fiber.state = FiberState::BlockedIo;
+                self.emit_event(FiberEvent::FiberStateChanged {
+                    fiber_id: current_id,
+                    new_state: "BlockedIo".to_string(),
+                });
+            }
+        }
+    }
+
+    /// Wake a fiber parked on I/O: push the syscall's result onto its saved
+    /// stack (where the resumed code expects the return value) and re-queue it.
+    /// Mirrors the channel-receive handoff.
+    pub fn wake_io(&mut self, fiber_id: FiberId, result: Value) {
+        if let Some(fiber) = self.fibers.get_mut(&fiber_id) {
+            fiber.stack.push(result);
+            fiber.state = FiberState::Ready;
+            self.emit_event(FiberEvent::FiberStateChanged {
+                fiber_id,
+                new_state: "Ready".to_string(),
+            });
+            self.ready_queue.push_back(fiber_id);
+        }
     }
 
     /// Tick the time slice counter, returns true if should yield

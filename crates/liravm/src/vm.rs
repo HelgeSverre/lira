@@ -128,6 +128,10 @@ pub struct VM {
     /// fiber and first-scheduled). Shared by `run_inner` and the stepping path
     /// so the bootstrap happens exactly once per execution.
     fiber_runtime_started: bool,
+    /// Thread pool for offloading blocking syscalls (HTTP) so they run in
+    /// parallel instead of stalling the single VM thread. Created lazily on the
+    /// first offloaded call; programs without blocking I/O spawn no threads.
+    io_pool: Option<crate::io_pool::IoPool>,
     /// Exit code captured when the main fiber finishes
     main_exit_code: i32,
     /// Saved native call stacks per fiber. The VM-native `CallFrame` carries
@@ -175,6 +179,7 @@ impl VM {
             scheduler,
             fiber_mode: false,
             fiber_runtime_started: false,
+            io_pool: None,
             runtime: Runtime::new(),
             output: Vec::new(),
             capture_output: false,
@@ -770,6 +775,56 @@ impl VM {
         }
     }
 
+    /// Offload a blocking syscall to the I/O pool and park the current fiber.
+    /// The caller must have already popped the syscall's arguments; `job`
+    /// carries the current fiber's id so the result routes back to it. `ip` is
+    /// past the syscall, so the fiber resumes just after it with the result on
+    /// its stack (pushed by [`Self::deliver_io`] when the pool completes).
+    fn offload_io(&mut self, job: crate::io_pool::IoJob) {
+        self.save_fiber_state();
+        self.io_pool
+            .get_or_insert_with(crate::io_pool::IoPool::new)
+            .submit(job);
+        self.scheduler.block_current_on_io();
+    }
+
+    /// Jobs submitted to the I/O pool but not yet harvested.
+    fn io_pending(&self) -> usize {
+        self.io_pool.as_ref().map_or(0, |p| p.pending())
+    }
+
+    /// The fiber to park if a blocking syscall should be offloaded — `Some`
+    /// only in fiber mode with a running fiber. `None` runs the syscall inline
+    /// (sequential programs, where there is no scheduler to hand control to).
+    fn io_offload_target(&self) -> Option<FiberId> {
+        if self.fiber_mode {
+            self.scheduler.current
+        } else {
+            None
+        }
+    }
+
+    /// Wake every fiber whose offloaded I/O has already completed.
+    fn harvest_io(&mut self) {
+        let completed = match self.io_pool.as_mut() {
+            Some(pool) => pool.drain_completed(),
+            None => return,
+        };
+        for comp in completed {
+            self.deliver_io(comp);
+        }
+    }
+
+    /// Build the `[status, body]` result on the VM thread and wake the fiber.
+    fn deliver_io(&mut self, comp: crate::io_pool::IoCompletion) {
+        let arr = vec![
+            Value::Int(comp.status),
+            Value::String(Rc::new(comp.body)),
+        ];
+        let value = Value::Array(Gc::new(GcCell::new(arr)));
+        self.scheduler.wake_io(comp.fiber, value);
+    }
+
     /// Run the program loop without attaching a source location to errors.
     ///
     /// This holds the actual execution loop; [`VM::run`] wraps it to prefix the
@@ -790,15 +845,29 @@ impl VM {
             // scheduler to pick the next runnable fiber. Sequential programs
             // never reach this branch: main stays Running until it Halts.
             if self.fiber_mode && self.scheduler.current.is_none() {
+                // Wake any fibers whose offloaded I/O finished while others ran.
+                self.harvest_io();
                 match self.scheduler.schedule() {
                     Some(_) => self.load_fiber_state(),
                     None => {
-                        if self.scheduler.is_deadlocked() {
+                        // Nothing runnable right now.
+                        if self.io_pending() > 0 {
+                            // Blocking I/O is in flight; wait for a completion to
+                            // wake a fiber rather than declaring deadlock. Loop
+                            // back so the scheduler runs the now-ready fiber.
+                            let comp = self.io_pool.as_mut().and_then(|p| p.wait_one());
+                            if let Some(comp) = comp {
+                                self.deliver_io(comp);
+                            }
+                            continue;
+                        } else if self.scheduler.is_deadlocked() {
                             return Err("deadlock: all fibers are blocked".to_string());
-                        }
-                        if !self.scheduler.has_runnable() {
+                        } else if !self.scheduler.has_runnable() {
                             return Ok(self.main_exit_code);
                         }
+                        // Runnable exists but wasn't selected this pass; retry
+                        // rather than falling through with no current fiber.
+                        continue;
                     }
                 }
             }
@@ -2702,49 +2771,54 @@ impl VM {
             // http_get(url: string) -> [int, string] (status, body)
             120 => {
                 let url = self.pop()?;
-                match &url {
-                    Value::String(url) => {
-                        match self.runtime.http_get(url) {
-                            Ok((status, _headers, body)) => {
-                                // Return array [status, body]
-                                let arr = vec![Value::Int(status), Value::String(Rc::new(body))];
-                                self.stack.push(Value::Array(Gc::new(GcCell::new(arr))));
-                                Ok(())
-                            }
-                            Err(e) => {
-                                // Return error as [-1, error_message]
-                                let arr = vec![Value::Int(-1), Value::String(Rc::new(e))];
-                                self.stack.push(Value::Array(Gc::new(GcCell::new(arr))));
-                                Ok(())
-                            }
-                        }
-                    }
-                    _ => Err("http_get requires string argument".to_string()),
+                let Value::String(url) = &url else {
+                    return Err("http_get requires string argument".to_string());
+                };
+                let url = (**url).clone();
+                // In fiber mode, offload the blocking request to the I/O pool and
+                // park this fiber so other fibers run (and other requests overlap).
+                if let Some(fiber) = self.io_offload_target() {
+                    self.offload_io(crate::io_pool::IoJob::HttpGet { fiber, url });
+                    return Ok(());
                 }
+                // Sequential path: block inline.
+                let (status, body) = match self.runtime.http_get(&url) {
+                    Ok((status, _headers, body)) => (status, body),
+                    Err(e) => (-1, e),
+                };
+                let arr = vec![Value::Int(status), Value::String(Rc::new(body))];
+                self.stack.push(Value::Array(Gc::new(GcCell::new(arr))));
+                Ok(())
             }
             // http_post(url: string, body: string, content_type: string) -> [int, string]
             121 => {
                 let content_type = self.pop()?;
                 let body = self.pop()?;
                 let url = self.pop()?;
-                match (&url, &body, &content_type) {
-                    (Value::String(url), Value::String(body), Value::String(content_type)) => {
-                        match self.runtime.http_post(url, body, content_type) {
-                            Ok((status, _headers, response_body)) => {
-                                let arr =
-                                    vec![Value::Int(status), Value::String(Rc::new(response_body))];
-                                self.stack.push(Value::Array(Gc::new(GcCell::new(arr))));
-                                Ok(())
-                            }
-                            Err(e) => {
-                                let arr = vec![Value::Int(-1), Value::String(Rc::new(e))];
-                                self.stack.push(Value::Array(Gc::new(GcCell::new(arr))));
-                                Ok(())
-                            }
-                        }
-                    }
-                    _ => Err("http_post requires (string, string, string) arguments".to_string()),
+                let (Value::String(url), Value::String(body), Value::String(content_type)) =
+                    (&url, &body, &content_type)
+                else {
+                    return Err("http_post requires (string, string, string) arguments".to_string());
+                };
+                let (url, body, content_type) =
+                    ((**url).clone(), (**body).clone(), (**content_type).clone());
+                if let Some(fiber) = self.io_offload_target() {
+                    self.offload_io(crate::io_pool::IoJob::HttpPost {
+                        fiber,
+                        url,
+                        body,
+                        content_type,
+                    });
+                    return Ok(());
                 }
+                let (status, response_body) = match self.runtime.http_post(&url, &body, &content_type)
+                {
+                    Ok((status, _headers, response_body)) => (status, response_body),
+                    Err(e) => (-1, e),
+                };
+                let arr = vec![Value::Int(status), Value::String(Rc::new(response_body))];
+                self.stack.push(Value::Array(Gc::new(GcCell::new(arr))));
+                Ok(())
             }
             // http_request(method: string, url: string, headers: string, body: string) -> [int, string]
             122 => {
@@ -2752,30 +2826,42 @@ impl VM {
                 let headers = self.pop()?;
                 let url = self.pop()?;
                 let method = self.pop()?;
-                match (&method, &url, &headers, &body) {
-                    (
-                        Value::String(method),
-                        Value::String(url),
-                        Value::String(headers),
-                        Value::String(body),
-                    ) => match self.runtime.http_request(method, url, headers, body) {
-                        Ok((status, response_body)) => {
-                            let arr =
-                                vec![Value::Int(status), Value::String(Rc::new(response_body))];
-                            self.stack.push(Value::Array(Gc::new(GcCell::new(arr))));
-                            Ok(())
-                        }
-                        Err(e) => {
-                            let arr = vec![Value::Int(-1), Value::String(Rc::new(e))];
-                            self.stack.push(Value::Array(Gc::new(GcCell::new(arr))));
-                            Ok(())
-                        }
-                    },
-                    _ => Err(
+                let (
+                    Value::String(method),
+                    Value::String(url),
+                    Value::String(headers),
+                    Value::String(body),
+                ) = (&method, &url, &headers, &body)
+                else {
+                    return Err(
                         "http_request requires (string, string, string, string) arguments"
                             .to_string(),
-                    ),
+                    );
+                };
+                let (method, url, headers, body) = (
+                    (**method).clone(),
+                    (**url).clone(),
+                    (**headers).clone(),
+                    (**body).clone(),
+                );
+                if let Some(fiber) = self.io_offload_target() {
+                    self.offload_io(crate::io_pool::IoJob::HttpRequest {
+                        fiber,
+                        method,
+                        url,
+                        headers,
+                        body,
+                    });
+                    return Ok(());
                 }
+                let (status, response_body) =
+                    match self.runtime.http_request(&method, &url, &headers, &body) {
+                        Ok((status, response_body)) => (status, response_body),
+                        Err(e) => (-1, e),
+                    };
+                let arr = vec![Value::Int(status), Value::String(Rc::new(response_body))];
+                self.stack.push(Value::Array(Gc::new(GcCell::new(arr))));
+                Ok(())
             }
 
             // ================================================================

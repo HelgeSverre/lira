@@ -1081,9 +1081,14 @@ impl Runtime {
             .join("\n")
     }
 
-    /// HTTP GET request
-    /// Returns (status_code, headers, body) or error
+    /// HTTP GET request. Returns (status_code, headers, body) or error.
     pub fn http_get(&self, url: &str) -> Result<(i64, String, String), String> {
+        Self::http_get_blocking(url)
+    }
+
+    /// Blocking HTTP GET with no `&self` — safe to run on the I/O thread pool
+    /// (it only touches owned data and builds its own agent).
+    pub(crate) fn http_get_blocking(url: &str) -> Result<(i64, String, String), String> {
         let req = ureq::http::Request::get(url)
             .body(())
             .map_err(|e| format!("Invalid request: {}", e))?;
@@ -1096,10 +1101,18 @@ impl Runtime {
         Ok((status, headers, body))
     }
 
-    /// HTTP POST request
-    /// Returns (status_code, headers, body) or error
+    /// HTTP POST request. Returns (status_code, headers, body) or error.
     pub fn http_post(
         &self,
+        url: &str,
+        body: &str,
+        content_type: &str,
+    ) -> Result<(i64, String, String), String> {
+        Self::http_post_blocking(url, body, content_type)
+    }
+
+    /// Blocking HTTP POST with no `&self` — safe to run off the VM thread.
+    pub(crate) fn http_post_blocking(
         url: &str,
         body: &str,
         content_type: &str,
@@ -1117,10 +1130,19 @@ impl Runtime {
         Ok((status, headers, resp_body))
     }
 
-    /// HTTP request with custom method and headers
-    /// Returns (status_code, body) or error
+    /// HTTP request with custom method and headers. Returns (status_code, body).
     pub fn http_request(
         &self,
+        method: &str,
+        url: &str,
+        headers_str: &str,
+        body: &str,
+    ) -> Result<(i64, String), String> {
+        Self::http_request_blocking(method, url, headers_str, body)
+    }
+
+    /// Blocking custom HTTP request with no `&self` — safe to run off the VM thread.
+    pub(crate) fn http_request_blocking(
         method: &str,
         url: &str,
         headers_str: &str,

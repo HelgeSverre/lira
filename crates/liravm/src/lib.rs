@@ -12,6 +12,7 @@ pub mod bytecode;
 pub mod debug;
 pub mod debug_session;
 pub mod fiber;
+pub mod io_pool;
 pub mod runtime;
 pub mod value;
 pub mod vm;

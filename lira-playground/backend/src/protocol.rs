@@ -281,6 +281,7 @@ pub enum FiberStateValue {
         channel_id: u64,
     },
     BlockedSelect,
+    BlockedIo,
     Yielded,
     Finished,
     Failed {
@@ -393,6 +394,7 @@ impl FiberStateValue {
             FiberState::BlockedReceive(ch) => FiberStateValue::BlockedReceive { channel_id: *ch },
             FiberState::BlockedSend(ch) => FiberStateValue::BlockedSend { channel_id: *ch },
             FiberState::BlockedSelect => FiberStateValue::BlockedSelect,
+            FiberState::BlockedIo => FiberStateValue::BlockedIo,
             FiberState::Yielded => FiberStateValue::Yielded,
             FiberState::Finished => FiberStateValue::Finished,
             FiberState::Failed(e) => FiberStateValue::Failed { error: e.clone() },
