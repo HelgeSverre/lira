@@ -21,6 +21,24 @@ interface Props {
 
 const { file, code, filename } = Astro.props as Props;
 
+// The .li files double as test cases, so many carry a header of test
+// scaffolding — `// @expect:`/`// @skip` directives and a "// Test ..." title.
+// That's noise on the page (the directives stay in the files for the test
+// harness); strip it before rendering. Genuine explanatory comments are kept.
+function stripScaffolding(src: string): string {
+  let lines = src.split("\n");
+  // Drop `// @expect...`, `// @expect-error`, `// @expect-contains`, `// @skip`.
+  lines = lines.filter((l) => !/^\s*\/\/\s*@(expect|skip)\b/.test(l));
+  // Drop a leading "// Test ..." title line and any now-leading blank lines.
+  while (
+    lines.length &&
+    (lines[0].trim() === "" || /^\/\/\s*Test\b/i.test(lines[0].trim()))
+  ) {
+    lines.shift();
+  }
+  return lines.join("\n");
+}
+
 let source = code ?? "";
 let caption = filename;
 
@@ -31,6 +49,8 @@ if (file) {
   source = readFileSync(resolve(repoRoot, file), "utf-8").trimEnd();
   caption = caption ?? file.split("/").pop();
 }
+
+source = stripScaffolding(source);
 
 const highlighted = await codeToHtml(source, {
   lang: { ...liraGrammar, name: "lira", scopeName: "source.lira" } as any,

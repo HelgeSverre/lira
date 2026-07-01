@@ -5,28 +5,37 @@ import Starfield from "../components/Starfield.astro";
 
 const github = "https://github.com/HelgeSverre/lira";
 
-// Each feature card embeds a real, verified .li file. The check:examples
+// Each feature row embeds a real, verified .li file. The check:examples
 // harness runs every one of these through the compiler before each build.
+// Snippets are kept to a similar length so the alternating rows stay balanced.
 const features = [
   {
+    kicker: "Concurrency",
     title: "Fibers and channels",
-    body: "Spawn lightweight fibers and coordinate them over typed channels. Receive with a bound select — no shared-memory guesswork.",
+    body: "Spawn lightweight fibers and coordinate them over typed channels. Receive with a bound select — the value lands in a variable, with no shared-memory guesswork.",
     file: "website/src/snippets/concurrency.li",
+    filename: "concurrency.li",
   },
   {
-    title: "Pattern matching",
-    body: "Match on literals, bindings, guards, and tuple patterns — including nested tuples. The checker enforces exhaustiveness.",
-    file: "examples/pattern_tuple_literals.li",
+    kicker: "Pattern matching",
+    title: "Match on shape, exhaustively",
+    body: "Destructure with literals, bindings, and nested tuples. The checker enforces exhaustiveness, so an unhandled case is a compile error — not a runtime surprise.",
+    file: "website/src/snippets/patterns-tuples.li",
+    filename: "patterns.li",
   },
   {
-    title: "Generics and generic enums",
-    body: "Write generic functions, structs, and enums. Build your own Option- or Result-shaped types with full type checking.",
-    file: "examples/generic_enum.li",
+    kicker: "Generics",
+    title: "Build your own Option and Result",
+    body: "Write generic functions, structs, and enums. Roll Option- or Result-shaped types yourself — fully type-checked, then erased at runtime.",
+    file: "website/src/snippets/patterns-option.li",
+    filename: "option.li",
   },
   {
+    kicker: "Error handling",
     title: "Errors as values",
-    body: "Return Result, propagate failures with ?, and handle them by matching. No exceptions, no surprises.",
+    body: "Return Result, propagate failures with the ? operator, and handle them by matching. No exceptions, no hidden control flow.",
     file: "examples/result_propagation.li",
+    filename: "result.li",
   },
 ];
 ---
@@ -75,13 +84,20 @@ const features = [
       </p>
     </header>
 
-    <div class="features__grid">
+    <div class="rows">
       {
         features.map((f) => (
-          <article class="card">
-            <h3>{f.title}</h3>
-            <p>{f.body}</p>
-            <Code file={f.file} />
+          <article class="row">
+            <div class="row__copy">
+              <p class="row__kick">
+                <span class="row__num" /> {f.kicker}
+              </p>
+              <h3>{f.title}</h3>
+              <p class="row__body">{f.body}</p>
+            </div>
+            <div class="row__code">
+              <Code file={f.file} filename={f.filename} />
+            </div>
           </article>
         ))
       }
@@ -188,37 +204,97 @@ const features = [
   .features__head p {
     color: var(--text-muted);
   }
-  .features__head code,
-  .features p code {
+  .features__head code {
     color: var(--starlight);
     font-size: 0.95em;
   }
-  .features__grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: var(--sp-3);
-  }
-  .card {
-    background: var(--dusk);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    padding: var(--sp-3);
-    box-shadow: var(--elevation-1);
+
+  /* Alternating text / code rows.
+     Each feature is a full-width chapter: prose on one side, code on the
+     other, flipping sides row to row. Because rows stack (rather than sit in a
+     grid) the differing snippet heights read as intentional, not misaligned. */
+  .rows {
+    counter-reset: feat;
     display: flex;
     flex-direction: column;
-    gap: var(--sp-2);
+    gap: var(--sp-12);
+    margin-top: var(--sp-8);
   }
-  .card h3 {
-    margin: 0;
+  .row {
+    counter-increment: feat;
+    display: grid;
+    grid-template-columns: 1fr 1.1fr;
+    gap: var(--sp-8);
+    align-items: center;
   }
-  .card p {
+  /* Default: copy left, code right. Even rows flip. */
+  .row__copy {
+    order: 1;
+  }
+  .row__code {
+    order: 2;
+    min-width: 0; /* let the code scroll internally instead of overflowing */
+  }
+  .row:nth-child(even) .row__copy {
+    order: 2;
+  }
+  .row:nth-child(even) .row__code {
+    order: 1;
+  }
+  .row__kick {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-1);
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--lira-gold);
+    margin-bottom: var(--sp-2);
+  }
+  .row__num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--lira-gold-bright);
+    letter-spacing: 0.05em;
+  }
+  .row__num::before {
+    content: counter(feat, decimal-leading-zero);
+  }
+  .row__num::after {
+    content: "";
+    display: inline-block;
+    width: var(--sp-3);
+    height: 1px;
+    margin-left: var(--sp-1);
+    vertical-align: middle;
+    background: var(--lira-gold);
+    opacity: 0.5;
+  }
+  .row__copy h3 {
+    font-size: clamp(1.5rem, 2.4vw, 2rem);
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+    margin: 0 0 var(--sp-2);
+  }
+  .row__body {
     color: var(--text-muted);
+    font-size: 1.0625rem;
+    max-width: 46ch;
     margin: 0;
+  }
+  /* A soft gold-tinted lift on the code so each specimen feels like the
+     focal point of its row. */
+  .row__code :global(.specimen) {
+    box-shadow:
+      var(--elevation-1),
+      0 0 0 1px rgba(232, 169, 36, 0.06),
+      0 18px 50px -28px rgba(232, 169, 36, 0.28);
   }
 
   /* Diagnostics */
   .diag {
-    margin-top: var(--sp-12);
+    margin-top: var(--sp-16);
     display: grid;
     grid-template-columns: 1fr 1.1fr;
     gap: var(--sp-6);
@@ -254,7 +330,7 @@ const features = [
 
   /* Closing */
   .closing {
-    margin-top: var(--sp-12);
+    margin-top: var(--sp-16);
     text-align: center;
   }
   .closing p {
@@ -271,12 +347,27 @@ const features = [
 
   @media (max-width: 860px) {
     .hero__inner,
-    .features__grid,
     .diag {
       grid-template-columns: 1fr;
     }
     .hero {
       padding-top: var(--sp-8);
+    }
+    /* Stack each row: copy always above its code. */
+    .row {
+      grid-template-columns: 1fr;
+      gap: var(--sp-3);
+    }
+    .row__copy,
+    .row:nth-child(even) .row__copy {
+      order: 1;
+    }
+    .row__code,
+    .row:nth-child(even) .row__code {
+      order: 2;
+    }
+    .rows {
+      gap: var(--sp-8);
     }
   }
 </style>
