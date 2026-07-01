@@ -298,6 +298,47 @@ impl Runtime {
     }
 
     // ========================================================================
+    // Handle registry access for the I/O offload pool
+    //
+    // These let the VM thread *check out* a File/TcpStream (remove it from the
+    // registry), move it into a pool job, and re-insert it when the job
+    // completes — all on the VM thread, so the registries stay lock-free.
+    // ========================================================================
+
+    /// Reserve the next file handle id without opening anything (the open runs
+    /// on a pool thread, but ids must be allocated on the VM thread to stay
+    /// monotonic regardless of completion order).
+    pub(crate) fn alloc_fd(&mut self) -> FileHandle {
+        let fd = self.next_fd;
+        self.next_fd += 1;
+        fd
+    }
+
+    /// Remove a file from the registry so it can be moved to a pool thread.
+    /// `None` if the fd is unknown or already checked out (in flight).
+    pub(crate) fn checkout_file(&mut self, fd: FileHandle) -> Option<File> {
+        self.files.remove(&fd)
+    }
+
+    pub(crate) fn insert_file(&mut self, fd: FileHandle, file: File) {
+        self.files.insert(fd, file);
+    }
+
+    pub(crate) fn alloc_socket_id(&mut self) -> i64 {
+        let id = self.next_socket_id;
+        self.next_socket_id += 1;
+        id
+    }
+
+    pub(crate) fn checkout_socket(&mut self, id: i64) -> Option<TcpStream> {
+        self.tcp_sockets.remove(&id)
+    }
+
+    pub(crate) fn insert_socket(&mut self, id: i64, stream: TcpStream) {
+        self.tcp_sockets.insert(id, stream);
+    }
+
+    // ========================================================================
     // File I/O Operations
     // ========================================================================
 

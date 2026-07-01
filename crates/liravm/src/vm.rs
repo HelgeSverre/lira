@@ -795,10 +795,22 @@ impl VM {
     /// its stack (pushed by [`Self::deliver_io`] when the pool completes).
     fn offload_io(&mut self, job: crate::io_pool::IoJob) {
         self.save_fiber_state();
-        self.io_pool
+        let submit_result = self
+            .io_pool
             .get_or_insert_with(crate::io_pool::IoPool::new)
             .submit(job);
-        self.scheduler.block_current_on_io();
+        match submit_result {
+            // Submitted: park the fiber; a completion will wake it.
+            Ok(()) => self.scheduler.block_current_on_io(),
+            // Pool unavailable (all workers gone): run the job inline on the VM
+            // thread so the fiber is never stranded. The job closure is a plain
+            // `FnOnce` — callable here — and re-inserts any checked-out handle.
+            Err(job) => {
+                self.load_fiber_state();
+                let value = self.io_outcome_to_value((job.run)());
+                self.stack.push(value);
+            }
+        }
     }
 
     /// Jobs submitted to the I/O pool but not yet harvested.
@@ -828,14 +840,60 @@ impl VM {
         }
     }
 
-    /// Build the `[status, body]` result on the VM thread and wake the fiber.
+    /// Convert an offloaded syscall's completion into the `Value` it should
+    /// yield, then wake the fiber. Runs on the VM thread, so it is the only
+    /// place `Rc`/`Gc` values are built and handle registries are touched.
     fn deliver_io(&mut self, comp: crate::io_pool::IoCompletion) {
-        let arr = vec![
-            Value::Int(comp.status),
-            Value::String(Rc::new(comp.body)),
-        ];
-        let value = Value::Array(Gc::new(GcCell::new(arr)));
+        let value = self.io_outcome_to_value(comp.outcome);
         self.scheduler.wake_io(comp.fiber, value);
+    }
+
+    fn io_outcome_to_value(&mut self, outcome: Result<crate::io_pool::IoValue, String>) -> Value {
+        match outcome {
+            Ok(v) => self.io_value_to_value(v),
+            // Reserved for unexpected failures (a panicked job). Syscalls encode
+            // their own error contracts inside `Ok(IoValue)`, so this is rare.
+            Err(e) => Value::String(Rc::new(e)),
+        }
+    }
+
+    /// Turn plain `IoValue` data into a runtime `Value`. Handle-carrying
+    /// variants re-insert their checked-out `File`/`TcpStream` first (so a
+    /// following syscall on the same handle checks out cleanly), then convert
+    /// their inner result.
+    fn io_value_to_value(&mut self, v: crate::io_pool::IoValue) -> Value {
+        use crate::io_pool::IoValue;
+        match v {
+            IoValue::Unit => Value::Null,
+            IoValue::Int(n) => Value::Int(n),
+            IoValue::Str(s) => Value::String(Rc::new(s)),
+            IoValue::Bool(b) => Value::Bool(b),
+            IoValue::Strs(items) => {
+                let arr: Vec<Value> =
+                    items.into_iter().map(|s| Value::String(Rc::new(s))).collect();
+                Value::Array(Gc::new(GcCell::new(arr)))
+            }
+            IoValue::HttpResponse { status, body } => {
+                let arr = vec![Value::Int(status), Value::String(Rc::new(body))];
+                Value::Array(Gc::new(GcCell::new(arr)))
+            }
+            IoValue::FileOpened { fd, file } => {
+                self.runtime.insert_file(fd, file);
+                Value::Int(fd)
+            }
+            IoValue::FileOp { fd, file, result } => {
+                self.runtime.insert_file(fd, file);
+                self.io_value_to_value(*result)
+            }
+            IoValue::TcpConnected { id, stream } => {
+                self.runtime.insert_socket(id, stream);
+                Value::Int(id)
+            }
+            IoValue::TcpOp { id, stream, result } => {
+                self.runtime.insert_socket(id, stream);
+                self.io_value_to_value(*result)
+            }
+        }
     }
 
     /// Run the program loop without attaching a source location to errors.
@@ -2791,7 +2849,13 @@ impl VM {
                 // In fiber mode, offload the blocking request to the I/O pool and
                 // park this fiber so other fibers run (and other requests overlap).
                 if let Some(fiber) = self.io_offload_target() {
-                    self.offload_io(crate::io_pool::IoJob::HttpGet { fiber, url });
+                    self.offload_io(crate::io_pool::IoJob::new(fiber, move || {
+                        let (status, body) = match Runtime::http_get_blocking(&url) {
+                            Ok((s, _headers, b)) => (s, b),
+                            Err(e) => (-1, e),
+                        };
+                        Ok(crate::io_pool::IoValue::HttpResponse { status, body })
+                    }));
                     return Ok(());
                 }
                 // Sequential path: block inline.
@@ -2816,12 +2880,14 @@ impl VM {
                 let (url, body, content_type) =
                     ((**url).clone(), (**body).clone(), (**content_type).clone());
                 if let Some(fiber) = self.io_offload_target() {
-                    self.offload_io(crate::io_pool::IoJob::HttpPost {
-                        fiber,
-                        url,
-                        body,
-                        content_type,
-                    });
+                    self.offload_io(crate::io_pool::IoJob::new(fiber, move || {
+                        let (status, body) =
+                            match Runtime::http_post_blocking(&url, &body, &content_type) {
+                                Ok((s, _headers, b)) => (s, b),
+                                Err(e) => (-1, e),
+                            };
+                        Ok(crate::io_pool::IoValue::HttpResponse { status, body })
+                    }));
                     return Ok(());
                 }
                 let (status, response_body) = match self.runtime.http_post(&url, &body, &content_type)
@@ -2858,13 +2924,14 @@ impl VM {
                     (**body).clone(),
                 );
                 if let Some(fiber) = self.io_offload_target() {
-                    self.offload_io(crate::io_pool::IoJob::HttpRequest {
-                        fiber,
-                        method,
-                        url,
-                        headers,
-                        body,
-                    });
+                    self.offload_io(crate::io_pool::IoJob::new(fiber, move || {
+                        let (status, body) =
+                            match Runtime::http_request_blocking(&method, &url, &headers, &body) {
+                                Ok((s, b)) => (s, b),
+                                Err(e) => (-1, e),
+                            };
+                        Ok(crate::io_pool::IoValue::HttpResponse { status, body })
+                    }));
                     return Ok(());
                 }
                 let (status, response_body) =

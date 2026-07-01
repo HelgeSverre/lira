@@ -335,6 +335,12 @@ impl Scheduler {
     /// Mirrors the channel-receive handoff.
     pub fn wake_io(&mut self, fiber_id: FiberId, result: Value) {
         if let Some(fiber) = self.fibers.get_mut(&fiber_id) {
+            // Only resume a fiber that is actually parked on this I/O. If it is
+            // gone (Finished/Failed) the result is dropped — the caller has
+            // already re-inserted any checked-out handle, so nothing leaks.
+            if fiber.state != FiberState::BlockedIo {
+                return;
+            }
             fiber.stack.push(result);
             fiber.state = FiberState::Ready;
             self.emit_event(FiberEvent::FiberStateChanged {

@@ -1,105 +1,111 @@
 //! I/O thread pool for offloading blocking syscalls off the single VM thread.
 //!
 //! Fibers are cooperatively scheduled on one OS thread, so a blocking syscall
-//! (an HTTP request) would otherwise stall every other fiber for its whole
-//! duration — no I/O overlap. Instead, a blocking syscall is packaged as an
-//! [`IoJob`], handed to a pool of worker threads, and the calling fiber is
-//! parked (`FiberState::BlockedIo`). The workers run requests in parallel and
-//! return owned, `Send` results ([`IoCompletion`]); the VM thread harvests
-//! them and wakes the corresponding fibers.
+//! (HTTP request, disk read, `sleep`, TCP recv, ...) would otherwise stall
+//! every other fiber for its whole duration. Instead, a blocking syscall is
+//! packaged as an [`IoJob`] — a boxed `Send` closure that owns everything it
+//! needs — handed to a pool of worker threads, and the calling fiber is parked
+//! (`FiberState::BlockedIo`). Workers run jobs in parallel and return plain,
+//! `Send` [`IoValue`]s; the VM thread harvests them, rebuilds the `Value`, and
+//! wakes the fiber.
 //!
-//! Only plain data (owned `String`/`i64`) crosses the thread boundary — never a
-//! `Gc` handle or any VM state — so the VM's single-threaded, non-`Send` value
-//! model is preserved. The result `Value` is reconstructed on the VM thread.
+//! Invariant: only owned data crosses the thread boundary — never a `Gc`/`Rc`
+//! handle or any VM state. The `+ Send` bound on the job closure enforces this
+//! at compile time (an accidentally-captured `Rc`/`Gc` fails to compile). The
+//! result `Value` is always reconstructed on the VM thread in `deliver_io`.
+//!
+//! Stateful handles (`File`/`TcpStream`, both `Send`) are *checked out* of the
+//! runtime registry on the VM thread, moved into the job, operated on the pool
+//! thread, and ride back inside the [`IoValue`] so the VM thread re-inserts
+//! them — so the registry stays single-threaded and lock-free.
 
-use crate::runtime::Runtime;
 use crate::value::FiberId;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-/// Number of worker threads. I/O-bound, so this is the ceiling on concurrent
-/// in-flight requests, not a function of CPU count.
-const POOL_SIZE: usize = 16;
+/// Worker thread count — the ceiling on concurrent in-flight blocking calls.
+/// I/O-bound, so independent of CPU count.
+const POOL_SIZE: usize = 32;
 
-/// A blocking syscall to run off the VM thread. Carries the parked fiber's id
-/// so the result can be routed back to it.
-pub enum IoJob {
-    HttpGet {
-        fiber: FiberId,
-        url: String,
+/// Plain, `Send` result data produced on a pool thread; the VM thread converts
+/// it to a `Value`. Handle-carrying variants ferry a checked-out `File`/
+/// `TcpStream` back so the VM thread can re-insert it into the runtime registry.
+pub enum IoValue {
+    /// No value (`sleep`) → `Value::Null`.
+    Unit,
+    Int(i64),
+    Str(String),
+    Bool(bool),
+    /// A list of strings (`listdir`) → `Value::Array` of strings.
+    Strs(Vec<String>),
+    /// An HTTP response → `[status, body]`.
+    HttpResponse { status: i64, body: String },
+
+    /// A freshly opened file: insert `file` at `fd`, then yield `Int(fd)`.
+    FileOpened { fd: i64, file: std::fs::File },
+    /// An op on a checked-out file: re-insert `file` at `fd`, then yield `result`.
+    FileOp {
+        fd: i64,
+        file: std::fs::File,
+        result: Box<IoValue>,
     },
-    HttpPost {
-        fiber: FiberId,
-        url: String,
-        body: String,
-        content_type: String,
-    },
-    HttpRequest {
-        fiber: FiberId,
-        method: String,
-        url: String,
-        headers: String,
-        body: String,
+    /// A freshly connected socket: insert `stream` at `id`, then yield `Int(id)`.
+    TcpConnected { id: i64, stream: std::net::TcpStream },
+    /// An op on a checked-out socket: re-insert `stream` at `id`, then `result`.
+    TcpOp {
+        id: i64,
+        stream: std::net::TcpStream,
+        result: Box<IoValue>,
     },
 }
 
-/// The result of a completed [`IoJob`], surfaced to Lira as `[status, body]`.
-/// `status` is `-1` on a transport error, with `body` holding the message —
-/// matching the existing inline syscall contract.
-pub struct IoCompletion {
+/// A blocking task to run off the VM thread, tagged with the fiber to wake.
+pub struct IoJob {
     pub fiber: FiberId,
-    pub status: i64,
-    pub body: String,
+    pub run: Box<dyn FnOnce() -> Result<IoValue, String> + Send + 'static>,
 }
 
-fn run_job(job: IoJob) -> IoCompletion {
-    match job {
-        IoJob::HttpGet { fiber, url } => {
-            let (status, body) = match Runtime::http_get_blocking(&url) {
-                Ok((s, _headers, b)) => (s, b),
-                Err(e) => (-1, e),
-            };
-            IoCompletion { fiber, status, body }
-        }
-        IoJob::HttpPost {
+impl IoJob {
+    pub fn new<F>(fiber: FiberId, f: F) -> Self
+    where
+        F: FnOnce() -> Result<IoValue, String> + Send + 'static,
+    {
+        IoJob {
             fiber,
-            url,
-            body,
-            content_type,
-        } => {
-            let (status, body) = match Runtime::http_post_blocking(&url, &body, &content_type) {
-                Ok((s, _headers, b)) => (s, b),
-                Err(e) => (-1, e),
-            };
-            IoCompletion { fiber, status, body }
-        }
-        IoJob::HttpRequest {
-            fiber,
-            method,
-            url,
-            headers,
-            body,
-        } => {
-            let (status, body) = match Runtime::http_request_blocking(&method, &url, &headers, &body)
-            {
-                Ok((s, b)) => (s, b),
-                Err(e) => (-1, e),
-            };
-            IoCompletion { fiber, status, body }
+            run: Box::new(f),
         }
     }
 }
 
+/// The finished result of an [`IoJob`], routed back to its fiber.
+pub struct IoCompletion {
+    pub fiber: FiberId,
+    pub outcome: Result<IoValue, String>,
+}
+
+fn run_job(job: IoJob) -> IoCompletion {
+    let fiber = job.fiber;
+    let run = job.run;
+    // A panic inside an arbitrary job closure must not kill the worker (which
+    // would silently shrink the pool) or strand the parked fiber. Convert it
+    // to an error the VM thread can surface via the syscall's error contract.
+    let outcome = match catch_unwind(AssertUnwindSafe(move || run())) {
+        Ok(result) => result,
+        Err(_) => Err("I/O task panicked".to_string()),
+    };
+    IoCompletion { fiber, outcome }
+}
+
 /// A fixed pool of worker threads plus the channels to feed them jobs and
-/// collect completions. Created lazily on first use so programs that never do
+/// collect completions. Created lazily on first use, so programs that never do
 /// blocking I/O spawn no threads.
 pub struct IoPool {
     job_tx: Sender<IoJob>,
     completion_rx: Receiver<IoCompletion>,
-    /// Jobs submitted but not yet harvested. The scheduler uses this to decide
-    /// whether an otherwise-idle VM thread should wait for I/O vs. declare a
-    /// deadlock / finish.
+    /// Jobs submitted but not yet harvested; drives the scheduler's decision to
+    /// wait for I/O vs. declare a deadlock / finish.
     pending: usize,
 }
 
@@ -113,8 +119,8 @@ impl IoPool {
             let job_rx = Arc::clone(&job_rx);
             let comp_tx = comp_tx.clone();
             thread::spawn(move || loop {
-                // Hold the lock only to dequeue; the blocking request runs
-                // outside it so all workers can be in-flight simultaneously.
+                // Hold the lock only to dequeue; the blocking work runs outside
+                // it so all workers can be in-flight simultaneously.
                 let job = {
                     let guard = match job_rx.lock() {
                         Ok(g) => g,
@@ -122,7 +128,7 @@ impl IoPool {
                     };
                     match guard.recv() {
                         Ok(job) => job,
-                        Err(_) => break, // pool dropped: sender gone
+                        Err(_) => break, // pool dropped
                     }
                 };
                 if comp_tx.send(run_job(job)).is_err() {
@@ -138,10 +144,16 @@ impl IoPool {
         }
     }
 
-    /// Submit a blocking job to the pool.
-    pub fn submit(&mut self, job: IoJob) {
-        if self.job_tx.send(job).is_ok() {
-            self.pending += 1;
+    /// Submit a job. On success the pending count is bumped. On failure (the
+    /// pool's workers are all gone) the job is handed back so the caller can run
+    /// it inline rather than parking a fiber that would never be woken.
+    pub fn submit(&mut self, job: IoJob) -> Result<(), IoJob> {
+        match self.job_tx.send(job) {
+            Ok(()) => {
+                self.pending += 1;
+                Ok(())
+            }
+            Err(err) => Err(err.0),
         }
     }
 
@@ -155,7 +167,7 @@ impl IoPool {
         loop {
             match self.completion_rx.try_recv() {
                 Ok(c) => {
-                    self.pending -= 1;
+                    self.pending = self.pending.saturating_sub(1);
                     out.push(c);
                 }
                 Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
@@ -169,7 +181,7 @@ impl IoPool {
     pub fn wait_one(&mut self) -> Option<IoCompletion> {
         match self.completion_rx.recv() {
             Ok(c) => {
-                self.pending -= 1;
+                self.pending = self.pending.saturating_sub(1);
                 Some(c)
             }
             Err(_) => None,
