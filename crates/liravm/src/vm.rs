@@ -442,20 +442,33 @@ impl VM {
     /// the stepping path drives the scheduler identically.
     fn pump_scheduler(&mut self) -> Option<StepOutcome> {
         if self.fiber_mode && self.scheduler.current.is_none() {
-            match self.scheduler.schedule() {
-                Some(_) => self.load_fiber_state(),
-                None => {
-                    if self.scheduler.is_deadlocked() {
-                        return Some(StepOutcome::Error {
-                            message: "deadlock: all fibers are blocked".to_string(),
-                        });
-                    }
-                    if !self.scheduler.has_runnable() {
-                        return Some(StepOutcome::Finished {
-                            exit_code: self.main_exit_code,
-                        });
-                    }
+            // Wake fibers whose offloaded I/O completed, then pick one.
+            self.harvest_io();
+            if self.scheduler.schedule().is_some() {
+                self.load_fiber_state();
+                return None;
+            }
+            // Nothing ready. If blocking I/O is in flight, wait for it (fibers
+            // parked on I/O are not deadlocked), then schedule the woken fiber.
+            if self.io_pending() > 0 {
+                let comp = self.io_pool.as_mut().and_then(|p| p.wait_one());
+                if let Some(comp) = comp {
+                    self.deliver_io(comp);
                 }
+                if self.scheduler.schedule().is_some() {
+                    self.load_fiber_state();
+                }
+                return None;
+            }
+            if self.scheduler.is_deadlocked() {
+                return Some(StepOutcome::Error {
+                    message: "deadlock: all fibers are blocked".to_string(),
+                });
+            }
+            if !self.scheduler.has_runnable() {
+                return Some(StepOutcome::Finished {
+                    exit_code: self.main_exit_code,
+                });
             }
         }
         None
