@@ -31,6 +31,10 @@ impl Token {
 pub enum TokenKind {
     // Literals
     IntLiteral(i64),
+    /// An integer whose magnitude overflows `i64` but fits `u64`. Only valid as
+    /// the operand of a unary minus (yielding `i64::MIN`); the parser folds it
+    /// or reports an out-of-range error.
+    BigIntLiteral(u64),
     FloatLiteral(f64),
     StringLiteral(String),
     /// Interpolated string literal: `"a ${x} b"`.
@@ -460,7 +464,13 @@ impl<'a> Lexer<'a> {
         } else {
             match clean.parse::<i64>() {
                 Ok(value) => self.make_token(TokenKind::IntLiteral(value)),
-                Err(_) => self.error_token("Invalid integer literal"),
+                // Overflowed i64 as a positive value. If the magnitude still
+                // fits u64 it may be the operand of a unary minus (i64::MIN);
+                // defer that decision to the parser.
+                Err(_) => match clean.parse::<u64>() {
+                    Ok(mag) => self.make_token(TokenKind::BigIntLiteral(mag)),
+                    Err(_) => self.error_token("Invalid integer literal"),
+                },
             }
         }
     }

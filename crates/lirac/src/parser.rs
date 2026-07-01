@@ -1496,6 +1496,13 @@ impl Parser {
 
         match &token.kind {
             TokenKind::IntLiteral(n) => Ok(self.expr(ExpressionKind::IntLiteral(*n), span)),
+            // A magnitude that overflowed i64 reaching here un-negated is a
+            // positive literal out of `int` range (the `-<lit>` case is folded
+            // in the unary-minus arm below).
+            TokenKind::BigIntLiteral(m) => Err(format!(
+                "{}:{}: integer literal {} out of range for int (max {})",
+                span.line, span.column, m, i64::MAX
+            )),
             TokenKind::FloatLiteral(n) => Ok(self.expr(ExpressionKind::FloatLiteral(*n), span)),
             TokenKind::StringLiteral(s) => {
                 Ok(self.expr(ExpressionKind::StringLiteral(s.clone()), span))
@@ -1563,6 +1570,21 @@ impl Parser {
             }
             TokenKind::Self_ => Ok(self.expr(ExpressionKind::Identifier("self".to_string()), span)),
             TokenKind::Minus => {
+                // Fold `-<big-literal>` so `i64::MIN` is writable: its magnitude
+                // 2^63 only has an `int` representation when negated. `-(m)` is
+                // in range iff `m == 2^63`; anything larger is out of range.
+                if let TokenKind::BigIntLiteral(m) = &self.peek().kind {
+                    let m = *m;
+                    let lit_span = self.span();
+                    self.advance(); // consume the big literal
+                    if m == (i64::MAX as u64) + 1 {
+                        return Ok(self.expr(ExpressionKind::IntLiteral(i64::MIN), span));
+                    }
+                    return Err(format!(
+                        "{}:{}: integer literal -{} out of range for int (min {})",
+                        lit_span.line, lit_span.column, m, i64::MIN
+                    ));
+                }
                 let operand = self.parse_precedence(Precedence::Unary)?;
                 Ok(self.expr(
                     ExpressionKind::Unary {
