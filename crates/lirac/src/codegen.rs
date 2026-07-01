@@ -392,19 +392,34 @@ impl CodeGenerator {
             }
         }
 
-        // Auto-invoke main() if it exists and takes no arguments
-        if let Some(main_func) = self.functions.iter().find(|f| f.name == "main") {
-            if main_func.param_count == 0 {
-                let offset = main_func.code_offset;
-                let idx = self.add_constant_internal(Constant::Function(offset));
-                if offset == 0 {
-                    self.pending_func_patches.push((idx, "main".to_string()));
+        // Auto-invoke main() as the entry point — but only if the top level
+        // doesn't already call it. Writing `fn main() { ... }` followed by an
+        // explicit `main()` is a common Rust/C habit; without this guard the
+        // explicit call (emitted in the third pass above) plus the auto-invoke
+        // would run main twice and silently double all output.
+        let top_level_calls_main = program.program.statements.iter().any(|stmt| {
+            let StatementKind::Expression(expr) = &stmt.kind else {
+                return false;
+            };
+            let ExpressionKind::Call { callee, args, .. } = &expr.kind else {
+                return false;
+            };
+            args.is_empty() && matches!(&callee.kind, ExpressionKind::Identifier(name) if name == "main")
+        });
+        if !top_level_calls_main {
+            if let Some(main_func) = self.functions.iter().find(|f| f.name == "main") {
+                if main_func.param_count == 0 {
+                    let offset = main_func.code_offset;
+                    let idx = self.add_constant_internal(Constant::Function(offset));
+                    if offset == 0 {
+                        self.pending_func_patches.push((idx, "main".to_string()));
+                    }
+                    self.emit_opcode(Opcode::LoadConst);
+                    self.emit_u16(idx);
+                    self.emit_opcode(Opcode::Call);
+                    self.emit_u8(0); // No arguments
+                    self.emit_opcode(Opcode::Pop); // Discard return value
                 }
-                self.emit_opcode(Opcode::LoadConst);
-                self.emit_u16(idx);
-                self.emit_opcode(Opcode::Call);
-                self.emit_u8(0); // No arguments
-                self.emit_opcode(Opcode::Pop); // Discard return value
             }
         }
 
