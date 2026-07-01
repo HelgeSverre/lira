@@ -2956,10 +2956,53 @@ impl VM {
             94 => sys_typed!("rmdir", str path => Bool: os_rmdir),
             // remove(path: string) -> bool
             95 => sys_typed!("remove", str path => Bool: os_remove),
-            // remove_all(path: string) -> bool
-            96 => sys_typed!("remove_all", str path => Bool: os_remove_all),
-            // listdir(path: string) -> [string]
-            97 => sys_typed!("listdir", str path => StrArray: os_listdir),
+            // remove_all(path: string) -> bool  (offloaded: recursive delete)
+            96 => {
+                let path = self.pop()?;
+                let Value::String(path) = &path else {
+                    return Err("remove_all requires string argument".to_string());
+                };
+                let path = self.absolutize(path);
+                if let Some(fiber) = self.io_offload_target() {
+                    self.offload_io(crate::io_pool::IoJob::new(fiber, move || {
+                        Ok(crate::io_pool::IoValue::Bool(
+                            std::fs::remove_dir_all(&path).is_ok(),
+                        ))
+                    }));
+                    return Ok(());
+                }
+                self.stack.push(Value::Bool(self.runtime.os_remove_all(&path)));
+                Ok(())
+            }
+            // listdir(path: string) -> [string]  (offloaded: dir scan)
+            97 => {
+                let path = self.pop()?;
+                let Value::String(path) = &path else {
+                    return Err("listdir requires string argument".to_string());
+                };
+                let path = self.absolutize(path);
+                if let Some(fiber) = self.io_offload_target() {
+                    self.offload_io(crate::io_pool::IoJob::new(fiber, move || {
+                        let entries = std::fs::read_dir(&path)
+                            .map(|es| {
+                                es.filter_map(|e| e.ok())
+                                    .map(|e| e.file_name().to_string_lossy().to_string())
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        Ok(crate::io_pool::IoValue::Strs(entries))
+                    }));
+                    return Ok(());
+                }
+                let arr: Vec<Value> = self
+                    .runtime
+                    .os_listdir(&path)
+                    .into_iter()
+                    .map(|s| Value::String(Rc::new(s)))
+                    .collect();
+                self.stack.push(Value::Array(Gc::new(GcCell::new(arr))));
+                Ok(())
+            }
             // is_dir(path: string) -> bool
             98 => sys_typed!("is_dir", str path => Bool: os_is_dir),
             // is_file(path: string) -> bool
@@ -2967,7 +3010,22 @@ impl VM {
             // rename(from: string, to: string) -> bool
             100 => sys_typed!("rename", str from, str to => Bool: os_rename),
             // copy(from: string, to: string) -> bool
-            101 => sys_typed!("copy", str from, str to => Bool: os_copy),
+            101 => {
+                let to = self.pop()?;
+                let from = self.pop()?;
+                let (Value::String(from), Value::String(to)) = (&from, &to) else {
+                    return Err("copy requires (string, string) arguments".to_string());
+                };
+                let (from, to) = (self.absolutize(from), self.absolutize(to));
+                if let Some(fiber) = self.io_offload_target() {
+                    self.offload_io(crate::io_pool::IoJob::new(fiber, move || {
+                        Ok(crate::io_pool::IoValue::Bool(std::fs::copy(&from, &to).is_ok()))
+                    }));
+                    return Ok(());
+                }
+                self.stack.push(Value::Bool(self.runtime.os_copy(&from, &to)));
+                Ok(())
+            }
 
             // ================================================================
             // URL encoding/decoding syscalls (110-111)
