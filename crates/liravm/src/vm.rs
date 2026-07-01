@@ -2493,13 +2493,22 @@ impl VM {
             // sys_sleep_ms
             5 => {
                 let millis = self.pop()?;
-                match millis {
-                    Value::Int(ms) => {
-                        self.runtime.sleep(ms);
-                        Ok(())
-                    }
-                    _ => Err("sleep requires integer milliseconds".to_string()),
+                let Value::Int(ms) = millis else {
+                    return Err("sleep requires integer milliseconds".to_string());
+                };
+                // In fiber mode, offload the sleep so the fiber parks and other
+                // fibers run — fixing the "sleep blocks every fiber" gotcha.
+                if let Some(fiber) = self.io_offload_target() {
+                    self.offload_io(crate::io_pool::IoJob::new(fiber, move || {
+                        if ms > 0 {
+                            std::thread::sleep(std::time::Duration::from_millis(ms as u64));
+                        }
+                        Ok(crate::io_pool::IoValue::Unit)
+                    }));
+                    return Ok(());
                 }
+                self.runtime.sleep(ms);
+                Ok(())
             }
             // time_secs() -> int
             6 => sys_noarg!(Int: current_time_secs),

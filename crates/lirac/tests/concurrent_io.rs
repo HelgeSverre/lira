@@ -97,3 +97,44 @@ main()
         elapsed
     );
 }
+
+#[test]
+fn sleep_parks_the_fiber_and_overlaps() {
+    // 8 fibers each sleep 300ms. Offloaded to the I/O pool, they overlap and
+    // finish in ~one sleep; the old inline sleep blocked every fiber (serial).
+    const N: usize = 8;
+    let source = format!(
+        r#"
+fn nap(done: Channel<int>) {{
+    sleep(300)
+    send(done, 1)
+}}
+fn main() {{
+    let done = chan({n})
+    var i = 0
+    while i < {n} {{
+        spawn nap(done)
+        i = i + 1
+    }}
+    var got = 0
+    while got < {n} {{
+        select {{ v = <-done => got = got + 1 }}
+    }}
+    println(got)
+}}
+main()
+"#,
+        n = N
+    );
+
+    let start = Instant::now();
+    let output = run(&source);
+    let elapsed = start.elapsed();
+
+    assert_eq!(output, vec![N.to_string()]);
+    assert!(
+        elapsed < Duration::from_millis(300 * N as u64) / 2,
+        "expected sleeps to overlap, took {:?}",
+        elapsed
+    );
+}
