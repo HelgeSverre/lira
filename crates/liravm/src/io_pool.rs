@@ -43,16 +43,19 @@ pub enum IoValue {
     /// An HTTP response → `[status, body]`.
     HttpResponse { status: i64, body: String },
 
-    /// A freshly opened file: insert `file` at `fd`, then yield `Int(fd)`.
-    FileOpened { fd: i64, file: std::fs::File },
+    /// A freshly opened file: the VM thread allocates an fd, inserts `file`, and
+    /// yields `Int(fd)`. The id is allocated on success only (a failed open
+    /// yields `Int(-1)` and consumes nothing).
+    FileOpened(std::fs::File),
     /// An op on a checked-out file: re-insert `file` at `fd`, then yield `result`.
     FileOp {
         fd: i64,
         file: std::fs::File,
         result: Box<IoValue>,
     },
-    /// A freshly connected socket: insert `stream` at `id`, then yield `Int(id)`.
-    TcpConnected { id: i64, stream: std::net::TcpStream },
+    /// A freshly connected socket: the VM thread allocates an id, inserts
+    /// `stream`, and yields `Int(id)`.
+    TcpConnected(std::net::TcpStream),
     /// An op on a checked-out socket: re-insert `stream` at `id`, then `result`.
     TcpOp {
         id: i64,

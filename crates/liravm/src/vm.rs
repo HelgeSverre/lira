@@ -451,9 +451,13 @@ impl VM {
             // Nothing ready. If blocking I/O is in flight, wait for it (fibers
             // parked on I/O are not deadlocked), then schedule the woken fiber.
             if self.io_pending() > 0 {
-                let comp = self.io_pool.as_mut().and_then(|p| p.wait_one());
-                if let Some(comp) = comp {
-                    self.deliver_io(comp);
+                match self.io_pool.as_mut().and_then(|p| p.wait_one()) {
+                    Some(comp) => self.deliver_io(comp),
+                    None => {
+                        return Some(StepOutcome::Error {
+                            message: "I/O pool terminated with work in flight".to_string(),
+                        })
+                    }
                 }
                 if self.scheduler.schedule().is_some() {
                     self.load_fiber_state();
@@ -892,7 +896,10 @@ impl VM {
                 let arr = vec![Value::Int(status), Value::String(Rc::new(body))];
                 Value::Array(Gc::new(GcCell::new(arr)))
             }
-            IoValue::FileOpened { fd, file } => {
+            IoValue::FileOpened(file) => {
+                // Allocate the fd only now (open succeeded), so a failed open —
+                // which yields Int(-1) instead — consumes no handle id.
+                let fd = self.runtime.alloc_fd();
                 self.runtime.insert_file(fd, file);
                 Value::Int(fd)
             }
@@ -900,7 +907,8 @@ impl VM {
                 self.runtime.insert_file(fd, file);
                 self.io_value_to_value(*result)
             }
-            IoValue::TcpConnected { id, stream } => {
+            IoValue::TcpConnected(stream) => {
+                let id = self.runtime.alloc_socket_id();
                 self.runtime.insert_socket(id, stream);
                 Value::Int(id)
             }
@@ -941,11 +949,19 @@ impl VM {
                             // Blocking I/O is in flight; wait for a completion to
                             // wake a fiber rather than declaring deadlock. Loop
                             // back so the scheduler runs the now-ready fiber.
-                            let comp = self.io_pool.as_mut().and_then(|p| p.wait_one());
-                            if let Some(comp) = comp {
-                                self.deliver_io(comp);
+                            match self.io_pool.as_mut().and_then(|p| p.wait_one()) {
+                                Some(comp) => {
+                                    self.deliver_io(comp);
+                                    continue;
+                                }
+                                // Pool gone with work in flight: cannot make
+                                // progress, so surface it instead of spinning.
+                                None => {
+                                    return Err(
+                                        "I/O pool terminated with work in flight".to_string()
+                                    )
+                                }
                             }
-                            continue;
                         } else if self.scheduler.is_deadlocked() {
                             return Err("deadlock: all fibers are blocked".to_string());
                         } else if !self.scheduler.has_runnable() {
@@ -2523,6 +2539,9 @@ impl VM {
                     return Ok(());
                 }
                 self.runtime.sleep(ms);
+                // Push Null so the inline path matches the offload path (which
+                // yields Unit -> Null); the statement's trailing Pop consumes it.
+                self.stack.push(Value::Null);
                 Ok(())
             }
             // time_secs() -> int
@@ -2544,13 +2563,12 @@ impl VM {
                     return Err("file_open requires (string, int) arguments".to_string());
                 };
                 let (path, mode) = (self.absolutize(path), *mode);
-                // Allocate the fd on the VM thread so ids stay monotonic; the
-                // (blocking) open runs on the pool and the completion inserts.
+                // The (blocking) open runs on the pool; deliver_io allocates the
+                // fd and inserts on success, so a failed open consumes no id.
                 if let Some(fiber) = self.io_offload_target() {
-                    let fd = self.runtime.alloc_fd();
                     self.offload_io(crate::io_pool::IoJob::new(fiber, move || {
                         match Runtime::open_file_blocking(&path, mode) {
-                            Ok(file) => Ok(crate::io_pool::IoValue::FileOpened { fd, file }),
+                            Ok(file) => Ok(crate::io_pool::IoValue::FileOpened(file)),
                             Err(_) => Ok(crate::io_pool::IoValue::Int(-1)),
                         }
                     }));
@@ -2853,10 +2871,9 @@ impl VM {
                 };
                 let (host, port) = ((**host).clone(), *port);
                 if let Some(fiber) = self.io_offload_target() {
-                    let id = self.runtime.alloc_socket_id();
                     self.offload_io(crate::io_pool::IoJob::new(fiber, move || {
                         match Runtime::tcp_connect_blocking(&host, port) {
-                            Some(stream) => Ok(crate::io_pool::IoValue::TcpConnected { id, stream }),
+                            Some(stream) => Ok(crate::io_pool::IoValue::TcpConnected(stream)),
                             None => Ok(crate::io_pool::IoValue::Int(-1)),
                         }
                     }));
