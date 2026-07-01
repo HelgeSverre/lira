@@ -1,0 +1,156 @@
+// Concurrent web crawler — a showcase for Lira's fiber concurrency.
+//
+// A pool of worker fibers pull URLs off a `work` channel, fetch them over HTTP
+// in parallel, extract same-domain links, and push results onto a `done`
+// channel. The main fiber coordinates: it seeds the queue, dedupes URLs, feeds
+// newly-discovered links back to the workers, and stops when the page budget
+// is reached. This is the classic Go-style worker-pool / fan-out-fan-in
+// pattern, expressed with `spawn`, `chan`, `send`, and `select`.
+//
+// Target is https://quotes.toscrape.com — a sandbox site built for scraping
+// practice, so crawling it is expected and polite.
+//
+// NOTE ON PARALLELISM: fibers are cooperative green threads on a single OS
+// thread. This program exercises the full concurrency *model* — worker pool,
+// `spawn`, channels, `select`, fan-out/fan-in — correctly. But `http_get` is
+// today a *blocking* syscall that does not yield to the scheduler, so the
+// fetches do not actually overlap: wall-clock time is ~the same as fetching
+// sequentially. True I/O parallelism needs an async-I/O / netpoller layer that
+// parks a fiber while its request is in flight (a known gap). This example is
+// still the right way to *structure* concurrent work in Lira.
+//
+// Makes real network requests, so it is skipped by the test suite. Run it with:
+//   lira run examples/concurrent_crawler.li
+//
+// @skip
+
+struct Page {
+    url: string
+    status: int
+    nbytes: int
+    links: [string]
+}
+
+fn starts_with(s: string, prefix: string) -> bool {
+    return str_index_of(s, prefix) == 0
+}
+
+fn is_asset(url: string) -> bool {
+    if str_index_of(url, "/static/") >= 0 { return true }
+    if str_index_of(url, ".css") >= 0 { return true }
+    if str_index_of(url, ".js") >= 0 { return true }
+    if str_index_of(url, ".ico") >= 0 { return true }
+    if str_index_of(url, ".png") >= 0 { return true }
+    if str_index_of(url, ".jpg") >= 0 { return true }
+    return false
+}
+
+// Turn an href into an absolute, same-domain URL — or "" to skip it.
+fn normalize(href: string) -> string {
+    let base = "https://quotes.toscrape.com"
+    let host = "quotes.toscrape.com"
+    if is_asset(href) { return "" }
+    if starts_with(href, "#") { return "" }
+    if starts_with(href, "/") { return base + href }
+    if starts_with(href, "http") {
+        if str_index_of(href, host) >= 0 { return href }
+        return ""
+    }
+    return ""
+}
+
+fn extract_links(html: string) -> [string] {
+    // regex_find_all returns whole matches like `href="/page/2/"`; strip the
+    // 6-char `href="` prefix and the trailing quote to recover the URL.
+    let matches = regex_find_all("href=\"([^\"]+)\"", html)
+    var out = []
+    var i = 0
+    while i < len(matches) {
+        let m = matches[i]
+        let href = str_substring(m, 6, len(m) - 1)
+        let norm = normalize(href)
+        if norm != "" { push(out, norm) }
+        i = i + 1
+    }
+    return out
+}
+
+fn contains(arr: [string], x: string) -> bool {
+    var i = 0
+    while i < len(arr) {
+        if arr[i] == x { return true }
+        i = i + 1
+    }
+    return false
+}
+
+// Worker fiber: fetch URLs from `work` until told to STOP.
+fn worker(work: Channel<string>, done: Channel<Page>) {
+    while true {
+        var url = ""
+        select { u = <-work => url = u }
+        if url == "STOP" { return }
+        let r = http_get(url)
+        let links = extract_links(r[1])
+        send(done, Page { url: url, status: r[0], nbytes: len(r[1]), links: links })
+    }
+}
+
+fn main() {
+    let seed = "https://quotes.toscrape.com/"
+    let max_pages = 20
+    let n_workers = 8
+
+    let work = chan(4096)
+    let done = chan(4096)
+
+    var visited = [seed]
+    var in_flight = 1
+    send(work, seed)
+
+    var w = 0
+    while w < n_workers {
+        spawn worker(work, done)
+        w = w + 1
+    }
+
+    println("Crawling " + seed)
+    println("  " + n_workers + " concurrent workers, budget " + max_pages + " pages")
+    println("")
+
+    var crawled = 0
+    while in_flight > 0 {
+        select {
+            page = <-done => {
+                in_flight = in_flight - 1
+                crawled = crawled + 1
+                println("[" + page.status + "] " + page.url + "  (" + len(page.links) + " links, " + page.nbytes + " bytes)")
+
+                var i = 0
+                while i < len(page.links) {
+                    let link = page.links[i]
+                    if !contains(visited, link) {
+                        if len(visited) < max_pages {
+                            push(visited, link)
+                            send(work, link)
+                            in_flight = in_flight + 1
+                        }
+                    }
+                    i = i + 1
+                }
+            }
+        }
+    }
+
+    // Release the workers now that the queue has drained.
+    var s = 0
+    while s < n_workers {
+        send(work, "STOP")
+        s = s + 1
+    }
+
+    println("")
+    println("Done. Fetched " + crawled + " pages, discovered " + len(visited) + " unique in-domain URLs.")
+}
+
+main()
