@@ -1,0 +1,18 @@
+// IEEE 754 special-value constructors from the math module.
+// @expect: inf
+// @expect: -inf
+// @expect: true
+// @expect: true
+// @expect: true
+
+import std.math
+
+let inf = math_inf()
+let neg_inf = math_neg_inf()
+let nan = math_nan()
+
+println(inf)                     // inf
+println(neg_inf)                 // -inf
+println(is_infinite(inf))        // true
+println(is_infinite(neg_inf))    // true
+println(is_nan(nan))             // true

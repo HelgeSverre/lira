@@ -46,6 +46,20 @@ fn math_log10e() -> float {
     return 0.4342944819032518
 }
 
+// IEEE 754 special values. There is no literal spelling for these (matching
+// Rust's f64::INFINITY / Go's math.Inf), so the math module constructs them.
+fn math_inf() -> float {
+    return 1.0 / 0.0
+}
+
+fn math_neg_inf() -> float {
+    return -1.0 / 0.0
+}
+
+fn math_nan() -> float {
+    return 0.0 / 0.0
+}
+
 // ============================================================================
 // Built-in Math Functions (VM syscalls 140-163)
 // ============================================================================
