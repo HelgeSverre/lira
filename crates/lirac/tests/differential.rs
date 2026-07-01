@@ -413,7 +413,9 @@ fn run_lira(src: &str) -> Result<Vec<i64>, String> {
 
 proptest! {
     #![proptest_config(ProptestConfig {
-        cases: 1500,
+        // Kept modest so the normal `cargo test` loop stays fast; control-flow
+        // programs do a lot of VM work. Deeper hunts: PROPTEST_CASES=50000 ...
+        cases: 600,
         // Integration tests have no crate root for the regression file; the
         // full failing source is printed on failure, so persistence is noise.
         failure_persistence: None,
