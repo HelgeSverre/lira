@@ -342,9 +342,9 @@ impl Runtime {
     // File I/O Operations
     // ========================================================================
 
-    /// Open a file and return a handle
-    /// mode: 0 = read, 1 = write, 2 = append, 3 = read+write
-    pub fn file_open(&mut self, path: &str, mode: i64) -> Result<FileHandle, String> {
+    /// Open a file (the blocking part), with no `&self` so it can run on a pool
+    /// thread. Returns the owned `File`; the caller allocates the fd and inserts.
+    pub(crate) fn open_file_blocking(path: &str, mode: i64) -> Result<File, String> {
         let file = match mode {
             0 => File::open(path), // read only
             1 => OpenOptions::new()
@@ -356,8 +356,32 @@ impl Runtime {
             3 => OpenOptions::new().read(true).write(true).open(path), // read+write
             _ => return Err(format!("Invalid file mode: {}", mode)),
         };
+        file.map_err(|e| format!("Failed to open '{}': {}", path, e))
+    }
 
-        let file = file.map_err(|e| format!("Failed to open '{}': {}", path, e))?;
+    /// Read up to `max_bytes` from an owned file (checked out of the registry).
+    /// Usable off the VM thread.
+    pub(crate) fn read_file_blocking(file: &mut File, max_bytes: i64) -> Result<String, String> {
+        let mut buffer = vec![0u8; max_bytes.min(1024 * 1024).max(0) as usize]; // cap at 1MB
+        let bytes_read = file
+            .read(&mut buffer)
+            .map_err(|e| format!("Read error: {}", e))?;
+        buffer.truncate(bytes_read);
+        String::from_utf8(buffer).map_err(|e| format!("UTF-8 decode error: {}", e))
+    }
+
+    /// Write to an owned file (checked out of the registry). Usable off the VM
+    /// thread.
+    pub(crate) fn write_file_blocking(file: &mut File, data: &str) -> Result<i64, String> {
+        file.write(data.as_bytes())
+            .map(|n| n as i64)
+            .map_err(|e| format!("Write error: {}", e))
+    }
+
+    /// Open a file and return a handle
+    /// mode: 0 = read, 1 = write, 2 = append, 3 = read+write
+    pub fn file_open(&mut self, path: &str, mode: i64) -> Result<FileHandle, String> {
+        let file = Self::open_file_blocking(path, mode)?;
         let fd = self.next_fd;
         self.next_fd += 1;
         self.files.insert(fd, file);

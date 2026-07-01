@@ -829,6 +829,21 @@ impl VM {
         }
     }
 
+    /// Resolve a path to absolute on the VM thread before offloading an fs op,
+    /// so a pool thread is unaffected by a concurrent `chdir` (cwd is
+    /// process-global). Unlike `canonicalize`, this does not require the path to
+    /// exist (needed for `mkdir`/`copy` destinations). Absolute paths pass through.
+    fn absolutize(&self, path: &str) -> String {
+        let p = std::path::Path::new(path);
+        if p.is_absolute() {
+            return path.to_string();
+        }
+        match std::env::current_dir() {
+            Ok(cwd) => cwd.join(p).to_string_lossy().into_owned(),
+            Err(_) => path.to_string(),
+        }
+    }
+
     /// Wake every fiber whose offloaded I/O has already completed.
     fn harvest_io(&mut self) {
         let completed = match self.io_pool.as_mut() {
@@ -2525,65 +2540,99 @@ impl VM {
             10 => {
                 let mode = self.pop()?;
                 let path = self.pop()?;
-                match (&path, &mode) {
-                    (Value::String(path), Value::Int(mode)) => {
-                        match self.runtime.file_open(path, *mode) {
-                            Ok(fd) => {
-                                self.stack.push(Value::Int(fd));
-                                Ok(())
-                            }
-                            Err(e) => {
-                                // Return -1 on error and push error message
-                                self.stack.push(Value::Int(-1));
-                                eprintln!("file_open error: {}", e);
-                                Ok(())
-                            }
+                let (Value::String(path), Value::Int(mode)) = (&path, &mode) else {
+                    return Err("file_open requires (string, int) arguments".to_string());
+                };
+                let (path, mode) = (self.absolutize(path), *mode);
+                // Allocate the fd on the VM thread so ids stay monotonic; the
+                // (blocking) open runs on the pool and the completion inserts.
+                if let Some(fiber) = self.io_offload_target() {
+                    let fd = self.runtime.alloc_fd();
+                    self.offload_io(crate::io_pool::IoJob::new(fiber, move || {
+                        match Runtime::open_file_blocking(&path, mode) {
+                            Ok(file) => Ok(crate::io_pool::IoValue::FileOpened { fd, file }),
+                            Err(_) => Ok(crate::io_pool::IoValue::Int(-1)),
                         }
-                    }
-                    _ => Err("file_open requires (string, int) arguments".to_string()),
+                    }));
+                    return Ok(());
                 }
+                match self.runtime.file_open(&path, mode) {
+                    Ok(fd) => self.stack.push(Value::Int(fd)),
+                    Err(e) => {
+                        self.stack.push(Value::Int(-1));
+                        eprintln!("file_open error: {}", e);
+                    }
+                }
+                Ok(())
             }
             // file_read(fd: int, max_bytes: int) -> string
             11 => {
                 let max_bytes = self.pop()?;
                 let fd = self.pop()?;
-                match (&fd, &max_bytes) {
-                    (Value::Int(fd), Value::Int(max_bytes)) => {
-                        match self.runtime.file_read(*fd, *max_bytes) {
-                            Ok(data) => {
-                                self.stack.push(Value::String(Rc::new(data)));
-                                Ok(())
-                            }
-                            Err(e) => {
-                                self.stack.push(Value::String(Rc::new(String::new())));
-                                eprintln!("file_read error: {}", e);
-                                Ok(())
-                            }
-                        }
+                let (Value::Int(fd), Value::Int(max_bytes)) = (&fd, &max_bytes) else {
+                    return Err("file_read requires (int, int) arguments".to_string());
+                };
+                let (fd, max_bytes) = (*fd, *max_bytes);
+                // Check the file out of the registry and read on the pool. If it
+                // is missing or already in flight, fail with the "" contract.
+                if let Some(fiber) = self.io_offload_target() {
+                    if let Some(mut file) = self.runtime.checkout_file(fd) {
+                        self.offload_io(crate::io_pool::IoJob::new(fiber, move || {
+                            // On a read error still return the handle (so it isn't
+                            // dropped/closed) with the empty-string error contract.
+                            let data = Runtime::read_file_blocking(&mut file, max_bytes)
+                                .unwrap_or_default();
+                            Ok(crate::io_pool::IoValue::FileOp {
+                                fd,
+                                file,
+                                result: Box::new(crate::io_pool::IoValue::Str(data)),
+                            })
+                        }));
+                        return Ok(());
                     }
-                    _ => Err("file_read requires (int, int) arguments".to_string()),
+                    self.stack.push(Value::String(Rc::new(String::new())));
+                    return Ok(());
                 }
+                match self.runtime.file_read(fd, max_bytes) {
+                    Ok(data) => self.stack.push(Value::String(Rc::new(data))),
+                    Err(e) => {
+                        self.stack.push(Value::String(Rc::new(String::new())));
+                        eprintln!("file_read error: {}", e);
+                    }
+                }
+                Ok(())
             }
             // file_write(fd: int, data: string) -> int
             12 => {
                 let data = self.pop()?;
                 let fd = self.pop()?;
-                match (&fd, &data) {
-                    (Value::Int(fd), Value::String(data)) => {
-                        match self.runtime.file_write(*fd, data) {
-                            Ok(bytes) => {
-                                self.stack.push(Value::Int(bytes));
-                                Ok(())
-                            }
-                            Err(e) => {
-                                self.stack.push(Value::Int(-1));
-                                eprintln!("file_write error: {}", e);
-                                Ok(())
-                            }
-                        }
+                let (Value::Int(fd), Value::String(data)) = (&fd, &data) else {
+                    return Err("file_write requires (int, string) arguments".to_string());
+                };
+                let (fd, data) = (*fd, (**data).clone());
+                if let Some(fiber) = self.io_offload_target() {
+                    if let Some(mut file) = self.runtime.checkout_file(fd) {
+                        self.offload_io(crate::io_pool::IoJob::new(fiber, move || {
+                            let bytes = Runtime::write_file_blocking(&mut file, &data).unwrap_or(-1);
+                            Ok(crate::io_pool::IoValue::FileOp {
+                                fd,
+                                file,
+                                result: Box::new(crate::io_pool::IoValue::Int(bytes)),
+                            })
+                        }));
+                        return Ok(());
                     }
-                    _ => Err("file_write requires (int, string) arguments".to_string()),
+                    self.stack.push(Value::Int(-1));
+                    return Ok(());
                 }
+                match self.runtime.file_write(fd, &data) {
+                    Ok(bytes) => self.stack.push(Value::Int(bytes)),
+                    Err(e) => {
+                        self.stack.push(Value::Int(-1));
+                        eprintln!("file_write error: {}", e);
+                    }
+                }
+                Ok(())
             }
             // file_close(fd: int) -> bool
             13 => {

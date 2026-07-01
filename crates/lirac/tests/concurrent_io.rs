@@ -138,3 +138,58 @@ main()
         elapsed
     );
 }
+
+#[test]
+fn concurrent_file_io_is_correct() {
+    // N fibers each open a distinct temp file, write their id's worth of bytes,
+    // close, reopen, read it back, and report the byte count. Exercises the
+    // file-handle checkout/offload/re-insert path under concurrency; the sum
+    // proves every handle round-tripped through the pool without corruption.
+    const N: usize = 8;
+    let dir = std::env::temp_dir().join(format!("lira_fileio_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let base = dir.to_string_lossy().to_string();
+
+    // Each fiber writes "payload-<id>" to its own file, reads it back, and
+    // reports the byte count. The distinct per-id lengths mean a corrupted or
+    // cross-wired handle would change the sum.
+    let source = format!(
+        r#"
+fn work(id: int, dir: string, done: Channel<int>) {{
+    let path = dir + "/f" + id + ".txt"
+    let payload = "payload-" + id
+    let wfd = file_open(path, 1)
+    file_write(wfd, payload)
+    file_close(wfd)
+    let rfd = file_open(path, 0)
+    let content = file_read(rfd, 100000)
+    file_close(rfd)
+    send(done, len(content))
+}}
+fn main() {{
+    let done = chan({n})
+    var i = 0
+    while i < {n} {{
+        spawn work(i, "{base}", done)
+        i = i + 1
+    }}
+    var total = 0
+    var got = 0
+    while got < {n} {{
+        select {{ v = <-done => total = total + v }}
+        got = got + 1
+    }}
+    println(total)
+}}
+main()
+"#,
+        n = N,
+        base = base
+    );
+
+    let output = run(&source);
+    // "payload-" (8) + decimal digits of id, for id in 0..8 → each is 9 bytes.
+    let expected: i64 = (0..N as i64).map(|k| 8 + k.to_string().len() as i64).sum();
+    assert_eq!(output, vec![expected.to_string()]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
