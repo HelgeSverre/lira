@@ -9,7 +9,7 @@
     "installCommand": null,
     "buildCommand": null,
     "outputDirectory": null,
-    "rootDirectory": null,
+    "rootDirectory": "website",
     "directoryListing": false,
     "nodeVersion": "24.x"
   }

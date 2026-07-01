@@ -32,6 +32,12 @@ docs/book/*
 !docs/book/theme/
 docs/stdlib/
 
+# Vercel — keep the project link (project.json) tracked so CLI deploys work
+# from a fresh clone, but ignore everything else, especially the *.local env
+# files which hold production secrets.
+.vercel/*
+!.vercel/project.json
+
 # Misc
 *.log
 *.tmp
