@@ -139,6 +139,79 @@ main()
     );
 }
 
+/// A concurrent TCP echo server: each connection handled on its own thread,
+/// delaying `delay` before echoing, so N clients can overlap.
+fn spawn_echo_server(count: usize, delay: Duration) -> u16 {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().unwrap().port();
+    thread::spawn(move || {
+        for _ in 0..count {
+            let (mut stream, _) = match listener.accept() {
+                Ok(c) => c,
+                Err(_) => return,
+            };
+            thread::spawn(move || {
+                let mut buf = [0u8; 1024];
+                let n = stream.read(&mut buf).unwrap_or(0);
+                thread::sleep(delay);
+                let _ = stream.write_all(&buf[..n]);
+                let _ = stream.flush();
+            });
+        }
+    });
+    port
+}
+
+#[test]
+fn concurrent_tcp_overlaps_and_is_correct() {
+    const N: usize = 8;
+    let delay = Duration::from_millis(300);
+    let port = spawn_echo_server(N, delay);
+
+    // Each fiber connects, writes "ping" (4 bytes), reads the echo, and reports
+    // the echoed length. Sum proves every socket round-tripped correctly.
+    let source = format!(
+        r#"
+fn work(port: int, done: Channel<int>) {{
+    let s = tcp_connect("127.0.0.1", port)
+    tcp_write(s, "ping")
+    let r = tcp_read(s, 1024)
+    tcp_close(s)
+    send(done, len(r))
+}}
+fn main() {{
+    let done = chan({n})
+    var i = 0
+    while i < {n} {{
+        spawn work({port}, done)
+        i = i + 1
+    }}
+    var total = 0
+    var got = 0
+    while got < {n} {{
+        select {{ v = <-done => total = total + v }}
+        got = got + 1
+    }}
+    println(total)
+}}
+main()
+"#,
+        n = N,
+        port = port
+    );
+
+    let start = Instant::now();
+    let output = run(&source);
+    let elapsed = start.elapsed();
+
+    assert_eq!(output, vec![(N * 4).to_string()], "each echo is 4 bytes");
+    assert!(
+        elapsed < delay * N as u32 / 2,
+        "expected TCP reads to overlap, took {:?}",
+        elapsed
+    );
+}
+
 #[test]
 fn concurrent_file_io_is_correct() {
     // N fibers each open a distinct temp file, write their id's worth of bytes,

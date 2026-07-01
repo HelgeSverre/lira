@@ -829,64 +829,72 @@ impl Runtime {
     // TCP Networking Operations
     // ========================================================================
 
-    /// Connect to TCP server, returns socket id or -1 on error
-    pub fn tcp_connect(&mut self, host: &str, port: i64) -> i64 {
+    /// Connect (blocking) with no `&self` — runs on a pool thread. Returns the
+    /// owned stream; the caller allocates the id and inserts it.
+    pub(crate) fn tcp_connect_blocking(host: &str, port: i64) -> Option<TcpStream> {
         use std::net::ToSocketAddrs;
         let addr = format!("{}:{}", host, port);
-        // Resolve address first
-        let socket_addr = match addr.to_socket_addrs() {
-            Ok(mut addrs) => match addrs.next() {
-                Some(a) => a,
-                None => return -1,
-            },
-            Err(_) => return -1,
-        };
-        // Try to connect with timeout (2 seconds default)
-        match TcpStream::connect_timeout(&socket_addr, std::time::Duration::from_secs(2)) {
-            Ok(stream) => {
-                stream
-                    .set_read_timeout(Some(std::time::Duration::from_secs(30)))
-                    .ok();
-                stream
-                    .set_write_timeout(Some(std::time::Duration::from_secs(30)))
-                    .ok();
-                let id = self.next_socket_id;
-                self.next_socket_id += 1;
-                self.tcp_sockets.insert(id, stream);
-                id
+        let socket_addr = addr.to_socket_addrs().ok()?.next()?;
+        let stream =
+            TcpStream::connect_timeout(&socket_addr, std::time::Duration::from_secs(2)).ok()?;
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(30)))
+            .ok();
+        stream
+            .set_write_timeout(Some(std::time::Duration::from_secs(30)))
+            .ok();
+        Some(stream)
+    }
+
+    /// Write to an owned socket (checked out of the registry). Off-VM-thread safe.
+    pub(crate) fn tcp_write_blocking(stream: &mut TcpStream, data: &str) -> i64 {
+        match stream.write(data.as_bytes()) {
+            Ok(n) => {
+                stream.flush().ok();
+                n as i64
             }
             Err(_) => -1,
         }
     }
 
+    /// Read from an owned socket (checked out of the registry). Off-VM-thread safe.
+    pub(crate) fn tcp_read_blocking(stream: &mut TcpStream, max_bytes: i64) -> String {
+        let mut buffer = vec![0u8; max_bytes.min(65536).max(0) as usize];
+        match stream.read(&mut buffer) {
+            Ok(n) => {
+                buffer.truncate(n);
+                String::from_utf8_lossy(&buffer).to_string()
+            }
+            Err(_) => String::new(),
+        }
+    }
+
+    /// Connect to TCP server, returns socket id or -1 on error
+    pub fn tcp_connect(&mut self, host: &str, port: i64) -> i64 {
+        match Self::tcp_connect_blocking(host, port) {
+            Some(stream) => {
+                let id = self.next_socket_id;
+                self.next_socket_id += 1;
+                self.tcp_sockets.insert(id, stream);
+                id
+            }
+            None => -1,
+        }
+    }
+
     /// Write data to socket, returns bytes written or -1
     pub fn tcp_write(&mut self, socket_id: i64, data: &str) -> i64 {
-        if let Some(stream) = self.tcp_sockets.get_mut(&socket_id) {
-            match stream.write(data.as_bytes()) {
-                Ok(n) => {
-                    stream.flush().ok();
-                    n as i64
-                }
-                Err(_) => -1,
-            }
-        } else {
-            -1
+        match self.tcp_sockets.get_mut(&socket_id) {
+            Some(stream) => Self::tcp_write_blocking(stream, data),
+            None => -1,
         }
     }
 
     /// Read data from socket (up to max_bytes)
     pub fn tcp_read(&mut self, socket_id: i64, max_bytes: i64) -> String {
-        if let Some(stream) = self.tcp_sockets.get_mut(&socket_id) {
-            let mut buffer = vec![0u8; max_bytes.min(65536) as usize];
-            match stream.read(&mut buffer) {
-                Ok(n) => {
-                    buffer.truncate(n);
-                    String::from_utf8_lossy(&buffer).to_string()
-                }
-                Err(_) => String::new(),
-            }
-        } else {
-            String::new()
+        match self.tcp_sockets.get_mut(&socket_id) {
+            Some(stream) => Self::tcp_read_blocking(stream, max_bytes),
+            None => String::new(),
         }
     }
 
@@ -911,16 +919,18 @@ impl Runtime {
 
     /// DNS lookup - resolve hostname to IP
     pub fn dns_lookup(&self, hostname: &str) -> String {
+        Self::dns_lookup_blocking(hostname)
+    }
+
+    /// Blocking DNS resolution with no `&self` — safe to run off the VM thread.
+    pub(crate) fn dns_lookup_blocking(hostname: &str) -> String {
         use std::net::ToSocketAddrs;
         let addr = format!("{}:80", hostname);
         match addr.to_socket_addrs() {
-            Ok(mut addrs) => {
-                if let Some(addr) = addrs.next() {
-                    addr.ip().to_string()
-                } else {
-                    String::new()
-                }
-            }
+            Ok(mut addrs) => addrs
+                .next()
+                .map(|a| a.ip().to_string())
+                .unwrap_or_default(),
             Err(_) => String::new(),
         }
     }

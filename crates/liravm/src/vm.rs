@@ -2845,15 +2845,100 @@ impl VM {
             // ================================================================
 
             // tcp_connect(host: string, port: int) -> int (socket id or -1)
-            80 => sys_typed!("tcp_connect", str host, int port => Int: tcp_connect),
+            80 => {
+                let port = self.pop()?;
+                let host = self.pop()?;
+                let (Value::String(host), Value::Int(port)) = (&host, &port) else {
+                    return Err("tcp_connect requires (string, int) arguments".to_string());
+                };
+                let (host, port) = ((**host).clone(), *port);
+                if let Some(fiber) = self.io_offload_target() {
+                    let id = self.runtime.alloc_socket_id();
+                    self.offload_io(crate::io_pool::IoJob::new(fiber, move || {
+                        match Runtime::tcp_connect_blocking(&host, port) {
+                            Some(stream) => Ok(crate::io_pool::IoValue::TcpConnected { id, stream }),
+                            None => Ok(crate::io_pool::IoValue::Int(-1)),
+                        }
+                    }));
+                    return Ok(());
+                }
+                let id = self.runtime.tcp_connect(&host, port);
+                self.stack.push(Value::Int(id));
+                Ok(())
+            }
             // tcp_write(socket_id: int, data: string) -> int (bytes written or -1)
-            81 => sys_typed!("tcp_write", int socket_id, str data => Int: tcp_write),
+            81 => {
+                let data = self.pop()?;
+                let socket_id = self.pop()?;
+                let (Value::Int(socket_id), Value::String(data)) = (&socket_id, &data) else {
+                    return Err("tcp_write requires (int, string) arguments".to_string());
+                };
+                let (socket_id, data) = (*socket_id, (**data).clone());
+                if let Some(fiber) = self.io_offload_target() {
+                    if let Some(mut stream) = self.runtime.checkout_socket(socket_id) {
+                        self.offload_io(crate::io_pool::IoJob::new(fiber, move || {
+                            let n = Runtime::tcp_write_blocking(&mut stream, &data);
+                            Ok(crate::io_pool::IoValue::TcpOp {
+                                id: socket_id,
+                                stream,
+                                result: Box::new(crate::io_pool::IoValue::Int(n)),
+                            })
+                        }));
+                        return Ok(());
+                    }
+                    self.stack.push(Value::Int(-1));
+                    return Ok(());
+                }
+                let n = self.runtime.tcp_write(socket_id, &data);
+                self.stack.push(Value::Int(n));
+                Ok(())
+            }
             // tcp_read(socket_id: int, max_bytes: int) -> string
-            82 => sys_typed!("tcp_read", int socket_id, int max_bytes => Str: tcp_read),
-            // tcp_close(socket_id: int) -> bool
+            82 => {
+                let max_bytes = self.pop()?;
+                let socket_id = self.pop()?;
+                let (Value::Int(socket_id), Value::Int(max_bytes)) = (&socket_id, &max_bytes) else {
+                    return Err("tcp_read requires (int, int) arguments".to_string());
+                };
+                let (socket_id, max_bytes) = (*socket_id, *max_bytes);
+                if let Some(fiber) = self.io_offload_target() {
+                    if let Some(mut stream) = self.runtime.checkout_socket(socket_id) {
+                        self.offload_io(crate::io_pool::IoJob::new(fiber, move || {
+                            let s = Runtime::tcp_read_blocking(&mut stream, max_bytes);
+                            Ok(crate::io_pool::IoValue::TcpOp {
+                                id: socket_id,
+                                stream,
+                                result: Box::new(crate::io_pool::IoValue::Str(s)),
+                            })
+                        }));
+                        return Ok(());
+                    }
+                    self.stack.push(Value::String(Rc::new(String::new())));
+                    return Ok(());
+                }
+                let s = self.runtime.tcp_read(socket_id, max_bytes);
+                self.stack.push(Value::String(Rc::new(s)));
+                Ok(())
+            }
+            // tcp_close(socket_id: int) -> bool  (inline: fast, drops the socket)
             83 => sys_typed!("tcp_close", int socket_id => Bool: tcp_close),
             // dns_lookup(hostname: string) -> string (IP address or empty)
-            84 => sys_typed!("dns_lookup", str hostname => Str: dns_lookup),
+            84 => {
+                let hostname = self.pop()?;
+                let Value::String(hostname) = &hostname else {
+                    return Err("dns_lookup requires string argument".to_string());
+                };
+                let hostname = (**hostname).clone();
+                if let Some(fiber) = self.io_offload_target() {
+                    self.offload_io(crate::io_pool::IoJob::new(fiber, move || {
+                        Ok(crate::io_pool::IoValue::Str(Runtime::dns_lookup_blocking(&hostname)))
+                    }));
+                    return Ok(());
+                }
+                let s = self.runtime.dns_lookup(&hostname);
+                self.stack.push(Value::String(Rc::new(s)));
+                Ok(())
+            }
 
             // ================================================================
             // OS syscalls (90-101)
