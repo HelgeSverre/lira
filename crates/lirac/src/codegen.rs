@@ -648,6 +648,25 @@ impl CodeGenerator {
         None
     }
 
+    /// Allocate a fresh local slot for a compiler-introduced temporary (e.g.
+    /// staging the RHS of a field/element assignment). VM frames grow their
+    /// locals on demand, so a temp just extends the high-water mark.
+    fn alloc_temp(&mut self) -> u16 {
+        let slot = self.next_local;
+        self.next_local += 1;
+        slot
+    }
+
+    fn store_temp(&mut self, slot: u16) {
+        self.emit_opcode(Opcode::StoreLocal);
+        self.emit_u16(slot);
+    }
+
+    fn load_temp(&mut self, slot: u16) {
+        self.emit_opcode(Opcode::LoadLocal);
+        self.emit_u16(slot);
+    }
+
     /// Rearrange call arguments into the callee's declared parameter order so
     /// named arguments bind to the correct slots at runtime.
     ///
@@ -2581,25 +2600,50 @@ impl CodeGenerator {
                 }
             }
 
-            ExpressionKind::Assign { target, value } => {
-                self.generate_expression(value);
-                // Duplicate value so assignment expression has a result
-                self.emit_opcode(Opcode::Dup);
-
-                if let ExpressionKind::Identifier(name) = &target.kind {
+            ExpressionKind::Assign { target, value } => match &target.kind {
+                ExpressionKind::Identifier(name) => {
+                    self.generate_expression(value);
+                    // Duplicate value so assignment expression has a result
+                    self.emit_opcode(Opcode::Dup);
                     if let Some(slot) = self.lookup_local(name) {
                         self.emit_opcode(Opcode::StoreLocal);
                         self.emit_u16(slot);
                     }
+                    // Stack now has the assigned value as the expression result
                 }
-                // Stack now has the assigned value as the expression result
-            }
+                // `obj.field = value` — stash the value in a temp, mutate the
+                // object in place (objects are shared refs), then reload the
+                // temp so the assignment expression still yields the value.
+                ExpressionKind::FieldAccess { object, field } => {
+                    let tmp = self.alloc_temp();
+                    self.generate_expression(value);
+                    self.store_temp(tmp);
+                    self.generate_expression(object);
+                    self.load_temp(tmp);
+                    let idx = self.add_constant(Constant::String(field.clone()));
+                    self.emit_opcode(Opcode::SetField);
+                    self.emit_u16(idx);
+                    self.load_temp(tmp);
+                }
+                // `arr[index] = value` — same shape, via ArraySet.
+                ExpressionKind::Index { object, index } => {
+                    let tmp = self.alloc_temp();
+                    self.generate_expression(value);
+                    self.store_temp(tmp);
+                    self.generate_expression(object);
+                    self.generate_expression(index);
+                    self.load_temp(tmp);
+                    self.emit_opcode(Opcode::ArraySet);
+                    self.load_temp(tmp);
+                }
+                _ => {
+                    self.errors.push(CodegenError::GenericError {
+                        message: "Invalid assignment target".to_string(),
+                    });
+                }
+            },
 
             ExpressionKind::CompoundAssign { target, op, value } => {
-                // target = target op value
-                self.generate_expression(target);
-                self.generate_expression(value);
-
                 let opcode = match op {
                     BinaryOp::Add => Opcode::Add,
                     BinaryOp::Sub => Opcode::Sub,
@@ -2618,14 +2662,65 @@ impl CodeGenerator {
                         return;
                     }
                 };
-                self.emit_opcode(opcode);
-                // Duplicate value so compound assignment expression has a result
-                self.emit_opcode(Opcode::Dup);
 
-                if let ExpressionKind::Identifier(name) = &target.kind {
-                    if let Some(slot) = self.lookup_local(name) {
-                        self.emit_opcode(Opcode::StoreLocal);
-                        self.emit_u16(slot);
+                match &target.kind {
+                    ExpressionKind::Identifier(name) => {
+                        self.generate_expression(target);
+                        self.generate_expression(value);
+                        self.emit_opcode(opcode);
+                        // Duplicate so the compound-assign expression has a result
+                        self.emit_opcode(Opcode::Dup);
+                        if let Some(slot) = self.lookup_local(name) {
+                            self.emit_opcode(Opcode::StoreLocal);
+                            self.emit_u16(slot);
+                        }
+                    }
+                    // `obj.field op= value` — evaluate the object once, read the
+                    // field, apply the op, write it back in place.
+                    ExpressionKind::FieldAccess { object, field } => {
+                        let obj_slot = self.alloc_temp();
+                        let new_slot = self.alloc_temp();
+                        self.generate_expression(object);
+                        self.store_temp(obj_slot);
+                        self.load_temp(obj_slot);
+                        let idx = self.add_constant(Constant::String(field.clone()));
+                        self.emit_opcode(Opcode::GetField);
+                        self.emit_u16(idx);
+                        self.generate_expression(value);
+                        self.emit_opcode(opcode);
+                        self.store_temp(new_slot);
+                        self.load_temp(obj_slot);
+                        self.load_temp(new_slot);
+                        let idx2 = self.add_constant(Constant::String(field.clone()));
+                        self.emit_opcode(Opcode::SetField);
+                        self.emit_u16(idx2);
+                        self.load_temp(new_slot);
+                    }
+                    // `arr[index] op= value` — evaluate array and index once.
+                    ExpressionKind::Index { object, index } => {
+                        let arr_slot = self.alloc_temp();
+                        let idx_slot = self.alloc_temp();
+                        let new_slot = self.alloc_temp();
+                        self.generate_expression(object);
+                        self.store_temp(arr_slot);
+                        self.generate_expression(index);
+                        self.store_temp(idx_slot);
+                        self.load_temp(arr_slot);
+                        self.load_temp(idx_slot);
+                        self.emit_opcode(Opcode::ArrayGet);
+                        self.generate_expression(value);
+                        self.emit_opcode(opcode);
+                        self.store_temp(new_slot);
+                        self.load_temp(arr_slot);
+                        self.load_temp(idx_slot);
+                        self.load_temp(new_slot);
+                        self.emit_opcode(Opcode::ArraySet);
+                        self.load_temp(new_slot);
+                    }
+                    _ => {
+                        self.errors.push(CodegenError::GenericError {
+                            message: "Invalid compound-assignment target".to_string(),
+                        });
                     }
                 }
                 // Stack now has the assigned value as the expression result
