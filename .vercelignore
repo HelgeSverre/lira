@@ -1,0 +1,17 @@
+# Vercel builds website/ (project rootDirectory), but the Astro build reads a
+# few sibling paths from the repo root: examples/*.li and stdlib/*.li (embedded
+# snippets resolved by Code.astro) and editors/vscode-lira/syntaxes/lira.tmLanguage.json
+# (the Shiki highlighting grammar loaded by astro.config.mjs).
+#
+# Everything else (crates/, docs/, lira-playground/, the rest of editors/,
+# target/) is irrelevant to the site and — editors/ alone is ~15MB — pushes the
+# CLI upload past Vercel's 10MB limit. Allowlist only what the build needs.
+/*
+!/website
+!/examples
+!/stdlib
+!/editors
+/editors/*
+!/editors/vscode-lira
+/editors/vscode-lira/*
+!/editors/vscode-lira/syntaxes
