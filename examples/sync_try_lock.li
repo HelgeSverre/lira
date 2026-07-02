@@ -1,0 +1,36 @@
+// Non-blocking try_lock on a mutex.
+//
+// try_lock attempts to acquire the lock WITHOUT blocking: it returns
+// SyncTryLock::Acquired(value) when the lock was free (the caller now holds it and
+// MUST unlock), or SyncTryLock::Busy when another holder has it. This is fully
+// deterministic in a single fiber, so no spawn/timing is involved.
+// @expect: acquired 5
+// @expect: busy
+// @expect: acquired 6
+
+import std.sync
+
+fn main() {
+    let m = new_int_mutex(5)
+
+    // First attempt: the value is available -> Acquired. We now hold the lock.
+    match m.try_lock() {
+        SyncTryLock::Acquired(v) => { println("acquired " + v) }
+        SyncTryLock::Busy => { println("busy") }
+    }
+
+    // Second attempt while still holding it (never unlocked) -> Busy.
+    match m.try_lock() {
+        SyncTryLock::Acquired(v) => { println("acquired " + v) }
+        SyncTryLock::Busy => { println("busy") }
+    }
+
+    // Release with an incremented value, then a fresh try succeeds again.
+    m.unlock(6)
+    match m.try_lock() {
+        SyncTryLock::Acquired(v) => { println("acquired " + v) }
+        SyncTryLock::Busy => { println("busy") }
+    }
+}
+
+main()

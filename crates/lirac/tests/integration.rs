@@ -272,6 +272,8 @@ example_test!(test_module_comprehensive, "module_comprehensive.li");
 
 // OOP features
 example_test!(test_classes_basic, "classes_basic.li");
+example_test!(test_class_inheritance, "class_inheritance.li");
+example_test!(test_class_methods, "class_methods.li");
 example_test!(test_enums_basic, "enums_basic.li");
 example_test!(test_enum_data, "enum_data.li");
 example_test!(test_generic_enum, "generic_enum.li");
@@ -320,6 +322,7 @@ example_test!(test_collections_deep_module, "test_collections_deep.li");
 example_test!(test_sync_mutex_waitgroup, "sync_mutex_waitgroup.li");
 example_test!(test_sync_semaphore, "sync_semaphore.li");
 example_test!(test_sync_with_closure, "sync_with_closure.li");
+example_test!(test_sync_try_lock, "sync_try_lock.li");
 
 // Parser/lexer gaps: turbofish, free 'default' identifier, supertraits
 example_test!(test_turbofish, "turbofish.li");

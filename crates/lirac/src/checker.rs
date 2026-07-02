@@ -1596,6 +1596,26 @@ impl TypeChecker {
                 type_params,
                 methods,
             } => {
+                // Reject `impl` blocks on a class. Classes dispatch dynamically
+                // (methods attached to each instance) so virtual overrides work;
+                // an impl block would register the methods for static dispatch,
+                // silently defeating overrides and colliding in the function
+                // table. Classes must define methods inline instead.
+                let target_is_class = matches!(
+                    self.env.lookup_type(type_name).map(|td| &td.kind),
+                    Some(TypeDefKind::Class { .. })
+                );
+                if target_is_class {
+                    self.env.error(
+                        &stmt.span,
+                        format!(
+                            "`impl` blocks are not supported on classes; define methods inline \
+                             inside `class {type_name} {{ ... }}` instead"
+                        ),
+                    );
+                    return;
+                }
+
                 // Set current type name for Self resolution
                 let old_type_name = self.current_type_name.clone();
                 self.current_type_name = Some(type_name.clone());
@@ -6410,6 +6430,43 @@ mod tests {
             class Derived extends Base {
                 override fn foo(self) -> int { return 10 }
                 override fn bar(self) -> int { return 20 }
+            }
+            "#
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn test_impl_block_on_class_is_rejected() {
+        // An `impl` block targeting a class must be rejected: classes dispatch
+        // dynamically (methods attached per-instance) so an impl block would
+        // register static-dispatch methods that silently defeat overrides.
+        let result = check_source(
+            r#"
+            class Dog {
+                name: string
+            }
+            impl Dog {
+                fn speak(self) -> string { return "Woof" }
+            }
+            "#,
+        );
+        assert!(result.is_err(), "impl on a class should be a checker error");
+        let msg = format!("{:?}", result.unwrap_err());
+        assert!(
+            msg.contains("impl") && msg.contains("class"),
+            "error should explain impl-on-class, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_impl_block_on_struct_still_allowed() {
+        // The rejection must be class-specific — impl on a struct is fine.
+        assert!(check_source(
+            r#"
+            struct Point { x: int }
+            impl Point {
+                fn get(self) -> int { return self.x }
             }
             "#
         )

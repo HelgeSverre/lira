@@ -16,7 +16,8 @@
 //   Go-style counter, because a counter would itself need a Mutex.
 //
 // Primitives provided (all proven by the spike on the real VM):
-//   - IntMutex / StringMutex : mutual exclusion over a single value
+//   - IntMutex / StringMutex : mutual exclusion over a single value, with a
+//                              non-blocking `try_lock` (returns a SyncTryLock enum)
 //   - WaitGroup              : block until N workers signal done
 //   - Semaphore              : bound concurrency to N permits
 //
@@ -35,6 +36,21 @@
 //   spawn worker(m)
 //   let v = m.lock()
 //   m.unlock(v + 1)
+
+// ============================================================================
+// try_lock result
+// ============================================================================
+//
+// try_lock cannot block, so it needs to report whether the lock was taken.
+// Lira has no built-in Option, so the honest return is a small enum: the
+// caller pattern-matches on it. `Acquired(v)` means the lock is now HELD by the
+// caller (who must `unlock`); `Busy` means someone else holds it and nothing
+// was taken.
+
+enum SyncTryLock<T> {
+    Acquired(T),
+    Busy
+}
 
 // ============================================================================
 // Mutex (over an int value)
@@ -66,6 +82,18 @@ impl IntMutex {
     /// Release the lock, storing `value` as the new protected value.
     fn unlock(self, value: int) {
         select { value -> self.ch => {} }
+    }
+
+    /// Non-blocking acquire. Returns `SyncTryLock::Acquired(value)` and takes the
+    /// lock if it was free, or `SyncTryLock::Busy` (taking nothing) if it is held.
+    /// The default arm makes the receive non-blocking. On `Acquired` the caller
+    /// MUST `unlock`.
+    fn try_lock(self) -> SyncTryLock<int> {
+        select {
+            v = <-self.ch => { return SyncTryLock::Acquired(v) }
+            _ => { return SyncTryLock::Busy }
+        }
+        return SyncTryLock::Busy
     }
 
     /// Bracketed critical section: lock, apply `f` to the current value, and
@@ -103,6 +131,17 @@ impl StringMutex {
     /// Release the lock, storing `value` as the new protected value.
     fn unlock(self, value: string) {
         select { value -> self.ch => {} }
+    }
+
+    /// Non-blocking acquire. Returns `SyncTryLock::Acquired(value)` and takes the
+    /// lock if it was free, or `SyncTryLock::Busy` (taking nothing) if it is held.
+    /// On `Acquired` the caller MUST `unlock`.
+    fn try_lock(self) -> SyncTryLock<string> {
+        select {
+            v = <-self.ch => { return SyncTryLock::Acquired(v) }
+            _ => { return SyncTryLock::Busy }
+        }
+        return SyncTryLock::Busy
     }
 
     /// Bracketed critical section: lock, apply `f`, unlock the result.

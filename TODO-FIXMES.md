@@ -42,13 +42,14 @@ Findings from a deep code review comparing Lira to Sema. Items to address before
 
 ## 🟡 Significant — Shallow Implementations
 
-### LSP Is Mostly Semantic now (diagnostics + hover + completion DONE; references/rename remain)
+### LSP Is Mostly Semantic now (diagnostics + hover + completion + references/rename DONE)
 - **DONE:** Diagnostics surface structured `CheckerError`/`CodegenError` (`crates/lirac/src/errors.rs`) with spans.
 - **DONE (2026-06-23):** **Hover** and **member completion** are type-aware via `SemanticTables`. New error-tolerant `lirac::analyze()` returns AST + `sema` + diagnostics even on errors (editor buffers are usually mid-edit); a cursor→innermost-NodeId walker (`lira-lsp/src/sema_index.rs`) resolves the node under the cursor; hover shows the resolved `Type` (`expr_types`/`field_resolution`/`call_resolution`), and `.`-completion lists a receiver's real fields + methods (`type_members`). Parser hardened with a recursion-depth guard so malformed buffers can't crash the LSP.
+- **DONE (2026-06-24):** **References/Rename** are scope-aware via `sema_refs::resolve_symbol_at` + `collect_symbol_ranges` (uses the checker's `symbol_refs`/`SymbolId` binding table), with member-aware fallbacks (`resolve_member_at`/`collect_member_ranges`). Shadowed bindings resolve to the correct declaration.
+- **DONE (2026-07-02):** **Go-to-definition** is scope-aware — `definition.rs` resolves the `SymbolId`/member under the cursor via `sema_refs` and jumps to the binding's declaration, falling back to the type/top-level regex search only for symbols the semantic tables don't track. Shadowed locals jump to the correct `let`.
 - **Still regex/text-based (remaining):**
-  - References/Rename: text-based search, not scope-aware
   - Code actions: string manipulation (`let` ↔ `var` toggle, etc.)
-- Fix (remaining): wire `SemanticTables`/`symbol_refs` into scope-aware references + rename.
+  - Document highlight, workspace symbols, document links, inlay hints: still largely regex-driven (polish, not correctness).
 
 ### Tests: mostly green (was reported broken — partly corrected)
 - ~~`cargo test` fails on `examples/char_literals.li`~~ **FIXED (2026-06-23).** The failure was a **malformed example**, not a lexer bug — the lexer handles `\n`/`\t`/`\'`/`\\` char escapes fine. The corrected `examples/char_literals.li` compiles, runs, and matches its `@expect` directives. The full example suite is green (85/85 examples; `cargo test --workspace` all pass).
@@ -63,13 +64,14 @@ Findings from a deep code review comparing Lira to Sema. Items to address before
 
 ## 🟠 Minor — Missing Pieces
 
-### TODOs in Code
-- `checker.rs:3241`: Handle named argument reordering
-- `checker.rs:4015`: Handle explicit type args for generic methods  
-- `parser.rs:805`: Parse supertraits (`trait Ord: Eq { }`)
-- `parser.rs:1584`: Parse turbofish syntax (`::<T>`)
-- `vm.rs:539`: Get function name from debug info for call frames
-- `lira-doc/extractor.rs:380`: Format default parameter expressions
+### TODOs in Code — DONE (2026-07-02)
+- **All six resolved and verified against current source** (`grep -n 'TODO\|FIXME'` over these files is now clean):
+  - ~~`checker.rs`: named argument reordering~~ — handled.
+  - ~~`checker.rs`: explicit type args for generic methods~~ — turbofish type args are parsed and erased at runtime (type-erased generics, by design).
+  - ~~`parser.rs`: parse supertraits (`trait Ord: Eq { }`)~~ — parsed (`parser.rs` supertrait list, `trait Ord: Eq + Clone { }`).
+  - ~~`parser.rs`: parse turbofish syntax (`::<T>`)~~ — parsed (`parse_turbofish_args`, both path and method-call forms).
+  - ~~`vm.rs`: function name from debug info for call frames~~ — call frames resolve names via `function_name_at(frame.func_offset)`.
+  - ~~`lira-doc/extractor.rs`: format default parameter expressions~~ — handled.
 
 ### VM Code Duplication — mostly DONE
 - **DONE (2026-06-23):** the duplicated fetch/decode block was extracted into a shared `decode_next()`, and the ~789-line `execute_opcode()` was split into category helpers (`execute_arithmetic`/`comparison`/`memory`/`control_flow`/`type`/`system`/`fiber_channel`).

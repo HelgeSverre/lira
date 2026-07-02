@@ -1,0 +1,45 @@
+// Class methods with inheritance and virtual dispatch.
+//
+// Exercises the parts of class codegen that used to be a no-op (so any method
+// call died at runtime with "Cannot call null"):
+//   - a base class method,
+//   - a subclass `override` that wins over the inherited method,
+//   - an INHERITED method that calls `self.speak()` and must dispatch to the
+//     concrete instance's override (true virtual dispatch), and
+//   - multi-level inheritance (Puppy -> Dog -> Animal).
+// @expect: Generic says ...
+// @expect: Rex says Woof
+// @expect: Bella says Yip
+// @expect: base-describe-uses-override: Rex says Woof
+
+class Animal {
+    name: string
+    fn speak(self) -> string { return "..." }
+    fn describe(self) -> string { return self.name + " says " + self.speak() }
+}
+
+class Dog extends Animal {
+    override fn speak(self) -> string { return "Woof" }
+}
+
+class Puppy extends Dog {
+    override fn speak(self) -> string { return "Yip" }
+}
+
+fn main() {
+    let a = Animal { name: "Generic" }
+    let d = Dog { name: "Rex" }
+    let p = Puppy { name: "Bella" }
+
+    // describe() is only declared on Animal; each call must use the concrete
+    // class's speak() override via virtual dispatch.
+    println(a.describe())
+    println(d.describe())
+    println(p.describe())
+
+    // Direct proof that the inherited (base-declared) describe picks up the
+    // subclass override rather than the ancestor's speak.
+    println("base-describe-uses-override: " + d.describe())
+}
+
+main()

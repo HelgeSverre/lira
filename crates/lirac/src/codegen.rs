@@ -170,8 +170,14 @@ pub struct CodeGenerator {
     errors: Vec<CodegenError>,
     /// Debug information
     debug_info: DebugInfo,
-    /// Struct method table: struct_name -> method_name -> code_offset
+    /// Struct method table: struct_name -> method_name -> code_offset.
+    /// Also holds each class's OWN methods (inherited methods are resolved by
+    /// walking `class_parents` at instance-construction time).
     struct_methods: HashMap<String, HashMap<String, usize>>,
+    /// Class inheritance edges: class_name -> parent class name (if any). Used to
+    /// resolve the full method set (own + inherited, child overrides win) when a
+    /// class instance is constructed. Only classes appear here.
+    class_parents: HashMap<String, Option<String>>,
     /// Captured variables for current closure (name -> capture index)
     captures: Vec<String>,
     /// Function default parameter values: fn_name -> [(param_index, default_expr)]
@@ -238,6 +244,7 @@ impl CodeGenerator {
             errors: Vec::new(),
             debug_info: DebugInfo::new(),
             struct_methods: HashMap::new(),
+            class_parents: HashMap::new(),
             captures: Vec::new(),
             function_defaults: HashMap::new(),
             function_param_names: HashMap::new(),
@@ -330,6 +337,13 @@ impl CodeGenerator {
                         }
                     }
                 }
+                StatementKind::ClassDecl { name, parent, .. } => {
+                    // Record the inheritance edge so a class instance can be
+                    // given its full (own + inherited) method set at
+                    // construction. Method bodies are generated in the second
+                    // pass, mirroring `StructDecl`.
+                    self.class_parents.insert(name.clone(), parent.clone());
+                }
                 StatementKind::ConstDecl {
                     name, initializer, ..
                 } => {
@@ -349,21 +363,30 @@ impl CodeGenerator {
         let main_jump_offset = self.current_offset();
         self.emit_i16(0); // Placeholder - will be patched
 
-        // Second pass: generate function bodies first (so we know their offsets)
+        // Second pass, part A: generate all TYPE method bodies (struct/impl/
+        // class) before any free-function bodies. This ensures `struct_methods`
+        // is fully populated (with real code offsets) before a function body
+        // that constructs an instance is generated — otherwise a function
+        // declared textually before its type (e.g. `fn main()` above the
+        // classes it uses) would attach no methods and every call on such an
+        // instance would fail at runtime with "Cannot call null". Free-function
+        // forward references are resolved separately via `pending_func_patches`,
+        // so deferring them here is safe.
         for stmt in &program.program.statements {
             match &stmt.kind {
-                StatementKind::FnDecl { .. } => {
-                    self.generate_statement(stmt);
-                }
-                StatementKind::StructDecl { .. } => {
-                    // Generate struct methods (they are functions too)
-                    self.generate_statement(stmt);
-                }
-                StatementKind::ImplDecl { .. } => {
-                    // Generate impl block methods
+                StatementKind::StructDecl { .. }
+                | StatementKind::ImplDecl { .. }
+                | StatementKind::ClassDecl { .. } => {
                     self.generate_statement(stmt);
                 }
                 _ => {}
+            }
+        }
+
+        // Second pass, part B: generate free-function bodies.
+        for stmt in &program.program.statements {
+            if let StatementKind::FnDecl { .. } = &stmt.kind {
+                self.generate_statement(stmt);
             }
         }
 
@@ -387,6 +410,7 @@ impl CodeGenerator {
                 StatementKind::FnDecl { .. }
                     | StatementKind::StructDecl { .. }
                     | StatementKind::ImplDecl { .. }
+                    | StatementKind::ClassDecl { .. }
             ) {
                 self.generate_statement(stmt);
             }
@@ -1146,13 +1170,21 @@ impl CodeGenerator {
                 // but the precondition guarantees a test is required here.
                 self.generate_pattern_check(pattern);
             }
-            // Variable/wildcard never reach here (filtered by pattern_needs_check),
-            // but bind-by-value still always matches for those: just discard.
+            // Variable/wildcard never reach here (filtered by
+            // pattern_needs_check). Any remaining kind (Struct/Range/Or/Binding
+            // nested in a tuple) has no sub-pattern codegen yet: emit a hard
+            // error instead of the old silent always-match `true`, keeping the
+            // stack balanced (element consumed, bool left) so the rest of
+            // codegen can run before compilation fails on the error.
             _ => {
+                self.errors.push(CodegenError::GenericError {
+                    message: "this nested pattern is not yet supported in a tuple pattern"
+                        .to_string(),
+                });
                 self.emit_opcode(Opcode::Pop);
-                let true_idx = self.add_constant(Constant::Bool(true));
+                let false_idx = self.add_constant(Constant::Bool(false));
                 self.emit_opcode(Opcode::LoadConst);
-                self.emit_u16(true_idx);
+                self.emit_u16(false_idx);
             }
         }
     }
@@ -1248,16 +1280,33 @@ impl CodeGenerator {
                 // Stack: [acc] - the combined boolean.
                 false // Needs runtime check
             }
-            PatternKind::Or(_patterns) => {
-                // Any of the patterns can match
+            PatternKind::Struct { .. }
+            | PatternKind::Range { .. }
+            | PatternKind::Or(_)
+            | PatternKind::Binding { .. } => {
+                // These pattern forms have no `match` codegen yet. The parser
+                // does not currently produce them in match arms, so this is a
+                // guard: emitting a hard error (instead of the old silent
+                // always-match) prevents a silent miscompile if parser support
+                // is added later. The arms are listed explicitly (no `_`) so a
+                // future `PatternKind` variant forces a decision here.
+                let kind = match &pattern.kind {
+                    PatternKind::Struct { .. } => "struct",
+                    PatternKind::Range { .. } => "range",
+                    PatternKind::Or(_) => "or (`|`)",
+                    _ => "binding (`@`)",
+                };
+                self.errors.push(CodegenError::GenericError {
+                    message: format!("{kind} patterns are not yet supported in match arms"),
+                });
+                // Consume the loaded subject and leave a `false` so the arm is
+                // treated as non-matching and the stack stays balanced.
+                // Compilation fails on the error above before this can run.
                 self.emit_opcode(Opcode::Pop);
-                // Simplified
-                true
-            }
-            _ => {
-                // Other patterns not yet implemented
-                self.emit_opcode(Opcode::Pop);
-                true
+                let false_idx = self.add_constant(Constant::Bool(false));
+                self.emit_opcode(Opcode::LoadConst);
+                self.emit_u16(false_idx);
+                false
             }
         }
     }
@@ -1823,8 +1872,78 @@ impl CodeGenerator {
                 }
             }
 
-            StatementKind::ClassDecl { .. }
-            | StatementKind::EnumDecl { .. }
+            StatementKind::ClassDecl { name, methods, .. } => {
+                // Emit each class method as a function and register it in the
+                // class's OWN method table. Inherited methods are resolved (and
+                // overridden) at instance-construction time via `class_parents`,
+                // so dispatch stays dynamic (method-as-field) and virtual
+                // dispatch works: `self.m()` inside an inherited method reads the
+                // concrete instance's field, hitting the subclass override.
+                for method in methods {
+                    if let StatementKind::FnDecl {
+                        name: method_name,
+                        params,
+                        body,
+                        ..
+                    } = &method.kind
+                    {
+                        let mangled_name = format!("{}_{}", name, method_name);
+
+                        let func_offset = self.current_offset();
+                        self.functions.push(FunctionInfo {
+                            name: mangled_name.clone(),
+                            code_offset: func_offset,
+                            param_count: params.len() as u8,
+                            local_count: 0,
+                        });
+                        // Capture the index NOW, before generating the body:
+                        // generating the body may push more `FunctionInfo`
+                        // entries (e.g. a nested struct/class declaration with
+                        // methods), so `self.functions.len() - 1` afterward would
+                        // point at the wrong function.
+                        let func_idx = self.functions.len() - 1;
+                        self.debug_info
+                            .add_function_symbol(func_offset as u32, mangled_name.clone());
+
+                        // Register in the class's own method table (used to build
+                        // the resolved set attached to each instance).
+                        self.struct_methods
+                            .entry(name.clone())
+                            .or_default()
+                            .insert(method_name.clone(), func_offset);
+
+                        // Fresh local frame for the method body.
+                        let prev_locals = std::mem::take(&mut self.locals);
+                        let prev_local_types = std::mem::take(&mut self.local_types);
+                        let prev_next_local = self.next_local;
+                        self.locals = vec![HashMap::new()];
+                        self.local_types = vec![HashMap::new()];
+                        self.next_local = 0;
+
+                        for param in params {
+                            self.define_local(&param.name);
+                            if param.name == "self" {
+                                self.define_local_type("self", name);
+                            }
+                        }
+
+                        self.generate_block(body);
+
+                        // Implicit `return null` fallthrough.
+                        let null_idx = self.add_constant(Constant::Null);
+                        self.emit_opcode(Opcode::LoadConst);
+                        self.emit_u16(null_idx);
+                        self.emit_opcode(Opcode::Return);
+
+                        self.functions[func_idx].local_count = self.next_local;
+
+                        self.locals = prev_locals;
+                        self.local_types = prev_local_types;
+                        self.next_local = prev_next_local;
+                    }
+                }
+            }
+            StatementKind::EnumDecl { .. }
             | StatementKind::InterfaceDecl { .. }
             | StatementKind::TypeAlias { .. }
             | StatementKind::Import { .. }
@@ -2241,12 +2360,18 @@ impl CodeGenerator {
                             let var_type = self.lookup_local_type(type_name).cloned();
 
                             if let Some(ref obj_type) = var_type {
-                                // Check if there's a method in struct_methods for this type
-                                let has_method = self
-                                    .struct_methods
-                                    .get(obj_type)
-                                    .map(|methods| methods.contains_key(field))
-                                    .unwrap_or(false);
+                                // Check if there's a method in struct_methods for this type.
+                                // Classes are EXCLUDED from this static-dispatch path: they
+                                // must dispatch dynamically (method-as-field) so that a call
+                                // like `self.speak()` inside an inherited method resolves to
+                                // the concrete instance's override, not the ancestor that
+                                // declared the method. Structs keep static dispatch.
+                                let has_method = !self.class_parents.contains_key(obj_type)
+                                    && self
+                                        .struct_methods
+                                        .get(obj_type)
+                                        .map(|methods| methods.contains_key(field))
+                                        .unwrap_or(false);
 
                                 if has_method {
                                     // Instance method call - call mangled function with self as first arg
@@ -3030,23 +3155,28 @@ impl CodeGenerator {
                     self.emit_u16(idx);
                 }
 
-                // Attach methods to the object if struct has methods
+                // Attach methods to the object. For a class this includes
+                // methods inherited from its ancestors (subclass overrides win),
+                // so a subclass instance carries the correct concrete method for
+                // every name it responds to.
                 if let Some(struct_name) = name {
-                    if let Some(methods) = self.struct_methods.get(struct_name).cloned() {
-                        for (method_name, method_offset) in methods {
-                            // Duplicate the object reference
-                            self.emit_opcode(Opcode::Dup);
+                    let methods = self.resolve_type_methods(struct_name);
+                    // Deterministic emission order for stable bytecode.
+                    let mut methods: Vec<(String, usize)> = methods.into_iter().collect();
+                    methods.sort();
+                    for (method_name, method_offset) in methods {
+                        // Duplicate the object reference
+                        self.emit_opcode(Opcode::Dup);
 
-                            // Load the method as a function value
-                            let func_idx = self.add_constant(Constant::Function(method_offset));
-                            self.emit_opcode(Opcode::LoadConst);
-                            self.emit_u16(func_idx);
+                        // Load the method as a function value
+                        let func_idx = self.add_constant(Constant::Function(method_offset));
+                        self.emit_opcode(Opcode::LoadConst);
+                        self.emit_u16(func_idx);
 
-                            // Set the method as a field on the object
-                            let name_idx = self.add_constant(Constant::String(method_name));
-                            self.emit_opcode(Opcode::SetField);
-                            self.emit_u16(name_idx);
-                        }
+                        // Set the method as a field on the object
+                        let name_idx = self.add_constant(Constant::String(method_name));
+                        self.emit_opcode(Opcode::SetField);
+                        self.emit_u16(name_idx);
                     }
                 }
 
@@ -3408,6 +3538,41 @@ impl CodeGenerator {
         }
     }
 
+    /// The full method table to attach to an instance of `type_name`: the
+    /// type's own methods plus, for a class, every method inherited from its
+    /// ancestors. Ancestors are applied root-first so a subclass method
+    /// overrides the inherited one of the same name (virtual dispatch). A plain
+    /// struct (not in `class_parents`) just yields its own methods.
+    fn resolve_type_methods(&self, type_name: &str) -> HashMap<String, usize> {
+        // Build the ancestry chain child -> ... -> root, guarding against cycles
+        // (the checker rejects inheritance cycles, but never loop unboundedly).
+        let mut chain = Vec::new();
+        let mut current = Some(type_name.to_string());
+        let mut guard = 0;
+        while let Some(name) = current {
+            if chain.contains(&name) {
+                break;
+            }
+            current = self.class_parents.get(&name).cloned().flatten();
+            chain.push(name);
+            guard += 1;
+            if guard > 1000 {
+                break;
+            }
+        }
+
+        // Apply from the root down so nearer (subclass) methods win.
+        let mut resolved = HashMap::new();
+        for name in chain.iter().rev() {
+            if let Some(methods) = self.struct_methods.get(name) {
+                for (method_name, offset) in methods {
+                    resolved.insert(method_name.clone(), *offset);
+                }
+            }
+        }
+        resolved
+    }
+
     /// Get the display name of an expression's type for method dispatch.
     /// Used for method dispatch (e.g., arr.sum() needs to know arr is [int]).
     fn expr_type_name(&self, expr: &Expression) -> Option<String> {
@@ -3531,6 +3696,59 @@ mod tests {
         );
         // The boundary still renders the exact legacy text.
         assert_eq!(generator.errors[0].message(), "Undefined variable: ghost");
+    }
+
+    fn pat(kind: PatternKind) -> Pattern {
+        Pattern {
+            id: crate::ids::NodeId::new(0),
+            kind,
+            span: Span { line: 1, column: 1 },
+        }
+    }
+
+    fn int_lit(n: i64) -> Expression {
+        Expression {
+            id: crate::ids::NodeId::new(0),
+            kind: ExpressionKind::IntLiteral(n),
+            span: Span { line: 1, column: 1 },
+        }
+    }
+
+    #[test]
+    fn unsupported_match_pattern_errors_instead_of_always_matching() {
+        // Regression guard: `Or`/`Struct`/`Range`/`Binding` patterns used to
+        // fall through to a silent always-match (`return true`), which is a
+        // miscompile — the arm would fire for ANY subject. They must now push a
+        // structured error and report needing a runtime check (`false`), never
+        // an unconditional match.
+        for kind in [
+            PatternKind::Or(vec![pat(PatternKind::Literal(int_lit(1)))]),
+            PatternKind::Range {
+                start: Box::new(pat(PatternKind::Literal(int_lit(1)))),
+                end: Box::new(pat(PatternKind::Literal(int_lit(5)))),
+                inclusive: false,
+            },
+            PatternKind::Struct {
+                name: "Point".to_string(),
+                fields: vec![],
+                rest: false,
+            },
+            PatternKind::Binding {
+                name: "x".to_string(),
+                pattern: Box::new(pat(PatternKind::Literal(int_lit(1)))),
+            },
+        ] {
+            let mut generator = CodeGenerator::new();
+            let always_matches = generator.generate_pattern_check(&pat(kind));
+            assert!(
+                !always_matches,
+                "unsupported pattern must NOT report an unconditional match"
+            );
+            assert!(
+                !generator.errors.is_empty(),
+                "unsupported pattern must record a structured error"
+            );
+        }
     }
 
     /// Check if a specific opcode appears in the bytecode's code section

@@ -1,12 +1,27 @@
 //! Go-to-definition support for Lira
 //!
-//! Finds symbol definitions within the document.
+//! Scope-aware: resolves the binding under the cursor to a `SymbolId` (or a
+//! struct member) via the type checker's semantic tables and jumps to its
+//! declaration, so shadowed locals land on the correct `let`. Falls back to a
+//! textual search for symbols the semantic tables don't track (struct/enum/
+//! trait names in type position, imported symbols).
 
+use crate::sema_refs;
 use crate::utils::{self, get_regex};
 use tower_lsp::lsp_types::*;
 
-/// Find the definition of the symbol at the given position
+/// Find the definition of the symbol at the given position.
 pub fn find_definition(uri: &Url, content: &str, position: Position) -> Option<Location> {
+    // Prefer scope-aware resolution: jump to the binding's actual declaration
+    // rather than the first textual match. Only value bindings and struct
+    // members are tracked here; type names fall through to the regex search.
+    if let Some(range) = semantic_definition(content, position) {
+        return Some(Location {
+            uri: uri.clone(),
+            range,
+        });
+    }
+
     let lines: Vec<&str> = content.lines().collect();
     let line_idx = position.line as usize;
 
@@ -20,8 +35,32 @@ pub fn find_definition(uri: &Url, content: &str, position: Position) -> Option<L
     // Get the word at the cursor
     let word_info = utils::get_word_at_position(line, col)?;
 
-    // Search for the definition
+    // Fall back to a textual search for symbols not tracked semantically.
     find_symbol_definition(uri, content, &word_info.text)
+}
+
+/// Resolve the declaration range under the cursor via the semantic tables.
+/// Returns `None` when the buffer fails to parse or the cursor is not on a
+/// tracked binding/member (the caller then falls back to the textual search).
+fn semantic_definition(content: &str, position: Position) -> Option<Range> {
+    let analysis = lirac::analyze(content).ok()?;
+
+    // A value binding (variable, parameter, function name) resolved to a
+    // scope-correct `SymbolId`.
+    if let Some(sym_id) = sema_refs::resolve_symbol_at(&analysis, content, position) {
+        if let Some(range) = sema_refs::decl_range(&analysis, content, sym_id) {
+            return Some(range);
+        }
+    }
+
+    // A struct field or method, scoped by its owner type.
+    if let Some(key) = sema_refs::resolve_member_at(&analysis, content, position) {
+        if let Some(range) = sema_refs::member_decl_range(&analysis, content, &key) {
+            return Some(range);
+        }
+    }
+
+    None
 }
 
 fn find_symbol_definition(uri: &Url, content: &str, symbol: &str) -> Option<Location> {
@@ -184,5 +223,55 @@ fn foo() {}
         assert!(result.is_some());
         // Should find the real definition, not the one in string
         assert_eq!(result.unwrap().range.start.line, 5);
+    }
+
+    // ---- Scope-aware go-to-definition (via the semantic tables) ----
+
+    fn pos(line: u32, character: u32) -> Position {
+        Position { line, character }
+    }
+
+    #[test]
+    fn test_goto_def_shadowed_inner_binding_jumps_to_inner() {
+        // Two distinct `x` bindings: outer (line 0) and inner inside `f` (line
+        // 2). Go-to-definition from the inner use `return x` must land on the
+        // INNER `let x = 2`, never the outer one. A regex search returns the
+        // first textual match (outer), so this only passes when scope-aware.
+        let content = "let x = 1\nfn f() -> int {\n    let x = 2\n    return x\n}\nlet y = x\n";
+        let uri = Url::parse("file:///test.li").unwrap();
+        // Cursor on `return x` (line 3, col 11).
+        let loc = find_definition(&uri, content, pos(3, 11)).expect("resolves");
+        assert_eq!(loc.range.start.line, 2, "inner decl, got {:?}", loc.range);
+    }
+
+    #[test]
+    fn test_goto_def_outer_use_jumps_to_outer() {
+        let content = "let x = 1\nfn f() -> int {\n    let x = 2\n    return x\n}\nlet y = x\n";
+        let uri = Url::parse("file:///test.li").unwrap();
+        // Cursor on the outer use `let y = x` (line 5, col 8).
+        let loc = find_definition(&uri, content, pos(5, 8)).expect("resolves");
+        assert_eq!(loc.range.start.line, 0, "outer decl, got {:?}", loc.range);
+    }
+
+    #[test]
+    fn test_goto_def_parameter_use_jumps_to_param() {
+        // A use of a parameter jumps to the parameter, not to a same-named
+        // top-level binding.
+        let content = "let a = 99\nfn add(a: int, b: int) -> int {\n    return a + b\n}\n";
+        let uri = Url::parse("file:///test.li").unwrap();
+        // Cursor on `return a` (line 2, col 11).
+        let loc = find_definition(&uri, content, pos(2, 11)).expect("resolves");
+        assert_eq!(loc.range.start.line, 1, "param decl, got {:?}", loc.range);
+    }
+
+    #[test]
+    fn test_goto_def_type_name_falls_back_to_struct_decl() {
+        // Struct/enum/trait names in type position aren't value bindings, so the
+        // regex fallback still resolves them.
+        let content = "struct Point {\n    x: int,\n}\nfn main() {\n    let p = Point { x: 1 }\n}\n";
+        let uri = Url::parse("file:///test.li").unwrap();
+        // Cursor on `Point` in the literal (line 4, col 12).
+        let loc = find_definition(&uri, content, pos(4, 12)).expect("resolves");
+        assert_eq!(loc.range.start.line, 0, "struct decl, got {:?}", loc.range);
     }
 }

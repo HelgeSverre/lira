@@ -31,5 +31,5 @@ fn main() {
 
 main()
 
-// Note: Method override with virtual dispatch is type-checked
-// but codegen for runtime dispatch is a Phase 8 TODO
+// Note: Method override with virtual dispatch now works at runtime too —
+// see examples/class_methods.li for overridden and inherited method calls.

@@ -101,6 +101,27 @@ pub fn collect_symbol_ranges(
     ranges
 }
 
+/// The declaration [`Range`] of the binding `sym_id`, if it can be located in
+/// the source. This is the single site go-to-definition jumps to (as opposed to
+/// [`collect_symbol_ranges`], which returns every use). Returns `None` when the
+/// symbol has no recorded declaration node or its name can't be located on the
+/// declaration line (e.g. best-effort `for`-loop bindings).
+pub fn decl_range(analysis: &Analysis, content: &str, sym_id: SymbolId) -> Option<Range> {
+    let decl_node = analysis.sema.symbols.get(&sym_id)?.decl_node;
+    let index = build_node_ranges(analysis, content);
+    index.get(&decl_node).copied()
+}
+
+/// The declaration [`Range`] of a struct/impl member (field or method), if
+/// locatable. When a member is declared more than once (e.g. an `impl` method
+/// name that also appears as a field) the first source-order match is returned.
+pub fn member_decl_range(analysis: &Analysis, content: &str, key: &MemberKey) -> Option<Range> {
+    let lines: Vec<&str> = content.lines().collect();
+    member_decl_ranges(&analysis.program, &lines, key)
+        .into_iter()
+        .min_by_key(|r| (r.start.line, r.start.character))
+}
+
 /// A 0-indexed LSP range covering `name` starting at a 1-indexed AST point.
 fn range_from_point(point: Span, name: &str) -> Range {
     let line = point.line.saturating_sub(1) as u32;
