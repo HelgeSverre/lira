@@ -64,13 +64,6 @@ fn main() {
             }
             disasm_command(&args[2]).map(|_| 0)
         }
-        "repl" => {
-            eprintln!("The REPL is currently under development.");
-            eprintln!("See docs/60-lira-repl.md for the specification and roadmap.");
-            eprintln!();
-            eprintln!("In the meantime, use 'lira run <file.li>' to execute Lira programs.");
-            process::exit(1);
-        }
         "--help" | "-h" | "help" => {
             print_usage();
             process::exit(0);
@@ -445,7 +438,6 @@ COMMANDS:
     check <file.li>            Type check source without compiling
     ast <file.li>              Dump parsed AST as JSON
     disasm <file.lic>          Disassemble bytecode to human-readable form
-    repl                       Interactive REPL (coming soon)
     help                       Show this help message
     version                    Show version information
 

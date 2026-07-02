@@ -280,9 +280,6 @@ Convenience tool that compiles and runs in one step:
 ```bash
 # Compile and run
 lir src/main.li
-
-# Start REPL
-lir
 ```
 
 ### 5.4 Formatter (lifmt)

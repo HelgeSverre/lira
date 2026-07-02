@@ -15,7 +15,7 @@
 1. [Overview](#1-overview)
 2. [lirac - Compiler](#2-lirac---compiler)
 3. [liravm - Virtual Machine](#3-liravm---virtual-machine)
-4. [lir - REPL/Runner](#4-lir---replrunner)
+4. [lir - Runner](#4-lir---runner)
 5. [lifmt - Formatter](#5-lifmt---formatter)
 6. [lidoc - Documentation Generator](#6-lidoc---documentation-generator)
 7. [lipkg - Package Manager](#7-lipkg---package-manager)
@@ -37,7 +37,7 @@
 │  │                                                             ││
 │  │  lirac      Compiler - Compile .li/.liui to .lic bytecode   ││
 │  │  liravm     VM - Execute .lic bytecode                       ││
-│  │  lir      REPL - Interactive Lira shell                 ││
+│  │  lir      Runner - Compile and run Lira source          ││
 │  │  lifmt    Formatter - Format Lira source code           ││
 │  │  lidoc    Docs - Generate documentation                    ││
 │  │  lipkg    Package - Package manager                        ││
@@ -280,14 +280,11 @@ liravm --profile app.lic
 
 ---
 
-## 4. lir - REPL/Runner
+## 4. lir - Runner
 
 ### 4.1 Basic Usage
 
 ```bash
-# Start interactive REPL
-lir
-
 # Run a file
 lir run script.li
 
@@ -295,48 +292,7 @@ lir run script.li
 lir eval "1 + 2 * 3"
 ```
 
-### 4.2 REPL Session
-
-```
-$ lir
-Lira REPL v1.0.0
-Type :help for help, :quit to exit.
-
->>> let x = 42
->>> x * 2
-84
-
->>> fn greet(name: string) -> string {
-...     return "Hello, " + name + "!"
-... }
-
->>> greet("World")
-"Hello, World!"
-
->>> :type greet
-fn(string) -> string
-
->>> :quit
-```
-
-### 4.3 REPL Commands
-
-```
-REPL Commands (prefix with :)
-
-:help              Show this help
-:quit              Exit REPL
-:clear             Clear screen
-:reset             Reset REPL state
-:type <expr>       Show type of expression
-:ast <expr>        Show AST of expression
-:bytecode <expr>   Show bytecode of expression
-:load <file>       Load and execute file
-:save <file>       Save session to file
-:history           Show command history
-```
-
-### 4.4 Script Mode
+### 4.2 Script Mode
 
 ```bash
 # Run script file

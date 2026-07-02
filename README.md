@@ -224,7 +224,6 @@ import std.fs.{read_file, write_file}
 | Documentation Generator | Complete                        |
 | Editor Extensions       | Complete (6 editors)            |
 | Code Formatter          | Planned                         |
-| REPL                    | Planned                         |
 | Debugger                | Planned                         |
 
 ## Contributing

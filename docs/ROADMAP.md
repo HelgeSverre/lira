@@ -589,7 +589,6 @@ _This roadmap tracks the development of Lira as a standalone systems programming
 
 | ID   | Task                    | Description                                                         | Status |
 | ---- | ----------------------- | ------------------------------------------------------------------- | ------ |
-| T9.1 | REPL                    | Interactive interpreter for quick experimentation (`lira repl`)     | [ ]    |
 | T9.2 | AST Dump Flag           | `lira ast file.li` to output parsed AST as JSON                     | [x]    |
 | T9.3 | Bytecode Disassembler   | `lira disasm file.lic` for human-readable bytecode inspection       | [x]    |
 | T9.4 | Debug Symbols           | Emit DWARF-like debug info, source mapping for stack traces         | [ ]    |
@@ -712,7 +711,7 @@ _This roadmap tracks the development of Lira as a standalone systems programming
 
 | ID    | Task              | Description                                  | Status |
 | ----- | ----------------- | -------------------------------------------- | ------ |
-| T16.1 | Online Playground | Web-based REPL (like Go Playground)          | [ ]    |
+| T16.1 | Online Playground | Web-based playground (like the Go Playground) | [ ]    |
 | T16.2 | Language Tutorial | Interactive "Tour of Lira" guide             | [ ]    |
 | T16.3 | Static Analyzer   | Linter with configurable rules (`lira lint`) | [ ]    |
 | T16.4 | JIT Compilation   | Hot-path optimization with tracing JIT       | [ ]    |
