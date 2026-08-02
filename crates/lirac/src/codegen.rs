@@ -428,7 +428,8 @@ impl CodeGenerator {
             let ExpressionKind::Call { callee, args, .. } = &expr.kind else {
                 return false;
             };
-            args.is_empty() && matches!(&callee.kind, ExpressionKind::Identifier(name) if name == "main")
+            args.is_empty()
+                && matches!(&callee.kind, ExpressionKind::Identifier(name) if name == "main")
         });
         if !top_level_calls_main {
             if let Some(main_func) = self.functions.iter().find(|f| f.name == "main") {

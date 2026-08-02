@@ -4,7 +4,9 @@
 //! Expected output is parsed from comments in the source files:
 //! - `// @expect: <output>` - expect this exact line in output
 //! - `// @expect-contains: <text>` - output should contain this text
-//! - `// @expect-error` - expect compilation to fail
+//! - `// @expect-error` - expect error at either compile or runtime
+//! - `// @expect-compile-error` - error must come from the compiler
+//! - `// @expect-runtime-error` - must compile but error at runtime
 //! - `// @skip` - skip this test (for known issues)
 
 use std::fs;
@@ -18,23 +20,42 @@ struct TestResult {
     message: String,
 }
 
+/// What kind of error is expected by the test
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ErrorExpectation {
+    None,
+    Any,
+    Compile,
+    Runtime,
+}
+
+/// Error from compile or runtime with stage info
+struct StageError {
+    message: String,
+    is_compile: bool,
+}
+
 /// Parse expected output from source file comments
-fn parse_expectations(source: &str) -> (Vec<String>, Vec<String>, bool, bool) {
+fn parse_expectations(source: &str) -> (Vec<String>, Vec<String>, ErrorExpectation, bool) {
     let mut expect_lines = Vec::new();
     let mut expect_contains = Vec::new();
-    let mut expect_error = false;
+    let mut expect_error = ErrorExpectation::None;
     let mut skip = false;
 
     for line in source.lines() {
         let trimmed = line.trim();
-        if trimmed.starts_with("// @expect:") {
+        if trimmed.starts_with("// @expect-compile-error") {
+            expect_error = ErrorExpectation::Compile;
+        } else if trimmed.starts_with("// @expect-runtime-error") {
+            expect_error = ErrorExpectation::Runtime;
+        } else if trimmed.starts_with("// @expect:") {
             let value = trimmed.strip_prefix("// @expect:").unwrap().trim();
             expect_lines.push(value.to_string());
         } else if trimmed.starts_with("// @expect-contains:") {
             let value = trimmed.strip_prefix("// @expect-contains:").unwrap().trim();
             expect_contains.push(value.to_string());
         } else if trimmed.starts_with("// @expect-error") {
-            expect_error = true;
+            expect_error = ErrorExpectation::Any;
         } else if trimmed.starts_with("// @skip") {
             skip = true;
         }
@@ -43,18 +64,30 @@ fn parse_expectations(source: &str) -> (Vec<String>, Vec<String>, bool, bool) {
     (expect_lines, expect_contains, expect_error, skip)
 }
 
-/// Compile and run a Lira source file, returning captured output
-fn compile_and_run(source_path: &str) -> Result<Vec<String>, String> {
-    let source = fs::read_to_string(source_path)
-        .map_err(|e| format!("Failed to read {}: {}", source_path, e))?;
+/// Compile and run a Lira source file, returning captured output or stage-aware error
+fn compile_and_run(source_path: &str) -> Result<Vec<String>, StageError> {
+    let source = fs::read_to_string(source_path).map_err(|e| StageError {
+        message: format!("Failed to read {}: {}", source_path, e),
+        is_compile: false,
+    })?;
 
-    // Compile with import support
-    let bytecode = lirac::compile_with_imports(source_path, &source)?;
+    let bytecode = match lirac::compile_with_imports(source_path, &source) {
+        Ok(bc) => bc,
+        Err(e) => {
+            return Err(StageError {
+                message: e,
+                is_compile: true,
+            })
+        }
+    };
 
-    // Run and capture output
-    let (_exit_code, output) = liravm::run_with_capture(&bytecode)?;
-
-    Ok(output)
+    match liravm::run_with_capture(&bytecode) {
+        Ok((_exit_code, output)) => Ok(output),
+        Err(e) => Err(StageError {
+            message: e,
+            is_compile: false,
+        }),
+    }
 }
 
 /// Test a single example file
@@ -85,17 +118,33 @@ fn test_example(path: &Path) -> TestResult {
         };
     }
 
-    // Try to compile and run
     let result = compile_and_run(&source_path);
 
     match result {
         Ok(output) => {
-            if expect_error {
-                return TestResult {
-                    name,
-                    passed: false,
-                    message: "Expected compilation error but succeeded".to_string(),
-                };
+            match expect_error {
+                ErrorExpectation::Compile => {
+                    return TestResult {
+                        name,
+                        passed: false,
+                        message: "Expected compiler error but succeeded".to_string(),
+                    };
+                }
+                ErrorExpectation::Any => {
+                    return TestResult {
+                        name,
+                        passed: false,
+                        message: "Expected error (compile or runtime) but succeeded".to_string(),
+                    };
+                }
+                ErrorExpectation::Runtime => {
+                    return TestResult {
+                        name,
+                        passed: false,
+                        message: "Expected runtime error but succeeded".to_string(),
+                    };
+                }
+                ErrorExpectation::None => {}
             }
 
             // Check expected lines
@@ -147,17 +196,38 @@ fn test_example(path: &Path) -> TestResult {
             }
         }
         Err(e) => {
-            if expect_error {
+            let passed = match expect_error {
+                ErrorExpectation::Compile => e.is_compile,
+                ErrorExpectation::Runtime => !e.is_compile,
+                ErrorExpectation::Any => true,
+                ErrorExpectation::None => false,
+            };
+
+            if passed {
+                let stage = if e.is_compile { "compile" } else { "runtime" };
                 TestResult {
                     name,
                     passed: true,
-                    message: "Expected error (got it)".to_string(),
+                    message: format!("Expected {} error (got it)", stage),
                 }
             } else {
+                let expected = match expect_error {
+                    ErrorExpectation::Compile => "Expected compiler error but got runtime error",
+                    ErrorExpectation::Runtime => "Expected runtime error but got compiler error",
+                    ErrorExpectation::Any => unreachable!(),
+                    ErrorExpectation::None => "",
+                };
+                let detail = if expect_error != ErrorExpectation::None && expected.is_empty() {
+                    format!("{}: {}", expected, e.message)
+                } else if expect_error != ErrorExpectation::None {
+                    format!("{}: {}", expected, e.message)
+                } else {
+                    format!("Error: {}", e.message)
+                };
                 TestResult {
                     name,
                     passed: false,
-                    message: format!("Error: {}", e),
+                    message: detail,
                 }
             }
         }
@@ -329,6 +399,40 @@ example_test!(test_turbofish, "turbofish.li");
 example_test!(test_default_identifier, "default_identifier.li");
 example_test!(test_supertraits, "supertraits.li");
 
+// Additional example files
+example_test!(test_all_binary_ops, "all_binary_ops.li");
+example_test!(test_block_expressions, "block_expressions.li");
+example_test!(test_char_literals, "char_literals.li");
+example_test!(test_concurrent_crawler, "concurrent_crawler.li");
+example_test!(test_const_declarations, "const_declarations.li");
+example_test!(test_cycle_auto_gc, "cycle_auto_gc.li");
+example_test!(test_cycle_stress, "cycle_stress.li");
+example_test!(test_default_params, "default_params.li");
+example_test!(test_empty_array_annotation, "empty_array_annotation.li");
+example_test!(test_factorial_debug, "factorial_debug.li");
+example_test!(test_function_types, "function_types.li");
+example_test!(test_if_expressions, "if_expressions.li");
+example_test!(test_interface_basic, "interface_basic.li");
+example_test!(test_loop_control, "loop_control.li");
+example_test!(test_main_entry_point, "main_entry_point.li");
+example_test!(test_match_exhaustive_enum, "match_exhaustive_enum.li");
+example_test!(
+    test_match_non_exhaustive_enum,
+    "match_non_exhaustive_enum.li"
+);
+example_test!(test_math_inf_nan, "math_inf_nan.li");
+example_test!(test_method_chaining, "method_chaining.li");
+example_test!(test_named_arguments, "named_arguments.li");
+example_test!(test_optional_chaining, "optional_chaining.li");
+example_test!(test_power_operator, "power_operator.li");
+example_test!(test_spawn_expression, "spawn_expression.li");
+example_test!(test_static_method_params, "static_method_params.li");
+example_test!(test_string_escapes, "string_escapes.li");
+example_test!(test_traits_basic, "traits_basic.li");
+example_test!(test_tuple_types, "tuple_types.li");
+example_test!(test_type_alias, "type_alias.li");
+example_test!(test_unary_operators, "unary_operators.li");
+
 // =============================================================================
 // Aggregate test that runs all examples
 // =============================================================================
@@ -389,7 +493,12 @@ fn test_all_examples_compile() {
             continue;
         }
 
-        // Check for expected error marker
+        // Check for expected compile-error marker
+        if source.contains("// @expect-compile-error") {
+            continue;
+        }
+
+        // Check for expected error marker (backward compat: could be compile or runtime)
         if source.contains("// @expect-error") {
             continue;
         }
@@ -405,6 +514,144 @@ fn test_all_examples_compile() {
     if !compile_errors.is_empty() {
         panic!(
             "Compilation errors in {} files:\n{}",
+            compile_errors.len(),
+            compile_errors.join("\n")
+        );
+    }
+}
+
+// =============================================================================
+// Sample tests (tests/samples/)
+// =============================================================================
+
+/// Get all .li files in the tests/samples directory
+fn get_sample_files() -> Vec<std::path::PathBuf> {
+    let samples_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("tests")
+        .join("samples");
+
+    let mut files: Vec<_> = match fs::read_dir(&samples_dir) {
+        Ok(entries) => entries
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "li"))
+            .collect(),
+        Err(_) => {
+            println!("Warning: tests/samples directory not found");
+            return Vec::new();
+        }
+    };
+
+    files.sort();
+    files
+}
+
+macro_rules! sample_test {
+    ($name:ident, $file:expr) => {
+        #[test]
+        fn $name() {
+            let samples_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join("tests")
+                .join("samples");
+            let path = samples_dir.join($file);
+            if !path.exists() {
+                println!("Skipping {} - file not found", $file);
+                return;
+            }
+            let result = test_example(&path);
+            if !result.passed {
+                panic!("{}: {}", result.name, result.message);
+            }
+        }
+    };
+}
+
+sample_test!(test_sample_hello, "hello.li");
+sample_test!(test_sample_arithmetic, "arithmetic.li");
+sample_test!(test_sample_control_flow, "control_flow.li");
+sample_test!(test_sample_fibers_basic, "fibers-basic.li");
+sample_test!(test_sample_ping_pong, "ping-pong.li");
+sample_test!(test_sample_producer_consumer, "producer-consumer.li");
+sample_test!(test_sample_worker_pool, "worker-pool.li");
+sample_test!(test_sample_parallel_sum, "parallel-sum.li");
+sample_test!(test_sample_countdown, "countdown.li");
+
+#[test]
+fn test_all_samples_compile_and_run() {
+    let files = get_sample_files();
+    if files.is_empty() {
+        println!("No sample files found, skipping");
+        return;
+    }
+
+    let mut passed = 0;
+    let mut failed = 0;
+    let mut skipped = 0;
+
+    println!("\n=== Lira Sample Tests ===\n");
+
+    for path in &files {
+        let result = test_example(path);
+        if result.message == "SKIPPED" {
+            skipped += 1;
+            println!("  [SKIP] {}", result.name);
+        } else if result.passed {
+            passed += 1;
+            println!("  [PASS] {} - {}", result.name, result.message);
+        } else {
+            failed += 1;
+            println!("  [FAIL] {} - {}", result.name, result.message);
+        }
+    }
+
+    println!("\n=== Samples Summary ===");
+    println!(
+        "Total: {} | Passed: {} | Failed: {} | Skipped: {}",
+        files.len(),
+        passed,
+        failed,
+        skipped
+    );
+}
+
+#[test]
+fn test_all_samples_compile() {
+    let files = get_sample_files();
+    let mut compile_errors = Vec::new();
+
+    for path in &files {
+        let source = fs::read_to_string(path).expect("Failed to read file");
+        let source_path = path.to_string_lossy().to_string();
+
+        if source.contains("// @skip") {
+            continue;
+        }
+        if source.contains("// @expect-compile-error") {
+            continue;
+        }
+        if source.contains("// @expect-error") {
+            continue;
+        }
+
+        match lirac::compile_with_imports(&source_path, &source) {
+            Ok(_) => {}
+            Err(e) => {
+                compile_errors.push(format!("{}: {}", path.display(), e));
+            }
+        }
+    }
+
+    if !compile_errors.is_empty() {
+        panic!(
+            "Compilation errors in {} sample files:\n{}",
             compile_errors.len(),
             compile_errors.join("\n")
         );

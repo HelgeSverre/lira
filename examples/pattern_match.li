@@ -41,3 +41,16 @@ fn double_it(x: int) -> int {
 println("Testing variable binding:")
 println(double_it(5))
 println(double_it(21))
+
+// @expect: Testing literal patterns:
+// @expect: Perfect!
+// @expect: A
+// @expect: B
+// @expect: F
+// @expect: F
+// @expect: Testing wildcard:
+// @expect: 0
+// @expect: 0
+// @expect: Testing variable binding:
+// @expect: 10
+// @expect: 42

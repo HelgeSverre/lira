@@ -59,13 +59,12 @@ pub fn rename(
 
     // Resolve the target as either a variable/param/fn-name binding (a
     // `SymbolId`) or a struct field/method (scoped by owner type).
-    let ranges = if let Some(sym_id) = sema_refs::resolve_symbol_at(&analysis, content, position) {
-        sema_refs::collect_symbol_ranges(&analysis, content, sym_id, true)
-    } else if let Some(key) = sema_refs::resolve_member_at(&analysis, content, position) {
-        sema_refs::collect_member_ranges(&analysis, content, &key, true)
-    } else {
-        return None;
-    };
+    let ranges = sema_refs::resolve_symbol_at(&analysis, content, position)
+        .map(|sym_id| sema_refs::collect_symbol_ranges(&analysis, content, sym_id, true))
+        .or_else(|| {
+            sema_refs::resolve_member_at(&analysis, content, position)
+                .map(|key| sema_refs::collect_member_ranges(&analysis, content, &key, true))
+        })?;
 
     if ranges.is_empty() {
         return None;

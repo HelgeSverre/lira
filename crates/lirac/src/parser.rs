@@ -138,6 +138,7 @@ impl Parser {
         std::mem::discriminant(&self.peek().kind) == std::mem::discriminant(kind)
     }
 
+    #[allow(dead_code)]
     fn check_any(&self, kinds: &[TokenKind]) -> bool {
         kinds.iter().any(|k| self.check(k))
     }
@@ -258,6 +259,7 @@ impl Parser {
         name: String,
         type_ann: TypeExpr,
         default: Option<Expression>,
+        is_mutable: bool,
         span: Span,
     ) -> Parameter {
         Parameter {
@@ -265,6 +267,7 @@ impl Parser {
             name,
             type_ann,
             default,
+            is_mutable,
             span,
         }
     }
@@ -523,7 +526,7 @@ impl Parser {
                 if self.check(&TokenKind::This) || self.check(&TokenKind::Self_) {
                     self.advance();
                     // Check for 'self mut' or just 'self'
-                    let _is_mut = self.match_token(&TokenKind::Mut);
+                    let is_mut = self.match_token(&TokenKind::Mut);
                     params.push(self.param(
                         "self".to_string(),
                         TypeExpr {
@@ -531,6 +534,7 @@ impl Parser {
                             span: span.clone(),
                         },
                         None,
+                        is_mut,
                         span,
                     ));
                     if !self.match_token(&TokenKind::Comma) {
@@ -550,6 +554,7 @@ impl Parser {
                             span: span.clone(),
                         },
                         None,
+                        false,
                         span,
                     ));
                     if !self.match_token(&TokenKind::Comma) {
@@ -576,7 +581,7 @@ impl Parser {
                     None
                 };
 
-                params.push(self.param(name, type_ann, default, span));
+                params.push(self.param(name, type_ann, default, false, span));
 
                 if !self.match_token(&TokenKind::Comma) {
                     break;
@@ -1197,10 +1202,8 @@ impl Parser {
     fn break_statement(&mut self, span: Span) -> Result<Statement, String> {
         let value = if self.check(&TokenKind::RBrace) || self.check(&TokenKind::Eof) {
             None
-        } else if !self.check_any(&[TokenKind::If, TokenKind::While, TokenKind::For]) {
-            Some(self.expression()?)
         } else {
-            None
+            Some(self.expression()?)
         };
 
         Ok(self.stmt(StatementKind::Break(value), span))
@@ -1501,7 +1504,10 @@ impl Parser {
             // in the unary-minus arm below).
             TokenKind::BigIntLiteral(m) => Err(format!(
                 "{}:{}: integer literal {} out of range for int (max {})",
-                span.line, span.column, m, i64::MAX
+                span.line,
+                span.column,
+                m,
+                i64::MAX
             )),
             TokenKind::FloatLiteral(n) => Ok(self.expr(ExpressionKind::FloatLiteral(*n), span)),
             TokenKind::StringLiteral(s) => {
@@ -1582,7 +1588,10 @@ impl Parser {
                     }
                     return Err(format!(
                         "{}:{}: integer literal -{} out of range for int (min {})",
-                        lit_span.line, lit_span.column, m, i64::MIN
+                        lit_span.line,
+                        lit_span.column,
+                        m,
+                        i64::MIN
                     ));
                 }
                 let operand = self.parse_precedence(Precedence::Unary)?;
@@ -2159,7 +2168,7 @@ impl Parser {
                         span: param_span.clone(),
                     }
                 };
-                params.push(self.param(name, type_ann, None, param_span));
+                params.push(self.param(name, type_ann, None, false, param_span));
                 if !self.match_token(&TokenKind::Comma) {
                     break;
                 }
@@ -3119,7 +3128,38 @@ mod tests {
             if let StatementKind::FnDecl { params, .. } = &methods[0].kind {
                 assert_eq!(params.len(), 1);
                 assert_eq!(params[0].name, "self");
-                // Note: mutability should be tracked somehow
+                assert!(
+                    params[0].is_mutable,
+                    "self mut should set is_mutable to true"
+                );
+            } else {
+                panic!("Expected function");
+            }
+        } else {
+            panic!("Expected ImplDecl");
+        }
+    }
+
+    #[test]
+    fn test_self_param_without_mut() {
+        let source = r#"
+            impl Counter {
+                fn read(self) -> int {
+                    return self.value
+                }
+            }
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let program = parse(&tokens).unwrap();
+
+        if let StatementKind::ImplDecl { methods, .. } = &program.statements[0].kind {
+            if let StatementKind::FnDecl { params, .. } = &methods[0].kind {
+                assert_eq!(params.len(), 1);
+                assert_eq!(params[0].name, "self");
+                assert!(
+                    !params[0].is_mutable,
+                    "self without mut should set is_mutable to false"
+                );
             } else {
                 panic!("Expected function");
             }
@@ -3481,5 +3521,54 @@ mod tests {
         // depth guard. Must return Err instead of overflowing.
         let deep = "(".repeat(5000);
         assert!(parse(&tokenize(&deep).unwrap()).is_err());
+    }
+
+    #[test]
+    fn test_break_without_value() {
+        let source = r#"
+            fn main() {
+                loop {
+                    break
+                }
+            }
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let program = parse(&tokens).unwrap();
+        if let StatementKind::FnDecl { body, .. } = &program.statements[0].kind {
+            if let StatementKind::Loop {
+                body: loop_body, ..
+            } = &body.statements[0].kind
+            {
+                if let StatementKind::Break(val) = &loop_body.statements[0].kind {
+                    assert!(val.is_none(), "break with no value should have None");
+                    return;
+                }
+            }
+        }
+        panic!("Expected break");
+    }
+
+    #[test]
+    fn test_break_with_if_expression_value() {
+        let source = r#"
+            fn main() {
+                loop {
+                    break if true { 1 } else { 0 }
+                }
+            }
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let program = parse(&tokens).unwrap();
+        if let StatementKind::FnDecl { body, .. } = &program.statements[0].kind {
+            if let StatementKind::Loop {
+                body: loop_body, ..
+            } = &body.statements[0].kind
+            {
+                if let StatementKind::Break(Some(_)) = &loop_body.statements[0].kind {
+                    return;
+                }
+            }
+        }
+        panic!("Expected break with if expression value");
     }
 }

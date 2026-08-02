@@ -277,7 +277,7 @@ impl<'a> Lexer<'a> {
         )
     }
 
-    fn skip_whitespace(&mut self) {
+    fn skip_whitespace(&mut self) -> Option<Token> {
         while let Some(ch) = self.peek() {
             match ch {
                 ' ' | '\t' | '\r' | '\n' => {
@@ -293,21 +293,27 @@ impl<'a> Lexer<'a> {
                         // Block comment
                         self.advance(); // consume /
                         self.advance(); // consume *
+                        let mut closed = false;
                         while let Some(ch) = self.peek() {
                             if ch == '*' && self.peek_next() == Some('/') {
                                 self.advance(); // consume *
                                 self.advance(); // consume /
+                                closed = true;
                                 break;
                             }
                             self.advance();
                         }
+                        if !closed {
+                            return Some(self.error_token("Unterminated block comment"));
+                        }
                     } else {
-                        return;
+                        return None;
                     }
                 }
-                _ => return,
+                _ => return None,
             }
         }
+        None
     }
 
     fn scan_identifier(&mut self) -> Token {
@@ -739,7 +745,9 @@ impl<'a> Lexer<'a> {
     }
 
     pub fn scan_token(&mut self) -> Token {
-        self.skip_whitespace();
+        if let Some(error) = self.skip_whitespace() {
+            return error;
+        }
         self.start_token();
 
         let ch = match self.advance() {
@@ -1176,5 +1184,27 @@ mod tests {
         assert!(matches!(tokens[3].kind, TokenKind::LParen));
         assert!(matches!(tokens[4].kind, TokenKind::RParen));
         assert!(matches!(tokens[5].kind, TokenKind::Question));
+    }
+
+    #[test]
+    fn test_unclosed_block_comment_produces_error() {
+        let result = tokenize("let x = 1\n/* unclosed block comment");
+        assert!(
+            result.is_err(),
+            "unclosed block comment should produce error"
+        );
+        assert!(
+            result.unwrap_err().contains("Unterminated block comment"),
+            "error should mention unterminated block comment"
+        );
+    }
+
+    #[test]
+    fn test_closed_block_comment_is_fine() {
+        let tokens = tokenize("let x = /* comment */ 1").unwrap();
+        assert!(matches!(tokens[0].kind, TokenKind::Let));
+        assert!(matches!(&tokens[1].kind, TokenKind::Identifier(s) if s == "x"));
+        assert!(matches!(tokens[2].kind, TokenKind::Eq));
+        assert!(matches!(tokens[3].kind, TokenKind::IntLiteral(1)));
     }
 }

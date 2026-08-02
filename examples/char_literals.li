@@ -1,5 +1,5 @@
 // Test char literals and operations
-// @expect: a
+// @expect: 97
 // @expect: 97
 // @expect: newline test
 

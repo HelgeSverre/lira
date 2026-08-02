@@ -130,8 +130,7 @@ pub enum Opcode {
     ChanRecv = 0xA2,
     /// Close channel
     ChanClose = 0xA3,
-    /// Try receive (non-blocking)
-    ChanTryRecv = 0xA4,
+    // Reserved: ChanTryRecv (0xA4) — non-blocking recv not yet implemented
     /// Select on multiple channels
     Select = 0xA5,
 
@@ -213,7 +212,6 @@ impl Opcode {
             0xA1 => Some(Opcode::ChanSend),
             0xA2 => Some(Opcode::ChanRecv),
             0xA3 => Some(Opcode::ChanClose),
-            0xA4 => Some(Opcode::ChanTryRecv),
             0xA5 => Some(Opcode::Select),
             0xB0 => Some(Opcode::MakeClosure),
             0xB1 => Some(Opcode::LoadCapture),

@@ -1,4 +1,4 @@
-// @expect-error
+// @expect-compile-error
 // A genuinely missing REQUIRED (no-default) parameter must still be an error,
 // even when supplied via named arguments. Here `a` has no default and is not
 // provided, so the call cannot be satisfied.

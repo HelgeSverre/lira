@@ -107,7 +107,7 @@ impl fmt::Display for Value {
             Value::Bool(b) => write!(f, "{}", b),
             Value::Int(n) => write!(f, "{}", n),
             Value::Float(fl) => write!(f, "{}", fl),
-            Value::String(s) => write!(f, "{}", &**s),
+            Value::String(s) => write!(f, "{}", **s),
             Value::Array(arr) => {
                 let elements: Vec<String> = arr.borrow().iter().map(|v| v.to_string()).collect();
                 write!(f, "[{}]", elements.join(", "))

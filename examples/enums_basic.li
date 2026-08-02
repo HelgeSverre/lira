@@ -45,3 +45,16 @@ println("c1.__variant == c2.__variant: " + (c1.__variant == c2.__variant)) // tr
 println("c1.__variant == c3.__variant: " + (c1.__variant == c3.__variant)) // false
 
 println("=== All Enum Tests Passed ===")
+
+// @expect: === Simple Enum Definition ===
+// @expect: Created Color variants
+// @expect: red.__enum: Color
+// @expect: red.__variant: Red
+// @expect: green.__variant: Green
+// @expect: blue.__variant: Blue
+// @expect: === Status Enum ===
+// @expect: Status: Active
+// @expect: === Comparison ===
+// @expect: c1.__variant == c2.__variant: true
+// @expect: c1.__variant == c3.__variant: false
+// @expect: === All Enum Tests Passed ===

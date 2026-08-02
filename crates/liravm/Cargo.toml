@@ -26,6 +26,7 @@ sha1 = "0.11"
 sha2 = "0.11"
 ureq = "3"
 uuid = { version = "1", features = ["v4", "v7"] }
+getrandom = "0.2"
 # `unstable-stats` exposes `gc::stats()` (live-heap accounting, used to assert
 # cyclic reclamation in tests); `unstable-config` exposes `gc::configure()` (used
 # to drive collection deterministically from the VM loop). Both only re-export

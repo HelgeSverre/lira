@@ -16,6 +16,15 @@ use tokio::sync::Mutex;
 use crate::protocol::{ClientMessage, CompileError, ErrorSeverity, ServerMessage};
 use crate::vm_thread::VmThreadHandle;
 
+/// Maximum allowed source code size (512 KB)
+const MAX_SOURCE_LEN: usize = 512 * 1024;
+
+/// Compilation timeout in seconds
+const COMPILATION_TIMEOUT_SECS: u64 = 30;
+
+/// Execution timeout in seconds
+const EXECUTION_TIMEOUT_SECS: u64 = 30;
+
 /// Health check endpoint
 pub async fn health() -> &'static str {
     "OK"
@@ -102,9 +111,20 @@ pub struct CheckResponse {
 pub async fn compile(Json(req): Json<SourceRequest>) -> impl IntoResponse {
     let start = Instant::now();
 
-    // Parse and type check
-    match compile_source(&req.source) {
-        Ok((ast, bytecode)) => {
+    if req.source.len() > MAX_SOURCE_LEN {
+        return Json(source_too_large_response());
+    }
+
+    let source = req.source;
+    let timeout = Duration::from_secs(COMPILATION_TIMEOUT_SECS);
+
+    match tokio::time::timeout(
+        timeout,
+        tokio::task::spawn_blocking(move || compile_source(&source)),
+    )
+    .await
+    {
+        Ok(Ok(Ok((ast, bytecode)))) => {
             let ast_json = match serde_json::to_value(&ast) {
                 Ok(json) => Some(json),
                 Err(e) => {
@@ -120,14 +140,69 @@ pub async fn compile(Json(req): Json<SourceRequest>) -> impl IntoResponse {
                 compile_time_ms: start.elapsed().as_millis() as u64,
             })
         }
-        Err(errors) => Json(CompileResponse {
+        Ok(Ok(Err(errors))) => Json(CompileResponse {
             success: false,
             ast: None,
             errors,
             bytecode_size: 0,
             compile_time_ms: start.elapsed().as_millis() as u64,
         }),
+        Ok(Err(_)) => {
+            tracing::error!("Compilation task panicked");
+            Json(compile_error_response(
+                "Internal compilation error (panic)".to_string(),
+                start,
+            ))
+        }
+        Err(_) => {
+            tracing::warn!("Compilation timed out after {}s", COMPILATION_TIMEOUT_SECS);
+            Json(compile_error_response(
+                format!(
+                    "Compilation timed out after {} seconds",
+                    COMPILATION_TIMEOUT_SECS
+                ),
+                start,
+            ))
+        }
     }
+}
+
+fn source_too_large_response() -> CompileResponse {
+    CompileResponse {
+        success: false,
+        ast: None,
+        errors: vec![CompileError {
+            message: format!(
+                "Source code too large. Maximum allowed size is {} bytes ({} KB).",
+                MAX_SOURCE_LEN,
+                MAX_SOURCE_LEN / 1024
+            ),
+            line: None,
+            column: None,
+            severity: ErrorSeverity::Error,
+        }],
+        bytecode_size: 0,
+        compile_time_ms: 0,
+    }
+}
+
+fn compile_error_response(message: String, start: Instant) -> CompileResponse {
+    CompileResponse {
+        success: false,
+        ast: None,
+        errors: vec![CompileError {
+            message,
+            line: None,
+            column: None,
+            severity: ErrorSeverity::Error,
+        }],
+        bytecode_size: 0,
+        compile_time_ms: elapsed_ms(start),
+    }
+}
+
+fn run_error_response(message: String, start: Instant) -> RunResponse {
+    RunResponse::failed(vec![], one_error(message, None, None), start)
 }
 
 impl RunResponse {
@@ -218,24 +293,57 @@ fn run_with_breakpoints(bytecode: &[u8], breakpoints: Vec<u32>, start: Instant) 
 pub async fn run(Json(req): Json<RunRequest>) -> impl IntoResponse {
     let start = Instant::now();
 
-    let bytecode = match compile_source(&req.source) {
-        Ok((_, bytecode)) => bytecode,
-        Err(errors) => return Json(RunResponse::failed(vec![], errors, start)),
-    };
+    if req.source.len() > MAX_SOURCE_LEN {
+        return Json(run_error_response(
+            format!(
+                "Source code too large. Maximum allowed size is {} bytes ({} KB).",
+                MAX_SOURCE_LEN,
+                MAX_SOURCE_LEN / 1024
+            ),
+            start,
+        ));
+    }
 
-    if req.breakpoints.is_empty() {
-        // Fast path: no breakpoints. The structured variant surfaces the real
-        // source location and any output produced before a failure.
-        match liravm::run_with_capture_structured(&bytecode) {
-            Ok((exit_code, output)) => Json(RunResponse::finished(output, exit_code, start)),
-            Err((output, err)) => Json(RunResponse::failed(
-                output,
-                one_error(err.message, err.line, err.column),
-                start,
-            )),
-        }
-    } else {
-        Json(run_with_breakpoints(&bytecode, req.breakpoints, start))
+    let source = req.source;
+    let breakpoints = req.breakpoints;
+    let timeout = Duration::from_secs(EXECUTION_TIMEOUT_SECS);
+
+    match tokio::time::timeout(
+        timeout,
+        tokio::task::spawn_blocking(move || {
+            let bytecode = match compile_source(&source) {
+                Ok((_, bytecode)) => bytecode,
+                Err(errors) => return RunResponse::failed(vec![], errors, start),
+            };
+
+            if breakpoints.is_empty() {
+                match liravm::run_with_capture_structured(&bytecode) {
+                    Ok((exit_code, output)) => RunResponse::finished(output, exit_code, start),
+                    Err((output, err)) => RunResponse::failed(
+                        output,
+                        one_error(err.message, err.line, err.column),
+                        start,
+                    ),
+                }
+            } else {
+                run_with_breakpoints(&bytecode, breakpoints, start)
+            }
+        }),
+    )
+    .await
+    {
+        Ok(Ok(response)) => Json(response),
+        Ok(Err(_)) => Json(run_error_response(
+            "Internal execution error (panic)".to_string(),
+            start,
+        )),
+        Err(_) => Json(run_error_response(
+            format!(
+                "Execution timed out after {} seconds",
+                EXECUTION_TIMEOUT_SECS
+            ),
+            start,
+        )),
     }
 }
 
@@ -255,71 +363,150 @@ fn parse_breakpoint_error(msg: &str) -> Option<BreakpointInfo> {
 
 /// Check endpoint - type checks without generating bytecode
 pub async fn check(Json(req): Json<SourceRequest>) -> impl IntoResponse {
-    match lirac::check(&req.source) {
-        Ok(()) => Json(CheckResponse {
+    if req.source.len() > MAX_SOURCE_LEN {
+        return Json(CheckResponse {
+            success: false,
+            errors: vec![CompileError {
+                message: format!(
+                    "Source code too large. Maximum allowed size is {} bytes.",
+                    MAX_SOURCE_LEN
+                ),
+                line: None,
+                column: None,
+                severity: ErrorSeverity::Error,
+            }],
+        });
+    }
+
+    let source = req.source;
+    let timeout = Duration::from_secs(COMPILATION_TIMEOUT_SECS);
+
+    match tokio::time::timeout(
+        timeout,
+        tokio::task::spawn_blocking(move || lirac::check(&source)),
+    )
+    .await
+    {
+        Ok(Ok(Ok(()))) => Json(CheckResponse {
             success: true,
             errors: vec![],
         }),
-        Err(e) => Json(CheckResponse {
+        Ok(Ok(Err(e))) => Json(CheckResponse {
             success: false,
             errors: parse_error_message(&e),
+        }),
+        Ok(Err(_)) => Json(CheckResponse {
+            success: false,
+            errors: vec![CompileError {
+                message: "Internal check error (panic)".to_string(),
+                line: None,
+                column: None,
+                severity: ErrorSeverity::Error,
+            }],
+        }),
+        Err(_) => Json(CheckResponse {
+            success: false,
+            errors: vec![CompileError {
+                message: format!(
+                    "Type checking timed out after {} seconds",
+                    COMPILATION_TIMEOUT_SECS
+                ),
+                line: None,
+                column: None,
+                severity: ErrorSeverity::Error,
+            }],
         }),
     }
 }
 
 /// Step endpoint - re-run with temporary breakpoint for stepping
+///
+/// NOTE: This endpoint restarts execution from scratch on every step. This means
+/// `StepType::Out` cannot properly "step out of a function" because it has no
+/// awareness of the call stack depth from the previous execution. It effectively
+/// behaves like `StepType::Continue` (run to the next breakpoint after the
+/// current line). For proper step-out semantics, use the WebSocket debug session.
+/// FIXME(H9): Track call stack depth across step invocations to implement
+/// actual step-out behaviour, or remove this endpoint and route stepping through
+/// the WebSocket debug session.
 pub async fn step(Json(req): Json<StepRequest>) -> impl IntoResponse {
     let start = Instant::now();
 
-    let bytecode = match compile_source(&req.source) {
-        Ok((_, bytecode)) => bytecode,
-        Err(errors) => return Json(RunResponse::failed(vec![], errors, start)),
-    };
+    if req.source.len() > MAX_SOURCE_LEN {
+        return Json(run_error_response(
+            format!(
+                "Source code too large. Maximum allowed size is {} bytes.",
+                MAX_SOURCE_LEN
+            ),
+            start,
+        ));
+    }
 
-    // Calculate effective breakpoints based on step type
-    // Key insight: since we re-run from scratch, we must only set breakpoints
-    // at lines AFTER the current line to avoid stopping at the same place again.
-    let effective_breakpoints: Vec<u32> = match req.step_type {
-        StepType::Into | StepType::Over => {
-            // Step to next executable line after current
-            // Add temporary breakpoints at next few lines (in case some are empty/comments)
-            let mut bps: Vec<u32> = vec![
-                req.current_line + 1,
-                req.current_line + 2,
-                req.current_line + 3,
-            ];
-            // Also include user breakpoints that are after current line
-            for &bp in &req.breakpoints {
-                if bp > req.current_line && !bps.contains(&bp) {
-                    bps.push(bp);
+    let source = req.source;
+    let current_line = req.current_line;
+    let step_type = req.step_type;
+    let breakpoints = req.breakpoints;
+    let timeout = Duration::from_secs(EXECUTION_TIMEOUT_SECS);
+
+    match tokio::time::timeout(
+        timeout,
+        tokio::task::spawn_blocking(move || {
+            let bytecode = match compile_source(&source) {
+                Ok((_, bytecode)) => bytecode,
+                Err(errors) => return RunResponse::failed(vec![], errors, start),
+            };
+
+            // Calculate effective breakpoints based on step type
+            // Key insight: since we re-run from scratch, we must only set breakpoints
+            // at lines AFTER the current line to avoid stopping at the same place again.
+            let effective_breakpoints: Vec<u32> = match step_type {
+                StepType::Into | StepType::Over => {
+                    let mut bps: Vec<u32> =
+                        vec![current_line + 1, current_line + 2, current_line + 3];
+                    for &bp in &breakpoints {
+                        if bp > current_line && !bps.contains(&bp) {
+                            bps.push(bp);
+                        }
+                    }
+                    bps
                 }
-            }
-            bps
-        }
-        StepType::Out => {
-            // Skip all breakpoints at or before current line
-            // This effectively runs to the next user breakpoint after current position
-            req.breakpoints
-                .iter()
-                .filter(|&&l| l > req.current_line)
-                .copied()
-                .collect()
-        }
-        StepType::Continue => {
-            // Run to next user breakpoint after current line
-            req.breakpoints
-                .iter()
-                .filter(|&&l| l > req.current_line)
-                .copied()
-                .collect()
-        }
-    };
+                StepType::Out => {
+                    // FIXME(H9): StepOut is broken in this HTTP endpoint.
+                    // Since we re-run from scratch, we cannot track call stack depth
+                    // to know when the current function has returned. This behaves
+                    // the same as Continue: runs to the next user breakpoint after
+                    // the current line.
+                    breakpoints
+                        .iter()
+                        .filter(|&&l| l > current_line)
+                        .copied()
+                        .collect()
+                }
+                StepType::Continue => breakpoints
+                    .iter()
+                    .filter(|&&l| l > current_line)
+                    .copied()
+                    .collect(),
+            };
 
-    Json(run_with_breakpoints(
-        &bytecode,
-        effective_breakpoints,
-        start,
-    ))
+            run_with_breakpoints(&bytecode, effective_breakpoints, start)
+        }),
+    )
+    .await
+    {
+        Ok(Ok(response)) => Json(response),
+        Ok(Err(_)) => Json(run_error_response(
+            "Internal step execution error (panic)".to_string(),
+            start,
+        )),
+        Err(_) => Json(run_error_response(
+            format!(
+                "Step execution timed out after {} seconds",
+                EXECUTION_TIMEOUT_SECS
+            ),
+            start,
+        )),
+    }
 }
 
 /// WebSocket upgrade handler
@@ -394,15 +581,28 @@ async fn handle_websocket(socket: WebSocket) {
 
         match result {
             Ok(response) => {
-                // Send all response messages
-                let mut sender_guard = sender.lock().await;
-                for msg in response.messages {
-                    let json = serde_json::to_string(&msg).unwrap();
-                    if sender_guard.send(Message::Text(json.into())).await.is_err() {
+                // Serialize all messages without holding the sender lock,
+                // then send one at a time, locking only for each send.
+                let serialized: Vec<String> = response
+                    .messages
+                    .into_iter()
+                    .map(|msg| serde_json::to_string(&msg).unwrap())
+                    .collect();
+                let mut send_failed = false;
+                for json in &serialized {
+                    let mut guard = sender.lock().await;
+                    if guard
+                        .send(Message::Text(json.clone().into()))
+                        .await
+                        .is_err()
+                    {
+                        send_failed = true;
                         break;
                     }
                 }
-                drop(sender_guard);
+                if send_failed {
+                    break;
+                }
 
                 // Check if we should terminate
                 if response.terminate {
@@ -411,7 +611,6 @@ async fn handle_websocket(socket: WebSocket) {
             }
             Err(e) => {
                 tracing::error!("VM thread error: {}", e);
-                // Send error to client
                 let error_msg = ServerMessage::RuntimeError {
                     message: format!("VM error: {}", e),
                     location: None,
@@ -419,8 +618,6 @@ async fn handle_websocket(socket: WebSocket) {
                 let json = serde_json::to_string(&error_msg).unwrap();
                 let mut sender_guard = sender.lock().await;
                 let _ = sender_guard.send(Message::Text(json.into())).await;
-
-                // Continue trying - the VM thread might recover or be restarted
             }
         }
     }

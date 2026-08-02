@@ -85,7 +85,11 @@ main()
     let elapsed = start.elapsed();
 
     // Correctness: every fiber got a 200.
-    assert_eq!(output, vec![N.to_string()], "all {N} fetches should return 200");
+    assert_eq!(
+        output,
+        vec![N.to_string()],
+        "all {N} fetches should return 200"
+    );
 
     // Parallelism: overlapped fetches finish in ~one delay, not N delays.
     // Serial would be N * 300ms = 2.4s; require comfortably under that.

@@ -21,7 +21,7 @@
 
 use crate::value::FiberId;
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -41,7 +41,10 @@ pub enum IoValue {
     /// A list of strings (`listdir`) → `Value::Array` of strings.
     Strs(Vec<String>),
     /// An HTTP response → `[status, body]`.
-    HttpResponse { status: i64, body: String },
+    HttpResponse {
+        status: i64,
+        body: String,
+    },
 
     /// A freshly opened file: the VM thread allocates an fd, inserts `file`, and
     /// yields `Int(fd)`. The id is allocated on success only (a failed open
@@ -94,7 +97,7 @@ fn run_job(job: IoJob) -> IoCompletion {
     // A panic inside an arbitrary job closure must not kill the worker (which
     // would silently shrink the pool) or strand the parked fiber. Convert it
     // to an error the VM thread can surface via the syscall's error contract.
-    let outcome = match catch_unwind(AssertUnwindSafe(move || run())) {
+    let outcome = match catch_unwind(AssertUnwindSafe(run)) {
         Ok(result) => result,
         Err(_) => Err("I/O task panicked".to_string()),
     };
@@ -167,14 +170,9 @@ impl IoPool {
     /// Harvest every already-completed job without blocking.
     pub fn drain_completed(&mut self) -> Vec<IoCompletion> {
         let mut out = Vec::new();
-        loop {
-            match self.completion_rx.try_recv() {
-                Ok(c) => {
-                    self.pending = self.pending.saturating_sub(1);
-                    out.push(c);
-                }
-                Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
-            }
+        while let Ok(c) = self.completion_rx.try_recv() {
+            self.pending = self.pending.saturating_sub(1);
+            out.push(c);
         }
         out
     }

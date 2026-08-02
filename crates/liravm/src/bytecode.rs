@@ -7,6 +7,9 @@ use lira_core::bytecode::DebugInfo;
 use lira_core::{BYTECODE_MAGIC, BYTECODE_VERSION};
 use std::rc::Rc;
 
+const MAX_CONSTANT_COUNT: u32 = 65536;
+const MAX_CODE_LENGTH: u32 = 10_000_000;
+
 /// A loaded bytecode program
 pub struct Program {
     /// Constant pool
@@ -106,7 +109,7 @@ pub fn load(bytes: &[u8]) -> Result<Program, String> {
     let version = reader.read_u32()?;
     let _flags = reader.read_u32()?;
     let entry_point = reader.read_u32()? as usize;
-    let constant_count = reader.read_u32()? as usize;
+    let constant_count = reader.read_u32()?;
     let _function_count = reader.read_u32()?;
 
     // Validate header
@@ -117,8 +120,15 @@ pub fn load(bytes: &[u8]) -> Result<Program, String> {
         return Err(format!("Unsupported version: {}", version));
     }
 
+    if constant_count > MAX_CONSTANT_COUNT {
+        return Err(format!(
+            "Constant pool too large: {} (max: {})",
+            constant_count, MAX_CONSTANT_COUNT
+        ));
+    }
+
     // Parse constant pool
-    let mut constants = Vec::with_capacity(constant_count);
+    let mut constants = Vec::with_capacity(constant_count as usize);
     for _ in 0..constant_count {
         let tag = reader.read_u8()?;
         let value = match tag {
@@ -152,8 +162,14 @@ pub fn load(bytes: &[u8]) -> Result<Program, String> {
     }
 
     // Code section (now has length prefix)
-    let code_len = reader.read_u32()? as usize;
-    let code = reader.read_bytes(code_len)?.to_vec();
+    let code_len = reader.read_u32()?;
+    if code_len > MAX_CODE_LENGTH {
+        return Err(format!(
+            "Code section too large: {} (max: {})",
+            code_len, MAX_CODE_LENGTH
+        ));
+    }
+    let code = reader.read_bytes(code_len as usize)?.to_vec();
 
     // Debug info section
     let mut debug_info = DebugInfo::new();
@@ -221,4 +237,82 @@ pub fn load(bytes: &[u8]) -> Result<Program, String> {
         debug_info,
         source_file,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_reject_excessive_constant_count() {
+        let mut buf = Vec::new();
+        // Header: magic, version, flags, entry_point
+        buf.extend_from_slice(&0x4C494243u32.to_le_bytes()); // BYTECODE_MAGIC
+        buf.extend_from_slice(&1u32.to_le_bytes()); // version
+        buf.extend_from_slice(&0u32.to_le_bytes()); // flags
+        buf.extend_from_slice(&0u32.to_le_bytes()); // entry_point
+                                                    // Excessive constant count
+        buf.extend_from_slice(&(MAX_CONSTANT_COUNT + 1).to_le_bytes());
+        buf.extend_from_slice(&0u32.to_le_bytes()); // function_count
+
+        match load(&buf) {
+            Ok(_) => panic!("Expected error for excessive constant count"),
+            Err(err) => assert!(
+                err.contains("Constant pool too large"),
+                "Expected 'Constant pool too large' error, got: {}",
+                err
+            ),
+        }
+    }
+
+    #[test]
+    fn test_reject_excessive_code_length() {
+        let mut buf = Vec::new();
+        // Header: magic, version, flags, entry_point
+        buf.extend_from_slice(&0x4C494243u32.to_le_bytes()); // BYTECODE_MAGIC
+        buf.extend_from_slice(&1u32.to_le_bytes()); // version
+        buf.extend_from_slice(&0u32.to_le_bytes()); // flags
+        buf.extend_from_slice(&0u32.to_le_bytes()); // entry_point
+        buf.extend_from_slice(&0u32.to_le_bytes()); // constant_count = 0
+        buf.extend_from_slice(&0u32.to_le_bytes()); // function_count
+                                                    // Excessive code length
+        buf.extend_from_slice(&(MAX_CODE_LENGTH + 1).to_le_bytes());
+
+        match load(&buf) {
+            Ok(_) => panic!("Expected error for excessive code length"),
+            Err(err) => assert!(
+                err.contains("Code section too large"),
+                "Expected 'Code section too large' error, got: {}",
+                err
+            ),
+        }
+    }
+
+    #[test]
+    fn test_accept_valid_bounds() {
+        let mut buf = Vec::new();
+        // Header: magic, version, flags, entry_point
+        buf.extend_from_slice(&0x4C494243u32.to_le_bytes()); // BYTECODE_MAGIC
+        buf.extend_from_slice(&1u32.to_le_bytes()); // version
+        buf.extend_from_slice(&0u32.to_le_bytes()); // flags
+        buf.extend_from_slice(&0u32.to_le_bytes()); // entry_point
+        buf.extend_from_slice(&1u32.to_le_bytes()); // 1 constant
+        buf.extend_from_slice(&0u32.to_le_bytes()); // function_count
+                                                    // 1 constant: Null tag
+        buf.push(0x00); // Null
+                        // Small code section
+        buf.extend_from_slice(&4u32.to_le_bytes()); // code_len = 4
+        buf.extend_from_slice(&[0xFFu8, 0x00, 0x00, 0x00]); // Halt; Nop; Nop; Nop
+                                                            // No debug info
+        buf.extend_from_slice(&0u32.to_le_bytes()); // line_count = 0
+        buf.extend_from_slice(&0u32.to_le_bytes()); // filename_len = 0
+
+        match load(&buf) {
+            Ok(prog) => {
+                assert_eq!(prog.constants.len(), 1);
+                assert_eq!(prog.code.len(), 4);
+            }
+            Err(e) => panic!("Valid bytecode should load, got: {}", e),
+        }
+    }
 }

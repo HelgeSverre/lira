@@ -13,3 +13,8 @@ println("min(5, 2): " + min(5, 2))
 // println(max(5, 2))
 
 println("=== Selective Import Test Passed ===")
+
+// @expect: === Selective Import Test ===
+// @expect: abs(-10): 10
+// @expect: min(5, 2): 2
+// @expect: === Selective Import Test Passed ===

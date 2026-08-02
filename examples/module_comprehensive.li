@@ -110,3 +110,30 @@ fn inner_fn(x: int) -> int {
 println("outer_fn(-5): " + outer_fn(-5)) // abs(-5)*2 + 10 = 20
 
 println("\n=== All Module Tests Passed ===")
+
+// @expect-contains: === Module System Comprehensive Tests ===
+// @expect-contains: --- Test 1: Basic stdlib imports ---
+// @expect-contains: (-42).abs(): 42
+// @expect-contains: min(10, 5): 5
+// @expect-contains: max(10, 5): 10
+// @expect-contains: 15.clamp(0, 10): 10
+// @expect-contains: --- Test 2: Multiple imports ---
+// @expect-contains: write_file: true
+// @expect-contains: read_file: Module test content
+// @expect-contains: --- Test 3: Selective imports ---
+// @expect-contains: [DEBUG] time check: 123
+// @expect-contains: now_ms returned a value: true
+// @expect-contains: --- Test 4: Mixed local and imported code ---
+// @expect-contains: Manhattan distance (0,0) to (3,4): 7
+// @expect-contains: bounded_value(50, 0, 100): 50
+// @expect-contains: bounded_value(150, 0, 100): 100
+// @expect-contains: bounded_value(-10, 0, 100): 0
+// @expect-contains: --- Test 5: File operations integration ---
+// @expect-contains: save_and_load result: Hello from function!
+// @expect-contains: --- Test 6: Core math operations ---
+// @expect-contains: complex_calc(5): 50
+// @expect-contains: complex_calc(10): 0
+// @expect-contains: complex_calc(8): 36
+// @expect-contains: --- Test 7: Chained function calls ---
+// @expect-contains: outer_fn(-5): 20
+// @expect-contains: === All Module Tests Passed ===

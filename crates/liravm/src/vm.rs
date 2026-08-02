@@ -134,6 +134,8 @@ pub struct VM {
     io_pool: Option<crate::io_pool::IoPool>,
     /// Exit code captured when the main fiber finishes
     main_exit_code: i32,
+    /// True when sys_exit has been called, signaling a clean VM-level halt
+    exit_requested: bool,
     /// Saved native call stacks per fiber. The VM-native `CallFrame` carries
     /// more state (stack base, captures) than the scheduler's `FiberCallFrame`,
     /// so each fiber's call stack is parked here across context switches.
@@ -193,6 +195,7 @@ impl VM {
             fiber_event_rx: Some(rx),
             main_fiber_id: 0,
             main_exit_code: 0,
+            exit_requested: false,
             fiber_call_stacks: HashMap::new(),
             allocations: 0,
         }
@@ -888,8 +891,10 @@ impl VM {
             IoValue::Str(s) => Value::String(Rc::new(s)),
             IoValue::Bool(b) => Value::Bool(b),
             IoValue::Strs(items) => {
-                let arr: Vec<Value> =
-                    items.into_iter().map(|s| Value::String(Rc::new(s))).collect();
+                let arr: Vec<Value> = items
+                    .into_iter()
+                    .map(|s| Value::String(Rc::new(s)))
+                    .collect();
                 Value::Array(Gc::new(GcCell::new(arr)))
             }
             IoValue::HttpResponse { status, body } => {
@@ -1097,7 +1102,6 @@ impl VM {
             | Opcode::ChanSend
             | Opcode::ChanRecv
             | Opcode::ChanClose
-            | Opcode::ChanTryRecv
             | Opcode::Select => self.execute_fiber_channel(opcode),
         }
     }
@@ -1221,17 +1225,27 @@ impl VM {
 
                 match (&array, &index) {
                     (Value::Array(arr), Value::Int(idx)) => {
+                        if *idx < 0 {
+                            return Err("Index out of bounds: negative index".to_string());
+                        }
                         let idx = *idx as usize;
-                        let value = arr.borrow().get(idx).cloned().unwrap_or(Value::Null);
+                        let value = arr
+                            .borrow()
+                            .get(idx)
+                            .cloned()
+                            .ok_or_else(|| "Index out of bounds".to_string())?;
                         self.stack.push(value);
                     }
                     (Value::String(s), Value::Int(idx)) => {
+                        if *idx < 0 {
+                            return Err("Index out of bounds: negative index".to_string());
+                        }
                         let idx = *idx as usize;
                         let value = s
                             .chars()
                             .nth(idx)
                             .map(|c| Value::String(Rc::new(c.to_string())))
-                            .unwrap_or(Value::Null);
+                            .ok_or_else(|| "Index out of bounds".to_string())?;
                         self.stack.push(value);
                     }
                     // Support object indexing with string keys (for JSON objects)
@@ -1250,11 +1264,19 @@ impl VM {
 
                 match (&array, &index) {
                     (Value::Array(arr), Value::Int(idx)) => {
+                        if *idx < 0 {
+                            return Err("Array index out of bounds: negative index".to_string());
+                        }
                         let idx = *idx as usize;
                         let mut arr = arr.borrow_mut();
-                        if idx < arr.len() {
-                            arr[idx] = value;
+                        if idx >= arr.len() {
+                            return Err(format!(
+                                "Array index out of bounds: {} (len={})",
+                                idx,
+                                arr.len()
+                            ));
                         }
+                        arr[idx] = value;
                     }
                     _ => return Err("Invalid array/index types".to_string()),
                 }
@@ -1294,6 +1316,12 @@ impl VM {
 
             // Closure operations
             Opcode::MakeClosure => {
+                // TODO: The closure code offset is encoded as u16, limiting
+                // function targets to offsets < 65536. If the code section
+                // exceeds 64 KiB, closures cannot reference functions in the
+                // later part. This is a bytecode format limitation; fixing it
+                // would require widening the instruction encoding (e.g. using
+                // a u32 operand or a constant-pool indirection).
                 let code_offset = self.read_u16()? as usize;
                 let capture_count = self.read_u8()? as usize;
 
@@ -1510,28 +1538,40 @@ impl VM {
             Opcode::Lt => {
                 let b = self.pop()?;
                 let a = self.pop()?;
-                let result = self.compare_values(&a, &b)? < 0;
+                let result = match self.compare_values(&a, &b) {
+                    Ok(ord) => ord < 0,
+                    Err(_) => false, // NaN is unordered
+                };
                 self.stack.push(Value::Bool(result));
             }
 
             Opcode::Le => {
                 let b = self.pop()?;
                 let a = self.pop()?;
-                let result = self.compare_values(&a, &b)? <= 0;
+                let result = match self.compare_values(&a, &b) {
+                    Ok(ord) => ord <= 0,
+                    Err(_) => false, // NaN is unordered
+                };
                 self.stack.push(Value::Bool(result));
             }
 
             Opcode::Gt => {
                 let b = self.pop()?;
                 let a = self.pop()?;
-                let result = self.compare_values(&a, &b)? > 0;
+                let result = match self.compare_values(&a, &b) {
+                    Ok(ord) => ord > 0,
+                    Err(_) => false, // NaN is unordered
+                };
                 self.stack.push(Value::Bool(result));
             }
 
             Opcode::Ge => {
                 let b = self.pop()?;
                 let a = self.pop()?;
-                let result = self.compare_values(&a, &b)? >= 0;
+                let result = match self.compare_values(&a, &b) {
+                    Ok(ord) => ord >= 0,
+                    Err(_) => false, // NaN is unordered
+                };
                 self.stack.push(Value::Bool(result));
             }
 
@@ -1596,7 +1636,9 @@ impl VM {
                 let b = self.pop()?;
                 let a = self.pop()?;
                 match (a, b) {
-                    (Value::Int(x), Value::Int(y)) => self.stack.push(Value::Int(x << (y as u32))),
+                    (Value::Int(x), Value::Int(y)) => {
+                        self.stack.push(Value::Int(x << ((y as u32).min(63))))
+                    }
                     _ => return Err("Shift left requires integer operands".to_string()),
                 }
             }
@@ -1607,7 +1649,7 @@ impl VM {
                 match (a, b) {
                     (Value::Int(x), Value::Int(y)) => {
                         // Arithmetic right shift (preserves sign)
-                        self.stack.push(Value::Int(x >> (y as u32)))
+                        self.stack.push(Value::Int(x >> ((y as u32).min(63))))
                     }
                     _ => return Err("Shift right requires integer operands".to_string()),
                 }
@@ -1619,7 +1661,7 @@ impl VM {
                 match (a, b) {
                     (Value::Int(x), Value::Int(y)) => {
                         // Logical right shift (zero-fill)
-                        let result = ((x as u64) >> (y as u32)) as i64;
+                        let result = ((x as u64) >> ((y as u32).min(63))) as i64;
                         self.stack.push(Value::Int(result))
                     }
                     _ => {
@@ -1639,14 +1681,22 @@ impl VM {
             // Control flow
             Opcode::Jump => {
                 let offset = self.read_i16()?;
-                self.ip = ((self.ip as i32) + (offset as i32)) as usize;
+                let target = (self.ip as isize).wrapping_add(offset as isize);
+                if target < 0 {
+                    return Err("jump target out of bounds".to_string());
+                }
+                self.ip = target as usize;
             }
 
             Opcode::JumpIfTrue => {
                 let offset = self.read_i16()?;
                 let condition = self.pop()?;
                 if condition.is_truthy() {
-                    self.ip = ((self.ip as i32) + (offset as i32)) as usize;
+                    let target = (self.ip as isize).wrapping_add(offset as isize);
+                    if target < 0 {
+                        return Err("jump target out of bounds".to_string());
+                    }
+                    self.ip = target as usize;
                 }
             }
 
@@ -1654,7 +1704,11 @@ impl VM {
                 let offset = self.read_i16()?;
                 let condition = self.pop()?;
                 if !condition.is_truthy() {
-                    self.ip = ((self.ip as i32) + (offset as i32)) as usize;
+                    let target = (self.ip as isize).wrapping_add(offset as isize);
+                    if target < 0 {
+                        return Err("jump target out of bounds".to_string());
+                    }
+                    self.ip = target as usize;
                 }
             }
 
@@ -1853,6 +1907,9 @@ impl VM {
             Opcode::Syscall => {
                 let syscall_num = self.read_u8()?;
                 self.handle_syscall(syscall_num)?;
+                if self.exit_requested {
+                    return Ok(Some(self.main_exit_code));
+                }
             }
 
             _ => unreachable!("execute_system called with non-system opcode"),
@@ -1990,26 +2047,6 @@ impl VM {
                         self.scheduler.close_channel(channel_id)?;
                     }
                     _ => return Err("Cannot close non-channel".to_string()),
-                }
-            }
-
-            Opcode::ChanTryRecv => {
-                let channel = self.pop()?;
-                match channel {
-                    Value::Channel(channel_id) => {
-                        // Try non-blocking receive
-                        // Returns the value if available, or null otherwise
-                        if let Some(ch) = self.scheduler.channels.get_mut(&channel_id) {
-                            if let Some(value) = ch.buffer.pop_front() {
-                                self.stack.push(value);
-                            } else {
-                                self.stack.push(Value::Null);
-                            }
-                        } else {
-                            return Err("Invalid channel".to_string());
-                        }
-                    }
-                    _ => return Err("Cannot receive from non-channel".to_string()),
                 }
             }
 
@@ -2299,15 +2336,27 @@ impl VM {
         match (a, b) {
             (Value::Int(a), Value::Int(b)) => Ok(a.cmp(b) as i32),
             (Value::Float(a), Value::Float(b)) => {
-                Ok(a.partial_cmp(b).map(|o| o as i32).unwrap_or(0))
+                if a.is_nan() || b.is_nan() {
+                    Err("NaN is unordered".to_string())
+                } else {
+                    Ok(a.partial_cmp(b).unwrap() as i32)
+                }
             }
             (Value::Int(a), Value::Float(b)) => {
-                let a = *a as f64;
-                Ok(a.partial_cmp(b).map(|o| o as i32).unwrap_or(0))
+                if b.is_nan() {
+                    Err("NaN is unordered".to_string())
+                } else {
+                    let a = *a as f64;
+                    Ok(a.partial_cmp(b).unwrap() as i32)
+                }
             }
             (Value::Float(a), Value::Int(b)) => {
-                let b = *b as f64;
-                Ok(a.partial_cmp(&b).map(|o| o as i32).unwrap_or(0))
+                if a.is_nan() {
+                    Err("NaN is unordered".to_string())
+                } else {
+                    let b = *b as f64;
+                    Ok(a.partial_cmp(&b).unwrap() as i32)
+                }
             }
             (Value::String(a), Value::String(b)) => Ok(a.cmp(b) as i32),
             _ => Err(format!(
@@ -2496,10 +2545,12 @@ impl VM {
             // sys_exit
             0 => {
                 let code = self.pop()?;
-                match code {
-                    Value::Int(n) => std::process::exit(n as i32),
-                    _ => std::process::exit(1),
-                }
+                self.main_exit_code = match code {
+                    Value::Int(n) => n as i32,
+                    _ => 1,
+                };
+                self.exit_requested = true;
+                Ok(())
             }
             // sys_print
             1 => {
@@ -2631,7 +2682,8 @@ impl VM {
                 if let Some(fiber) = self.io_offload_target() {
                     if let Some(mut file) = self.runtime.checkout_file(fd) {
                         self.offload_io(crate::io_pool::IoJob::new(fiber, move || {
-                            let bytes = Runtime::write_file_blocking(&mut file, &data).unwrap_or(-1);
+                            let bytes =
+                                Runtime::write_file_blocking(&mut file, &data).unwrap_or(-1);
                             Ok(crate::io_pool::IoValue::FileOp {
                                 fd,
                                 file,
@@ -2914,7 +2966,8 @@ impl VM {
             82 => {
                 let max_bytes = self.pop()?;
                 let socket_id = self.pop()?;
-                let (Value::Int(socket_id), Value::Int(max_bytes)) = (&socket_id, &max_bytes) else {
+                let (Value::Int(socket_id), Value::Int(max_bytes)) = (&socket_id, &max_bytes)
+                else {
                     return Err("tcp_read requires (int, int) arguments".to_string());
                 };
                 let (socket_id, max_bytes) = (*socket_id, *max_bytes);
@@ -2948,7 +3001,9 @@ impl VM {
                 let hostname = (**hostname).clone();
                 if let Some(fiber) = self.io_offload_target() {
                     self.offload_io(crate::io_pool::IoJob::new(fiber, move || {
-                        Ok(crate::io_pool::IoValue::Str(Runtime::dns_lookup_blocking(&hostname)))
+                        Ok(crate::io_pool::IoValue::Str(Runtime::dns_lookup_blocking(
+                            &hostname,
+                        )))
                     }));
                     return Ok(());
                 }
@@ -2988,7 +3043,8 @@ impl VM {
                     }));
                     return Ok(());
                 }
-                self.stack.push(Value::Bool(self.runtime.os_remove_all(&path)));
+                self.stack
+                    .push(Value::Bool(self.runtime.os_remove_all(&path)));
                 Ok(())
             }
             // listdir(path: string) -> [string]  (offloaded: dir scan)
@@ -3036,11 +3092,14 @@ impl VM {
                 let (from, to) = (self.absolutize(from), self.absolutize(to));
                 if let Some(fiber) = self.io_offload_target() {
                     self.offload_io(crate::io_pool::IoJob::new(fiber, move || {
-                        Ok(crate::io_pool::IoValue::Bool(std::fs::copy(&from, &to).is_ok()))
+                        Ok(crate::io_pool::IoValue::Bool(
+                            std::fs::copy(&from, &to).is_ok(),
+                        ))
                     }));
                     return Ok(());
                 }
-                self.stack.push(Value::Bool(self.runtime.os_copy(&from, &to)));
+                self.stack
+                    .push(Value::Bool(self.runtime.os_copy(&from, &to)));
                 Ok(())
             }
 
@@ -3108,11 +3167,11 @@ impl VM {
                     }));
                     return Ok(());
                 }
-                let (status, response_body) = match self.runtime.http_post(&url, &body, &content_type)
-                {
-                    Ok((status, _headers, response_body)) => (status, response_body),
-                    Err(e) => (-1, e),
-                };
+                let (status, response_body) =
+                    match self.runtime.http_post(&url, &body, &content_type) {
+                        Ok((status, _headers, response_body)) => (status, response_body),
+                        Err(e) => (-1, e),
+                    };
                 let arr = vec![Value::Int(status), Value::String(Rc::new(response_body))];
                 self.stack.push(Value::Array(Gc::new(GcCell::new(arr))));
                 Ok(())
@@ -4581,5 +4640,660 @@ mod tests {
             .filter(|&&id| id == vm.main_fiber_id)
             .count();
         assert_eq!(main_count, 1, "exactly one main fiber (no double-spawn)");
+    }
+
+    // ── Bug C1: Jump target integer overflow ──
+
+    #[test]
+    fn test_jump_negative_overflow_is_bounds_checked() {
+        // A Jump instruction at offset 0 with i16::MIN (-32768) that would
+        // wrap around additively if computed as (ip as i32 + offset) as usize.
+        let program = make_program(
+            vec![],
+            vec![
+                Opcode::Jump as u8,
+                0x00,
+                0x80, // little-endian i16::MIN = -32768
+                Opcode::Halt as u8,
+            ],
+        );
+        let mut vm = VM::new(program);
+        let result = vm.run();
+        assert!(result.is_err(), "jump with wraparound offset must error");
+        assert!(
+            result
+                .as_ref()
+                .unwrap_err()
+                .contains("jump target out of bounds"),
+            "error must mention jump target out of bounds, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_jump_valid_offset_still_works() {
+        let program = make_program(
+            vec![Value::Int(42)],
+            vec![
+                Opcode::LoadConst as u8,
+                0,
+                0, // Load 42
+                Opcode::Jump as u8,
+                0,
+                2,                 // jump forward 2 bytes to Halt
+                Opcode::Pop as u8, // skipped
+                Opcode::Halt as u8,
+            ],
+        );
+        let mut vm = VM::new(program);
+        let result = vm.run();
+        assert!(result.is_ok(), "valid jump must still work");
+    }
+
+    #[test]
+    fn test_jump_if_true_overflow_is_checked() {
+        let program = make_program(
+            vec![Value::Bool(true)],
+            vec![
+                Opcode::LoadConst as u8,
+                0,
+                0, // Load true
+                Opcode::JumpIfTrue as u8,
+                0x00,
+                0x80, // little-endian i16::MIN = -32768
+                Opcode::Halt as u8,
+            ],
+        );
+        let mut vm = VM::new(program);
+        let result = vm.run();
+        assert!(
+            result.is_err(),
+            "JumpIfTrue with wraparound offset must error"
+        );
+    }
+
+    #[test]
+    fn test_jump_if_false_overflow_is_checked() {
+        let program = make_program(
+            vec![Value::Bool(false)],
+            vec![
+                Opcode::LoadConst as u8,
+                0,
+                0, // Load false
+                Opcode::JumpIfFalse as u8,
+                0x00,
+                0x80, // little-endian i16::MIN = -32768
+                Opcode::Halt as u8,
+            ],
+        );
+        let mut vm = VM::new(program);
+        let result = vm.run();
+        assert!(
+            result.is_err(),
+            "JumpIfFalse with wraparound offset must error"
+        );
+    }
+
+    // ── Bug C2: Bit shift UB ──
+
+    #[test]
+    fn test_shl_excessive_shift_clamped_not_ub() {
+        let program = make_program(
+            vec![Value::Int(1), Value::Int(1000)],
+            vec![
+                Opcode::LoadConst as u8,
+                0,
+                0, // Load 1
+                Opcode::LoadConst as u8,
+                1,
+                0,                 // Load 1000
+                Opcode::Shl as u8, // 1 << 1000 (clamped to << 63)
+                Opcode::Pop as u8,
+                Opcode::Halt as u8,
+            ],
+        );
+        let mut vm = VM::new(program);
+        let result = vm.run();
+        assert!(result.is_ok(), "shl by 1000 must not panic/UB");
+    }
+
+    #[test]
+    fn test_shr_excessive_shift_clamped_not_ub() {
+        let program = make_program(
+            vec![Value::Int(42), Value::Int(999)],
+            vec![
+                Opcode::LoadConst as u8,
+                0,
+                0, // Load 42
+                Opcode::LoadConst as u8,
+                1,
+                0,                 // Load 999
+                Opcode::Shr as u8, // 42 >> 999 (clamped to >> 63)
+                Opcode::Pop as u8,
+                Opcode::Halt as u8,
+            ],
+        );
+        let mut vm = VM::new(program);
+        let result = vm.run();
+        assert!(result.is_ok(), "shr by 999 must not panic/UB");
+    }
+
+    #[test]
+    fn test_ushr_excessive_shift_clamped_not_ub() {
+        let program = make_program(
+            vec![Value::Int(-1_i64), Value::Int(2000)],
+            vec![
+                Opcode::LoadConst as u8,
+                0,
+                0, // Load -1 (all 1s bits)
+                Opcode::LoadConst as u8,
+                1,
+                0,                  // Load 2000
+                Opcode::UShr as u8, // -1 >>> 2000 (clamped to >>> 63)
+                Opcode::Pop as u8,
+                Opcode::Halt as u8,
+            ],
+        );
+        let mut vm = VM::new(program);
+        let result = vm.run();
+        assert!(result.is_ok(), "ushr by 2000 must not panic/UB");
+    }
+
+    #[test]
+    fn test_shift_by_zero_is_identity() {
+        let program = make_program(
+            vec![Value::Int(42), Value::Int(0)],
+            vec![
+                Opcode::LoadConst as u8,
+                0,
+                0,
+                Opcode::LoadConst as u8,
+                1,
+                0,
+                Opcode::Shl as u8, // 42 << 0 = 42
+                Opcode::Pop as u8,
+                Opcode::Halt as u8,
+            ],
+        );
+        let mut vm = VM::new(program);
+        let result = vm.run();
+        assert!(result.is_ok(), "shift by zero must work");
+    }
+
+    // ── Bug C6: sys_exit graceful halt ──
+
+    #[test]
+    fn test_sys_exit_graceful() {
+        // Push exit code 42, then call sys_exit (syscall 0).
+        // After the fix, this must NOT call std::process::exit.
+        let program = make_program(
+            vec![Value::Int(42)],
+            vec![
+                Opcode::LoadConst as u8,
+                0,
+                0, // Load 42 (exit code) from constant pool index 0
+                Opcode::Syscall as u8,
+                0, // syscall number 0 = sys_exit
+                Opcode::Halt as u8,
+            ],
+        );
+        let mut vm = VM::new(program);
+        let result = vm.run();
+        assert!(
+            result.is_ok(),
+            "sys_exit must not kill process; expected Ok exit"
+        );
+        assert_eq!(result.unwrap(), 42, "sys_exit(42) must return exit code 42");
+    }
+
+    #[test]
+    fn test_sys_exit_default_code() {
+        // sys_exit with a non-int value should default to exit code 1.
+        let program = make_program(
+            vec![Value::Bool(true)],
+            vec![
+                Opcode::LoadConst as u8,
+                0,
+                0, // Load true (non-int)
+                Opcode::Syscall as u8,
+                0, // syscall number 0 = sys_exit
+                Opcode::Halt as u8,
+            ],
+        );
+        let mut vm = VM::new(program);
+        let result = vm.run();
+        assert!(result.is_ok(), "sys_exit non-int must not kill process");
+        assert_eq!(
+            result.unwrap(),
+            1,
+            "sys_exit(non-int) must return default exit code 1"
+        );
+    }
+
+    // ── Bug M1: Negative Array/String Index ──
+
+    #[test]
+    fn test_array_get_negative_index_errors() {
+        let program = make_program(
+            vec![
+                Value::Array(Gc::new(GcCell::new(vec![
+                    Value::Int(1),
+                    Value::Int(2),
+                    Value::Int(3),
+                ]))),
+                Value::Int(-1),
+            ],
+            vec![
+                Opcode::LoadConst as u8,
+                0,
+                0, // Load array
+                Opcode::LoadConst as u8,
+                1,
+                0,                      // Load -1 index
+                Opcode::ArrayGet as u8, // arr[-1]
+                Opcode::Halt as u8,
+            ],
+        );
+        let mut vm = VM::new(program);
+        let result = vm.run();
+        assert!(result.is_err(), "negative array index must error");
+        assert!(
+            result
+                .as_ref()
+                .unwrap_err()
+                .contains("Index out of bounds: negative index"),
+            "error must mention negative index, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_array_get_out_of_bounds_index_errors() {
+        let program = make_program(
+            vec![
+                Value::Array(Gc::new(GcCell::new(vec![Value::Int(1), Value::Int(2)]))),
+                Value::Int(5),
+            ],
+            vec![
+                Opcode::LoadConst as u8,
+                0,
+                0, // Load array [1, 2]
+                Opcode::LoadConst as u8,
+                1,
+                0,                      // Load index 5
+                Opcode::ArrayGet as u8, // arr[5]
+                Opcode::Halt as u8,
+            ],
+        );
+        let mut vm = VM::new(program);
+        let result = vm.run();
+        assert!(result.is_err(), "out-of-bounds array index must error");
+        assert!(
+            result.as_ref().unwrap_err().contains("Index out of bounds"),
+            "error must mention out of bounds, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_array_get_valid_index_still_works() {
+        let program = make_program(
+            vec![
+                Value::Array(Gc::new(GcCell::new(vec![
+                    Value::Int(10),
+                    Value::Int(20),
+                    Value::Int(30),
+                ]))),
+                Value::Int(1),
+            ],
+            vec![
+                Opcode::LoadConst as u8,
+                0,
+                0, // Load array
+                Opcode::LoadConst as u8,
+                1,
+                0,                      // Load index 1
+                Opcode::ArrayGet as u8, // arr[1] = 20
+                Opcode::Halt as u8,
+            ],
+        );
+        let mut vm = VM::new(program);
+        let result = vm.run();
+        assert!(result.is_ok(), "valid array index must still work");
+        assert_eq!(vm.stack.len(), 1);
+        match &vm.stack[0] {
+            Value::Int(n) => assert_eq!(*n, 20),
+            other => panic!("Expected Int(20), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_string_index_negative_errors() {
+        let program = make_program(
+            vec![Value::String(Rc::new("hello".to_string())), Value::Int(-2)],
+            vec![
+                Opcode::LoadConst as u8,
+                0,
+                0, // Load "hello"
+                Opcode::LoadConst as u8,
+                1,
+                0,                      // Load -2 index
+                Opcode::ArrayGet as u8, // "hello"[-2]
+                Opcode::Halt as u8,
+            ],
+        );
+        let mut vm = VM::new(program);
+        let result = vm.run();
+        assert!(result.is_err(), "negative string index must error");
+        assert!(
+            result
+                .as_ref()
+                .unwrap_err()
+                .contains("Index out of bounds: negative index"),
+            "error must mention negative index, got: {:?}",
+            result
+        );
+    }
+
+    // ── Bug M2: ArraySet OOB writes ──
+
+    #[test]
+    fn test_array_set_oob_errors() {
+        let program = make_program(
+            vec![
+                Value::Array(Gc::new(GcCell::new(vec![Value::Int(1), Value::Int(2)]))),
+                Value::Int(5),
+                Value::Int(99),
+            ],
+            vec![
+                Opcode::LoadConst as u8,
+                0,
+                0, // Load array [1, 2]
+                Opcode::LoadConst as u8,
+                1,
+                0, // Load index 5 (OOB)
+                Opcode::LoadConst as u8,
+                2,
+                0,                      // Load value 99
+                Opcode::ArraySet as u8, // arr[5] = 99
+                Opcode::Halt as u8,
+            ],
+        );
+        let mut vm = VM::new(program);
+        let result = vm.run();
+        assert!(result.is_err(), "OOB array set must error");
+        assert!(
+            result
+                .as_ref()
+                .unwrap_err()
+                .contains("Array index out of bounds"),
+            "error must mention Array index out of bounds, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_array_set_valid_still_works() {
+        let program = make_program(
+            vec![
+                Value::Array(Gc::new(GcCell::new(vec![
+                    Value::Int(1),
+                    Value::Int(2),
+                    Value::Int(3),
+                ]))),
+                Value::Int(1),
+                Value::Int(99),
+            ],
+            vec![
+                Opcode::LoadConst as u8,
+                0,
+                0, // Load array [1, 2, 3]
+                Opcode::LoadConst as u8,
+                1,
+                0, // Load index 1
+                Opcode::LoadConst as u8,
+                2,
+                0,                      // Load value 99
+                Opcode::ArraySet as u8, // arr[1] = 99
+                Opcode::Halt as u8,
+            ],
+        );
+        let mut vm = VM::new(program);
+        let result = vm.run();
+        assert!(result.is_ok(), "valid array set must still work");
+    }
+
+    // ── Bug M3: Neg on Int::MIN wraps (spec: integer overflow is wrapping) ──
+
+    #[test]
+    fn test_neg_int_min_wraps() {
+        let program = make_program(
+            vec![Value::Int(i64::MIN)],
+            vec![
+                Opcode::LoadConst as u8,
+                0,
+                0,                 // Load Int::MIN
+                Opcode::Neg as u8, // neg(Int::MIN) wraps to Int::MIN
+                Opcode::Halt as u8,
+            ],
+        );
+        let mut vm = VM::new(program);
+        let result = vm.run();
+        assert!(result.is_ok(), "neg(Int::MIN) must wrap, not error");
+        assert_eq!(vm.stack.len(), 1);
+        match &vm.stack[0] {
+            Value::Int(n) => assert_eq!(*n, i64::MIN, "neg(Int::MIN) wraps to Int::MIN"),
+            other => panic!("Expected Int(i64::MIN), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_neg_normal_still_works() {
+        let program = make_program(
+            vec![Value::Int(42)],
+            vec![
+                Opcode::LoadConst as u8,
+                0,
+                0,                 // Load 42
+                Opcode::Neg as u8, // -42
+                Opcode::Halt as u8,
+            ],
+        );
+        let mut vm = VM::new(program);
+        let result = vm.run();
+        assert!(result.is_ok(), "normal negation must still work");
+        assert_eq!(vm.stack.len(), 1);
+        match &vm.stack[0] {
+            Value::Int(n) => assert_eq!(*n, -42),
+            other => panic!("Expected Int(-42), got {:?}", other),
+        }
+    }
+
+    // ── Bug M4: NaN float comparison ──
+
+    fn assert_stack_bool(vm: &VM, expected: bool, msg: &str) {
+        assert_eq!(vm.stack.len(), 1, "{}", msg);
+        match &vm.stack[0] {
+            Value::Bool(b) => assert_eq!(*b, expected, "{}", msg),
+            other => panic!("{} — expected Bool({}), got {:?}", msg, expected, other),
+        }
+    }
+
+    fn make_nan_test_program(opcode: Opcode) -> Program {
+        make_program(
+            vec![Value::Float(f64::NAN), Value::Float(1.0)],
+            vec![
+                Opcode::LoadConst as u8,
+                0,
+                0, // Load NaN
+                Opcode::LoadConst as u8,
+                1,
+                0, // Load 1.0
+                opcode as u8,
+                Opcode::Halt as u8,
+            ],
+        )
+    }
+
+    fn make_nan_nan_test_program(opcode: Opcode) -> Program {
+        make_program(
+            vec![Value::Float(f64::NAN), Value::Float(f64::NAN)],
+            vec![
+                Opcode::LoadConst as u8,
+                0,
+                0, // Load NaN
+                Opcode::LoadConst as u8,
+                1,
+                0, // Load NaN
+                opcode as u8,
+                Opcode::Halt as u8,
+            ],
+        )
+    }
+
+    #[test]
+    fn test_nan_lt_one_is_false() {
+        let program = make_nan_test_program(Opcode::Lt);
+        let mut vm = VM::new(program);
+        let result = vm.run();
+        assert!(result.is_ok());
+        assert_stack_bool(&vm, false, "NaN < 1 should be false");
+    }
+
+    #[test]
+    fn test_nan_gt_one_is_false() {
+        let program = make_nan_test_program(Opcode::Gt);
+        let mut vm = VM::new(program);
+        let result = vm.run();
+        assert!(result.is_ok());
+        assert_stack_bool(&vm, false, "NaN > 1 should be false");
+    }
+
+    #[test]
+    fn test_nan_le_one_is_false() {
+        let program = make_nan_test_program(Opcode::Le);
+        let mut vm = VM::new(program);
+        let result = vm.run();
+        assert!(result.is_ok());
+        assert_stack_bool(&vm, false, "NaN <= 1 should be false");
+    }
+
+    #[test]
+    fn test_nan_ge_one_is_false() {
+        let program = make_nan_test_program(Opcode::Ge);
+        let mut vm = VM::new(program);
+        let result = vm.run();
+        assert!(result.is_ok());
+        assert_stack_bool(&vm, false, "NaN >= 1 should be false");
+    }
+
+    #[test]
+    fn test_nan_eq_one_is_false() {
+        let program = make_nan_test_program(Opcode::Eq);
+        let mut vm = VM::new(program);
+        let result = vm.run();
+        assert!(result.is_ok());
+        assert_stack_bool(&vm, false, "NaN == 1 should be false");
+    }
+
+    #[test]
+    fn test_nan_ne_one_is_true() {
+        let program = make_nan_test_program(Opcode::Ne);
+        let mut vm = VM::new(program);
+        let result = vm.run();
+        assert!(result.is_ok());
+        assert_stack_bool(&vm, true, "NaN != 1 should be true");
+    }
+
+    #[test]
+    fn test_nan_eq_nan_is_false() {
+        let program = make_nan_nan_test_program(Opcode::Eq);
+        let mut vm = VM::new(program);
+        let result = vm.run();
+        assert!(result.is_ok());
+        assert_stack_bool(&vm, false, "NaN == NaN should be false");
+    }
+
+    #[test]
+    fn test_nan_ne_nan_is_true() {
+        let program = make_nan_nan_test_program(Opcode::Ne);
+        let mut vm = VM::new(program);
+        let result = vm.run();
+        assert!(result.is_ok());
+        assert_stack_bool(&vm, true, "NaN != NaN should be true");
+    }
+
+    #[test]
+    fn test_normal_float_comparisons_still_work() {
+        let program = make_program(
+            vec![Value::Float(3.0), Value::Float(5.0)],
+            vec![
+                Opcode::LoadConst as u8,
+                0,
+                0, // Load 3.0
+                Opcode::LoadConst as u8,
+                1,
+                0,                // Load 5.0
+                Opcode::Lt as u8, // 3.0 < 5.0 = true
+                Opcode::Halt as u8,
+            ],
+        );
+        let mut vm = VM::new(program);
+        let result = vm.run();
+        assert!(result.is_ok());
+        assert_stack_bool(&vm, true, "3.0 < 5.0 should be true");
+    }
+
+    #[test]
+    fn test_one_gt_nan_is_false() {
+        let program = make_program(
+            vec![Value::Float(1.0), Value::Float(f64::NAN)],
+            vec![
+                Opcode::LoadConst as u8,
+                0,
+                0, // Load 1.0
+                Opcode::LoadConst as u8,
+                1,
+                0,                // Load NaN
+                Opcode::Gt as u8, // 1.0 > NaN should be false
+                Opcode::Halt as u8,
+            ],
+        );
+        let mut vm = VM::new(program);
+        let result = vm.run();
+        assert!(result.is_ok());
+        assert_stack_bool(&vm, false, "1 > NaN should be false");
+    }
+
+    #[test]
+    fn test_make_closure_u16_limit_at_boundary() {
+        // Verify MakeClosure with offset at u16::MAX does not panic.
+        // This is a bytecode-layer test: we verify the u16 read does not
+        // overflow, and that the VM handles the maximum representable offset.
+        // Real closures at this offset are not practically reachable because
+        // MAX_CODE_LENGTH (10_000_000) fits in u32 but codegen truncates to u16.
+        let program = make_program(
+            vec![],
+            vec![
+                Opcode::MakeClosure as u8,
+                0xFF,
+                0xFF, // code_offset = u16::MAX
+                0x00, // capture_count = 0
+                Opcode::Halt as u8,
+            ],
+        );
+        let mut vm = VM::new(program);
+        let result = vm.run();
+        assert!(
+            result.is_ok(),
+            "MakeClosure at u16::MAX should not panic: {:?}",
+            result
+        );
+        // Should have a closure on the stack with the expected offset
+        assert_eq!(vm.stack.len(), 1);
+        match &vm.stack[0] {
+            Value::Closure(c) => assert_eq!(c.code_offset, u16::MAX as usize),
+            other => panic!("Expected Closure, got {:?}", other),
+        }
     }
 }

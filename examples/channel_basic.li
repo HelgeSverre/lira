@@ -9,3 +9,6 @@ println("Channel created with buffer size 5")
 
 // Channel type is available for use
 println("Channel operations ready")
+
+// @expect: Channel created with buffer size 5
+// @expect: Channel operations ready

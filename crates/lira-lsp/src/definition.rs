@@ -268,7 +268,8 @@ fn foo() {}
     fn test_goto_def_type_name_falls_back_to_struct_decl() {
         // Struct/enum/trait names in type position aren't value bindings, so the
         // regex fallback still resolves them.
-        let content = "struct Point {\n    x: int,\n}\nfn main() {\n    let p = Point { x: 1 }\n}\n";
+        let content =
+            "struct Point {\n    x: int,\n}\nfn main() {\n    let p = Point { x: 1 }\n}\n";
         let uri = Url::parse("file:///test.li").unwrap();
         // Cursor on `Point` in the literal (line 4, col 12).
         let loc = find_definition(&uri, content, pos(4, 12)).expect("resolves");

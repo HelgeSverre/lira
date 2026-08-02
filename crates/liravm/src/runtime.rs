@@ -362,7 +362,7 @@ impl Runtime {
     /// Read up to `max_bytes` from an owned file (checked out of the registry).
     /// Usable off the VM thread.
     pub(crate) fn read_file_blocking(file: &mut File, max_bytes: i64) -> Result<String, String> {
-        let mut buffer = vec![0u8; max_bytes.min(1024 * 1024).max(0) as usize]; // cap at 1MB
+        let mut buffer = vec![0u8; max_bytes.clamp(0, 1024 * 1024) as usize]; // cap at 1MB
         let bytes_read = file
             .read(&mut buffer)
             .map_err(|e| format!("Read error: {}", e))?;
@@ -525,34 +525,22 @@ impl Runtime {
     // Random Number Generation
     // ========================================================================
 
-    /// Generate random bytes
+    /// Generate random bytes using the OS CSPRNG
     pub fn random_bytes(&self, count: usize) -> Vec<u8> {
-        use std::collections::hash_map::RandomState;
-        use std::hash::{BuildHasher, Hasher};
-        // Use RandomState for simple random generation
-        let mut bytes = Vec::with_capacity(count);
-        for _ in 0..count {
-            let s = RandomState::new();
-            let mut hasher = s.build_hasher();
-            hasher.write_u64(self.current_time_millis() as u64);
-            bytes.push((hasher.finish() & 0xFF) as u8);
-        }
-        bytes
+        let mut buf = vec![0u8; count];
+        getrandom::getrandom(&mut buf).expect("Failed to get random bytes from OS");
+        buf
     }
 
-    /// Generate random float 0.0 to 1.0
+    /// Generate random float 0.0 to 1.0 using the OS CSPRNG
     pub fn random_float(&self) -> f64 {
-        use std::collections::hash_map::RandomState;
-        use std::hash::{BuildHasher, Hasher};
-        let s = RandomState::new();
-        let mut hasher = s.build_hasher();
-        hasher.write_u64(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos() as u64,
-        );
-        (hasher.finish() as f64) / (u64::MAX as f64)
+        use std::io::Read;
+        let mut buf = [0u8; 8];
+        std::fs::File::open("/dev/urandom")
+            .and_then(|mut f| f.read_exact(&mut buf))
+            .expect("Failed to read from /dev/urandom");
+        let raw: [u8; 8] = buf;
+        (u64::from_le_bytes(raw) as f64) / (u64::MAX as f64)
     }
 
     /// Generate random integer in range [min, max]
@@ -859,7 +847,7 @@ impl Runtime {
 
     /// Read from an owned socket (checked out of the registry). Off-VM-thread safe.
     pub(crate) fn tcp_read_blocking(stream: &mut TcpStream, max_bytes: i64) -> String {
-        let mut buffer = vec![0u8; max_bytes.min(65536).max(0) as usize];
+        let mut buffer = vec![0u8; max_bytes.clamp(0, 65536) as usize];
         match stream.read(&mut buffer) {
             Ok(n) => {
                 buffer.truncate(n);
@@ -927,10 +915,7 @@ impl Runtime {
         use std::net::ToSocketAddrs;
         let addr = format!("{}:80", hostname);
         match addr.to_socket_addrs() {
-            Ok(mut addrs) => addrs
-                .next()
-                .map(|a| a.ip().to_string())
-                .unwrap_or_default(),
+            Ok(mut addrs) => addrs.next().map(|a| a.ip().to_string()).unwrap_or_default(),
             Err(_) => String::new(),
         }
     }

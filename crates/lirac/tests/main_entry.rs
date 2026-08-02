@@ -61,8 +61,5 @@ println("preamble")
 main()
 "#;
     let output = run(source).expect("program should compile and run");
-    assert_eq!(
-        output,
-        vec!["preamble".to_string(), "in main".to_string()]
-    );
+    assert_eq!(output, vec!["preamble".to_string(), "in main".to_string()]);
 }

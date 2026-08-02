@@ -50,7 +50,10 @@ println(a[0])
 println(a[1])
 println(a[2])
 "#;
-    assert_eq!(run(src).unwrap(), vec!["99".to_string(), "2".to_string(), "7".to_string()]);
+    assert_eq!(
+        run(src).unwrap(),
+        vec!["99".to_string(), "2".to_string(), "7".to_string()]
+    );
 }
 
 #[test]
@@ -99,5 +102,8 @@ println(a[0])
 println(a[1])
 println(a[2])
 "#;
-    assert_eq!(run(src).unwrap(), vec!["10".to_string(), "25".to_string(), "20".to_string()]);
+    assert_eq!(
+        run(src).unwrap(),
+        vec!["10".to_string(), "25".to_string(), "20".to_string()]
+    );
 }
