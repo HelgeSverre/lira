@@ -154,7 +154,7 @@ impl VM {
     /// guarantees collection happens at a point where no `GcCell` is borrowed
     /// (every `execute_*` handler releases its borrows before returning), making
     /// the trigger deterministic and independent of allocation-site timing.
-    const AUTO_COLLECT_INTERVAL: u64 = 10_000;
+    const AUTO_COLLECT_INTERVAL: u64 = 100_000;
 
     /// Record a cyclic-capable heap allocation (object, array, or closure).
     #[inline]
@@ -1103,6 +1103,7 @@ impl VM {
     }
 
     /// Stack, local variable, object, array and closure-data operations.
+    #[inline(always)]
     fn execute_memory(&mut self, opcode: Opcode) -> Result<Option<i32>, String> {
         match opcode {
             // Stack operations
@@ -1337,6 +1338,7 @@ impl VM {
     }
 
     /// Arithmetic operations.
+    #[inline(always)]
     fn execute_arithmetic(&mut self, opcode: Opcode) -> Result<Option<i32>, String> {
         match opcode {
             // Arithmetic operations
@@ -1490,6 +1492,7 @@ impl VM {
     }
 
     /// Comparison, logical and bitwise operations.
+    #[inline(always)]
     fn execute_comparison(&mut self, opcode: Opcode) -> Result<Option<i32>, String> {
         match opcode {
             // Comparison operations
@@ -1634,6 +1637,7 @@ impl VM {
     }
 
     /// Control flow, function calls and program halt.
+    #[inline(always)]
     fn execute_control_flow(&mut self, opcode: Opcode) -> Result<Option<i32>, String> {
         match opcode {
             // Control flow
@@ -1669,13 +1673,11 @@ impl VM {
                 match &callee {
                     Value::Function(code_offset) => {
                         let code_offset = *code_offset;
-                        // Pop arguments and store as locals
-                        let args: Vec<Value> = (0..arg_count)
-                            .map(|_| self.pop())
-                            .collect::<Result<Vec<_>, _>>()?
-                            .into_iter()
-                            .rev()
-                            .collect();
+                        let mut args = Vec::with_capacity(arg_count);
+                        for _ in 0..arg_count {
+                            args.push(self.pop()?);
+                        }
+                        args.reverse();
 
                         // Save stack base AFTER popping args - this isolates the caller's stack
                         let frame = CallFrame {
@@ -1696,13 +1698,11 @@ impl VM {
                         self.ip = code_offset;
                     }
                     Value::Closure(closure_data) => {
-                        // Pop arguments and store as locals
-                        let args: Vec<Value> = (0..arg_count)
-                            .map(|_| self.pop())
-                            .collect::<Result<Vec<_>, _>>()?
-                            .into_iter()
-                            .rev()
-                            .collect();
+                        let mut args = Vec::with_capacity(arg_count);
+                        for _ in 0..arg_count {
+                            args.push(self.pop()?);
+                        }
+                        args.reverse();
 
                         // Save stack base AFTER popping args - this isolates the caller's stack
                         let frame = CallFrame {
@@ -1764,6 +1764,7 @@ impl VM {
     }
 
     /// Type test and cast operations.
+    #[inline(always)]
     fn execute_type(&mut self, opcode: Opcode) -> Result<Option<i32>, String> {
         match opcode {
             // Type operations
@@ -1821,6 +1822,7 @@ impl VM {
     }
 
     /// System operations (print and syscall dispatch).
+    #[inline(always)]
     fn execute_system(&mut self, opcode: Opcode) -> Result<Option<i32>, String> {
         match opcode {
             // System operations
@@ -1864,6 +1866,7 @@ impl VM {
     ///
     /// Kept together as a single unit so the scheduler/channel machinery can be
     /// evolved cohesively by later work.
+    #[inline(always)]
     fn execute_fiber_channel(&mut self, opcode: Opcode) -> Result<Option<i32>, String> {
         match opcode {
             // Fiber operations
@@ -2269,8 +2272,12 @@ impl VM {
     }
 
     fn read_u16(&mut self) -> Result<u16, String> {
-        let lo = self.read_u8()? as u16;
-        let hi = self.read_u8()? as u16;
+        if self.ip + 2 > self.program.code.len() {
+            return Err("Unexpected end of bytecode".to_string());
+        }
+        let lo = self.program.code[self.ip] as u16;
+        let hi = self.program.code[self.ip + 1] as u16;
+        self.ip += 2;
         Ok(lo | (hi << 8))
     }
 
