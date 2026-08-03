@@ -324,12 +324,11 @@ just ci                  # fmt-check + clippy + test
 
 ```bash
 cargo build --package lira --package lirac --package liravm
-cargo test --package lirac --package liravm --package lira-core \
-           --package lira-spec --package lira-playground
-cargo test --package lirac --test integration
+cargo nextest run --package lirac --package liravm --package lira-core \
+                  --package lira-spec --package lira-playground
 
 # Run a single example-based integration test
-cargo test --package lirac --test integration -- test_hello
+cargo nextest run --package lirac --test integration -- test_hello
 
 # Compile and run a file manually
 cargo run --package lirac -- compile examples/hello.li -o /tmp/hello.lic
@@ -475,8 +474,10 @@ aggregate tests that run all examples.
 
 ### Unit tests
 
-Each crate contains `#[cfg(test)]` unit tests. Run them with `cargo test` or
-`just test`.
+Each crate contains `#[cfg(test)]` unit tests. Run them with `cargo nextest run` or
+`just test`. The project uses nextest (not plain `cargo test`) for faster parallel
+execution and automatic failure output. Do not add doctests — Lira has no Rust-facing
+doc-test mechanism.
 
 ### Property-based / fuzz tests
 
@@ -490,9 +491,9 @@ Located in `crates/lirac/tests/`:
 Run individually:
 
 ```bash
-cargo test -p lirac --test differential
-PROPTEST_CASES=50000 cargo test -p lirac --test differential
-cargo test -p lirac --test robustness
+cargo nextest run -p lirac --test differential
+PROPTEST_CASES=50000 cargo nextest run -p lirac --test differential
+cargo nextest run -p lirac --test robustness
 ```
 
 ### Mutation testing
