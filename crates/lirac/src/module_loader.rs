@@ -22,6 +22,9 @@ pub struct ModuleLoader {
     module_cache: HashMap<String, Program>,
     /// Set of modules currently being loaded (for cycle detection)
     loading: HashSet<String>,
+    /// Next file index for globally-unique NodeId assignment.
+    /// Each loaded module gets a successive index starting at 1 (main file = 0).
+    next_file_index: u32,
 }
 
 impl ModuleLoader {
@@ -38,6 +41,7 @@ impl ModuleLoader {
             stdlib_dir,
             module_cache: HashMap::new(),
             loading: HashSet::new(),
+            next_file_index: 1,
         }
     }
 
@@ -152,7 +156,9 @@ impl ModuleLoader {
             .map_err(|e| format!("Failed to read module {}: {}", path_key, e))?;
 
         let tokens = lexer::tokenize(&source)?;
-        let ast = parser::parse(&tokens)?;
+        let file_index = self.next_file_index;
+        self.next_file_index += 1;
+        let ast = parser::parse_with_index(&tokens, file_index)?;
 
         // Done loading
         self.loading.remove(&path_key);

@@ -89,21 +89,32 @@ Additional optimizations applied:
 
 **Result: 10.7s** (13.5s → 12.7s → 10.7s). ~21% total improvement from original.
 
-### Known limitation: expr_types collision
+### Round 3: NodeId fix + full typed opcode emission
 
-`NodeId` resets per compilation unit (file), so `SemanticTables.expr_types` has
-collisions when multiple files are compiled. Codegen cannot reliably use
-`expr_types` for identifier-typed opcodes. Fix requires globally-unique NodeId.
+- **NodeId(u32) → NodeId(u64)**: high 32 bits = file index, low 32 = local.
+  `ModuleLoader` assigns successive file indices to imported modules, making
+  `SemanticTables.expr_types` reliable across multi-file compilation.
+- Codegen `checked_is_int`/`checked_is_float` methods use `expr_types` for
+  authoritative type info (with literal-shape fallback for synthetic nodes).
+- Binary ops, unary neg, PreInc/PostDec, for-range increment, and all 3
+  CompoundAssign paths now emit typed opcodes.
+- `pop_int_fast`/`pop_float_fast`: free functions that skip the stack-base
+  guard (codegen guarantees balanced stacks for typed ops), avoiding the
+  `pop_int`/`pop_float` overhead.
+
+**Result: 9.5s** (13.5s → 12.7s → 10.7s → 9.5s). ~30% total improvement.
 
 ### Path to 5s
 
-The typed opcodes are wired up in the VM but codegen only emits them for
-literal-on-literal operations. To unlock the full ~40% typed-opcode speedup:
+The remaining gap (~9.5s → 5s) needs ~1.9× further speedup. Options:
+- Value Drop optimization (A1 — remove `Finalize` derive overhead): est. 10-15%
+- TCO (tail-call optimization): eliminates call frames for tail-recursive calls
+- Inlining of small functions at codegen time
+- Stack caching: keep TOS in a register, avoid push/pop for single-use values
+- Register-based local variables: avoid LoadLocal/StoreLocal overhead
 
-1. Make `NodeId` globally unique (file-id prefix) → `expr_types` becomes reliable
-2. Codegen queries `expr_types` to emit typed opcodes for ALL int/float expressions
-3. Estimated impact: 10.7s → ~6-7s
-4. For the remaining gap to 5s: value Drop optimization (A1) + TCO/inlining
+Of these, TCO alone could bring fib(30) close to 5s by eliminating 67M call
+frames. Combined with Finalize removal, the target is achievable.
 
 ## Value Size
 

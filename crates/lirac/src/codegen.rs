@@ -12,16 +12,6 @@ use lira_core::opcode::Opcode;
 use lira_core::{BYTECODE_MAGIC, BYTECODE_VERSION};
 use std::collections::HashMap;
 
-/// Check if an expression is statically known to produce an int value.
-fn is_int_expr(e: &Expression) -> bool {
-    matches!(&e.kind, ExpressionKind::IntLiteral(_))
-}
-
-/// Check if an expression is statically known to produce a float value.
-fn is_float_expr(e: &Expression) -> bool {
-    matches!(&e.kind, ExpressionKind::FloatLiteral(_))
-}
-
 /// Table of syscall-based builtins: (function_name, syscall_number, required_arg_count).
 /// Special builtins (print, chan, send, recv, close, fiber_yield, fiber_id, len, push, pop)
 /// use custom opcodes and are handled as explicit match arms instead.
@@ -1668,7 +1658,7 @@ impl CodeGenerator {
                 let one_idx = self.add_constant(Constant::Int(1));
                 self.emit_opcode(Opcode::LoadConst);
                 self.emit_u16(one_idx);
-                self.emit_opcode(Opcode::Add);
+                self.emit_opcode(Opcode::IAdd);
                 self.emit_opcode(Opcode::StoreLocal);
                 self.emit_u16(idx_slot);
 
@@ -2073,8 +2063,8 @@ impl CodeGenerator {
                 self.generate_expression(left);
                 self.generate_expression(right);
 
-                let both_int = is_int_expr(left) && is_int_expr(right);
-                let both_float = is_float_expr(left) && is_float_expr(right);
+                let both_int = self.checked_is_int(left) && self.checked_is_int(right);
+                let both_float = self.checked_is_float(left) && self.checked_is_float(right);
 
                 let opcode = match op {
                     BinaryOp::Add => if both_int { Opcode::IAdd } else if both_float { Opcode::FAdd } else { Opcode::Add },
@@ -2112,8 +2102,8 @@ impl CodeGenerator {
                 match op {
                     UnaryOp::Neg => {
                         self.generate_expression(operand);
-                        let opcode = if is_int_expr(operand) { Opcode::INeg }
-                            else if is_float_expr(operand) { Opcode::FNeg }
+                        let opcode = if self.checked_is_int(operand) { Opcode::INeg }
+                            else if self.checked_is_float(operand) { Opcode::FNeg }
                             else { Opcode::Neg };
                         self.emit_opcode(opcode);
                     }
@@ -2138,9 +2128,9 @@ impl CodeGenerator {
                                 self.emit_u16(one_idx);
                                 // Add or subtract
                                 if *op == UnaryOp::PreInc {
-                                    self.emit_opcode(Opcode::Add);
+                                    self.emit_opcode(Opcode::IAdd);
                                 } else {
-                                    self.emit_opcode(Opcode::Sub);
+                                    self.emit_opcode(Opcode::ISub);
                                 }
                                 // Duplicate the result (new value stays on stack)
                                 self.emit_opcode(Opcode::Dup);
@@ -2169,9 +2159,9 @@ impl CodeGenerator {
                                 self.emit_u16(one_idx);
                                 // Add or subtract
                                 if *op == UnaryOp::PostInc {
-                                    self.emit_opcode(Opcode::Add);
+                                    self.emit_opcode(Opcode::IAdd);
                                 } else {
-                                    self.emit_opcode(Opcode::Sub);
+                                    self.emit_opcode(Opcode::ISub);
                                 }
                                 // Store back (new value)
                                 self.emit_opcode(Opcode::StoreLocal);
@@ -2785,12 +2775,15 @@ impl CodeGenerator {
             },
 
             ExpressionKind::CompoundAssign { target, op, value } => {
+                let both_int = self.checked_is_int(target) && self.checked_is_int(value);
+                let both_float = self.checked_is_float(target) && self.checked_is_float(value);
+
                 let opcode = match op {
-                    BinaryOp::Add => Opcode::Add,
-                    BinaryOp::Sub => Opcode::Sub,
-                    BinaryOp::Mul => Opcode::Mul,
-                    BinaryOp::Div => Opcode::Div,
-                    BinaryOp::Mod => Opcode::Mod,
+                    BinaryOp::Add => if both_int { Opcode::IAdd } else if both_float { Opcode::FAdd } else { Opcode::Add },
+                    BinaryOp::Sub => if both_int { Opcode::ISub } else if both_float { Opcode::FSub } else { Opcode::Sub },
+                    BinaryOp::Mul => if both_int { Opcode::IMul } else if both_float { Opcode::FMul } else { Opcode::Mul },
+                    BinaryOp::Div => if both_int { Opcode::IDiv } else if both_float { Opcode::FDiv } else { Opcode::Div },
+                    BinaryOp::Mod => if both_int { Opcode::IMod } else if both_float { Opcode::FMod } else { Opcode::Mod },
                     BinaryOp::BitAnd => Opcode::BitAnd,
                     BinaryOp::BitOr => Opcode::BitOr,
                     BinaryOp::BitXor => Opcode::BitXor,
@@ -3587,6 +3580,25 @@ impl CodeGenerator {
             }
         }
         resolved
+    }
+
+    /// Check if an expression is statically known to produce an int.
+    /// Queries the semantic tables (now reliable with globally-unique NodeId)
+    /// and falls back to literal shape for expressions without type info.
+    fn checked_is_int(&self, expr: &Expression) -> bool {
+        if let Some(ty) = self.sema.expr_types.get(&expr.id) {
+            return ty.is_numeric()
+                && !matches!(ty, Type::Float);
+        }
+        matches!(&expr.kind, ExpressionKind::IntLiteral(_))
+    }
+
+    /// Check if an expression is statically known to produce a float.
+    fn checked_is_float(&self, expr: &Expression) -> bool {
+        if let Some(ty) = self.sema.expr_types.get(&expr.id) {
+            return matches!(ty, Type::Float);
+        }
+        matches!(&expr.kind, ExpressionKind::FloatLiteral(_))
     }
 
     /// Get the display name of an expression's type for method dispatch.

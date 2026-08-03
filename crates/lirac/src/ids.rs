@@ -6,15 +6,20 @@
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// Unique identifier for an AST node
+/// Unique identifier for an AST node.
+///
+/// High 32 bits encode the source-file index (0 = main file, 1+ = imported
+/// modules). Low 32 bits are a per-file monotonic counter. Together they
+/// guarantee global uniqueness across a multi-file compilation without
+/// remapping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct NodeId(pub u32);
+pub struct NodeId(pub u64);
 
 impl NodeId {
-    /// Create a new NodeId with the given value
+    /// Create a new NodeId with the given raw value (for synthetic/dummy nodes).
     pub fn new(value: u32) -> Self {
-        Self(value)
+        Self(value as u64)
     }
 }
 
@@ -75,16 +80,21 @@ impl std::fmt::Display for TypeId {
     }
 }
 
-/// Generator for unique NodeIds
-pub struct NodeIdGen(u32);
+/// Generator for globally-unique `NodeId`s.
+///
+/// Seeds from `(file_index << 32)` so that every compilation unit produces
+/// non-overlapping ID ranges.  File 0 (main source) gets the low 32-bit
+/// range; file 1 (first import) gets the next range, etc.
+pub struct NodeIdGen(u64);
 
 impl NodeIdGen {
-    /// Create a new generator starting at 0
-    pub fn new() -> Self {
-        Self(0)
+    /// Create a new generator for the given compilation-unit file index.
+    /// `file_index = 0` for the main file, 1+ for imported modules.
+    pub fn new(file_index: u32) -> Self {
+        Self((file_index as u64) << 32)
     }
 
-    /// Generate the next unique NodeId
+    /// Generate the next unique NodeId (monotonic within this file).
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> NodeId {
         let id = NodeId(self.0);
@@ -92,15 +102,15 @@ impl NodeIdGen {
         id
     }
 
-    /// Get the current count of generated IDs
+    /// Number of IDs generated so far (local counter, low 32 bits only).
     pub fn count(&self) -> u32 {
-        self.0
+        (self.0 & 0xFFFF_FFFF) as u32
     }
 }
 
 impl Default for NodeIdGen {
     fn default() -> Self {
-        Self::new()
+        Self::new(0)
     }
 }
 
@@ -110,7 +120,7 @@ mod tests {
 
     #[test]
     fn test_node_id_generation() {
-        let mut gen = NodeIdGen::new();
+        let mut gen = NodeIdGen::new(0);
         let id1 = gen.next();
         let id2 = gen.next();
         let id3 = gen.next();
@@ -122,8 +132,20 @@ mod tests {
     }
 
     #[test]
+    fn test_node_id_file_prefix() {
+        let mut gen0 = NodeIdGen::new(0);
+        let mut gen1 = NodeIdGen::new(1);
+        let id0 = gen0.next();
+        let id1 = gen1.next();
+        // IDs from different files must not collide
+        assert_ne!(id0, id1);
+        assert_eq!(id0, NodeId(0));
+        assert_eq!(id1, NodeId(1 << 32));
+    }
+
+    #[test]
     fn test_node_id_uniqueness() {
-        let mut gen = NodeIdGen::new();
+        let mut gen = NodeIdGen::new(0);
         let mut ids = std::collections::HashSet::new();
 
         for _ in 0..100 {
@@ -134,8 +156,8 @@ mod tests {
 
     #[test]
     fn test_node_id_display() {
-        assert_eq!(NodeId(0).to_string(), "N0");
-        assert_eq!(NodeId(42).to_string(), "N42");
+        assert_eq!(NodeId::new(0).to_string(), "N0");
+        assert_eq!(NodeId::new(42).to_string(), "N42");
     }
 
     #[test]

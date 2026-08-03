@@ -39,13 +39,13 @@ pub struct Parser {
 }
 
 impl Parser {
-    pub fn new(tokens: Vec<Token>) -> Self {
+    pub fn new(tokens: Vec<Token>, file_index: u32) -> Self {
         Self {
             tokens,
             current: 0,
             errors: Vec::new(),
             panic_mode: false,
-            node_id: NodeIdGen::new(),
+            node_id: NodeIdGen::new(file_index),
             depth: 0,
             pending_type_args: Vec::new(),
         }
@@ -1470,7 +1470,7 @@ impl Parser {
             )
         })?;
 
-        let mut sub = Parser::new(tokens);
+        let mut sub = Parser::new(tokens, 0);
         // Share the NodeId generator so embedded expression nodes don't collide
         // with the surrounding program's node IDs.
         sub.node_id = std::mem::take(&mut self.node_id);
@@ -2456,9 +2456,14 @@ impl Precedence {
     }
 }
 
-/// Parse tokens into a program AST
+/// Parse tokens into a program AST (main file, file_index = 0).
 pub fn parse(tokens: &[Token]) -> Result<Program, String> {
-    let mut parser = Parser::new(tokens.to_vec());
+    parse_with_index(tokens, 0)
+}
+
+/// Parse tokens into a program AST for a specific compilation unit.
+pub fn parse_with_index(tokens: &[Token], file_index: u32) -> Result<Program, String> {
+    let mut parser = Parser::new(tokens.to_vec(), file_index);
     parser.parse()
 }
 
@@ -2469,7 +2474,7 @@ mod tests {
 
     fn parse_expr(source: &str) -> Result<Expression, String> {
         let tokens = tokenize(source)?;
-        let mut parser = Parser::new(tokens);
+        let mut parser = Parser::new(tokens, 0);
         parser.expression()
     }
 
@@ -2684,7 +2689,7 @@ mod tests {
             }
         "#;
         let tokens = tokenize(source).unwrap();
-        let mut parser = Parser::new(tokens);
+        let mut parser = Parser::new(tokens, 0);
         let expr = parser.expression().unwrap();
 
         if let ExpressionKind::Match { arms, .. } = expr.kind {
@@ -3204,7 +3209,7 @@ mod tests {
             }
         "#;
         let tokens = tokenize(source).unwrap();
-        let mut parser = Parser::new(tokens);
+        let mut parser = Parser::new(tokens, 0);
         let expr = parser.expression().unwrap();
 
         if let ExpressionKind::Select(arms) = expr.kind {
@@ -3228,7 +3233,7 @@ mod tests {
             }
         "#;
         let tokens = tokenize(source).unwrap();
-        let mut parser = Parser::new(tokens);
+        let mut parser = Parser::new(tokens, 0);
         let expr = parser.expression().unwrap();
 
         if let ExpressionKind::Select(arms) = expr.kind {
@@ -3252,7 +3257,7 @@ mod tests {
             }
         "#;
         let tokens = tokenize(source).unwrap();
-        let mut parser = Parser::new(tokens);
+        let mut parser = Parser::new(tokens, 0);
         let expr = parser.expression().unwrap();
 
         if let ExpressionKind::Select(arms) = expr.kind {
@@ -3277,7 +3282,7 @@ mod tests {
             }
         "#;
         let tokens = tokenize(source).unwrap();
-        let mut parser = Parser::new(tokens);
+        let mut parser = Parser::new(tokens, 0);
         let expr = parser.expression().unwrap();
 
         if let ExpressionKind::Select(arms) = expr.kind {
