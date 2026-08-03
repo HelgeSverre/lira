@@ -1,0 +1,145 @@
+// Tail-call optimisation regression tests
+// @expect: 2000
+// @expect: 15
+// @expect: 3628800
+// @expect: 125
+// @expect: 2.5
+
+// Bug 2: the tail-call rewrite scanned raw bytes and fired when the operand
+// byte of the final instruction equalled the Call opcode value (0x60 = 96).
+// Here `return 2000` loads constant index 96, whose low byte is 0x60, which
+// used to corrupt the LoadConst into a TailCall and return null.
+fn colliding_const_return() -> int {
+    let a0 = 1000
+    let a1 = 1001
+    let a2 = 1002
+    let a3 = 1003
+    let a4 = 1004
+    let a5 = 1005
+    let a6 = 1006
+    let a7 = 1007
+    let a8 = 1008
+    let a9 = 1009
+    let a10 = 1010
+    let a11 = 1011
+    let a12 = 1012
+    let a13 = 1013
+    let a14 = 1014
+    let a15 = 1015
+    let a16 = 1016
+    let a17 = 1017
+    let a18 = 1018
+    let a19 = 1019
+    let a20 = 1020
+    let a21 = 1021
+    let a22 = 1022
+    let a23 = 1023
+    let a24 = 1024
+    let a25 = 1025
+    let a26 = 1026
+    let a27 = 1027
+    let a28 = 1028
+    let a29 = 1029
+    let a30 = 1030
+    let a31 = 1031
+    let a32 = 1032
+    let a33 = 1033
+    let a34 = 1034
+    let a35 = 1035
+    let a36 = 1036
+    let a37 = 1037
+    let a38 = 1038
+    let a39 = 1039
+    let a40 = 1040
+    let a41 = 1041
+    let a42 = 1042
+    let a43 = 1043
+    let a44 = 1044
+    let a45 = 1045
+    let a46 = 1046
+    let a47 = 1047
+    let a48 = 1048
+    let a49 = 1049
+    let a50 = 1050
+    let a51 = 1051
+    let a52 = 1052
+    let a53 = 1053
+    let a54 = 1054
+    let a55 = 1055
+    let a56 = 1056
+    let a57 = 1057
+    let a58 = 1058
+    let a59 = 1059
+    let a60 = 1060
+    let a61 = 1061
+    let a62 = 1062
+    let a63 = 1063
+    let a64 = 1064
+    let a65 = 1065
+    let a66 = 1066
+    let a67 = 1067
+    let a68 = 1068
+    let a69 = 1069
+    let a70 = 1070
+    let a71 = 1071
+    let a72 = 1072
+    let a73 = 1073
+    let a74 = 1074
+    let a75 = 1075
+    let a76 = 1076
+    let a77 = 1077
+    let a78 = 1078
+    let a79 = 1079
+    let a80 = 1080
+    let a81 = 1081
+    let a82 = 1082
+    let a83 = 1083
+    let a84 = 1084
+    let a85 = 1085
+    let a86 = 1086
+    let a87 = 1087
+    let a88 = 1088
+    let a89 = 1089
+    let a90 = 1090
+    let a91 = 1091
+    let a92 = 1092
+    let a93 = 1093
+    let a94 = 1094
+    let a95 = 1095
+    return 2000
+}
+
+// Bug 1: tail-calling a closure that captures a variable used to crash with
+// "LoadCapture outside of closure" because TailCall did not swap frame.captures.
+fn make_adder(n: int) -> fn(int) -> int {
+    return |x: int| x + n
+}
+
+fn apply(f: fn(int) -> int, x: int) -> int {
+    return f(x)
+}
+
+// Sanity: genuine tail recursion still works and returns the right value.
+fn fact_tail(n: int, acc: int) -> int {
+    if n <= 1 {
+        return acc
+    }
+    return fact_tail(n - 1, n * acc)
+}
+
+// Bug 3: increment/decrement on a float variable used to emit IAdd/ISub
+// unconditionally, crashing at runtime with "Expected int, got float".
+fn float_inc() -> float {
+    var f = 1.5
+    f++
+    return f
+}
+
+fn main() {
+    println(colliding_const_return()) // 2000
+    let add5 = make_adder(5)
+    println(apply(add5, 10))          // 15
+    println(fact_tail(10, 1))         // 3628800
+    println(5 ** 3)                    // 125
+    println(float_inc())              // 2.5
+}

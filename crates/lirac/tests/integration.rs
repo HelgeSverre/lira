@@ -253,6 +253,7 @@ example_test!(
 example_test!(test_lambda, "lambda.li");
 example_test!(test_mutual_recursion, "mutual_recursion.li");
 example_test!(test_recursion_stress, "recursion_stress.li");
+example_test!(test_tail_call_regressions, "tail_call_regressions.li");
 example_test!(test_named_args, "named_args.li");
 example_test!(test_named_args_defaults, "named_args_defaults.li");
 example_test!(

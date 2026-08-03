@@ -195,6 +195,12 @@ pub struct CodeGenerator {
     impl_method_returns: HashMap<String, HashMap<String, String>>,
     /// Semantic tables produced by the type checker (authoritative expression types).
     sema: SemanticTables,
+    /// Byte offset of the `Call` opcode byte when the last emitted instruction
+    /// was a `Call`; cleared by any other opcode emission. Lets the tail-call
+    /// rewrite in `return` statements identify the trailing call exactly —
+    /// scanning raw bytes is unsound because operand bytes (constant indices,
+    /// jump offsets) can collide with the `Call` opcode value.
+    trailing_call: Option<usize>,
 }
 
 /// Key for constant deduplication
@@ -252,6 +258,7 @@ impl CodeGenerator {
             impl_methods: HashMap::new(),
             impl_method_returns: HashMap::new(),
             sema: SemanticTables::new(),
+            trailing_call: None,
         }
     }
 
@@ -557,6 +564,11 @@ impl CodeGenerator {
     }
 
     fn emit_opcode(&mut self, opcode: Opcode) {
+        if opcode == Opcode::Call {
+            self.trailing_call = Some(self.code.len());
+        } else {
+            self.trailing_call = None;
+        }
         self.code.push(opcode as u8);
     }
 
@@ -1483,19 +1495,21 @@ impl CodeGenerator {
                 if let Some(expr) = value {
                     let before = self.code.len();
                     self.generate_expression(expr);
-                    // Tail-call optimisation: if the return value is a single
-                    // function call we rewrite the trailing `Call n` into
-                    // `TailCall n` and omit the `Return` opcode entirely.
-                    // Uses byte-pattern matching because the AST-level Call
-                    // handler already emitted the opcode; we peek at the last
-                    // two bytes. The second-to-last byte being 0x60 (Call) is
-                    // unambiguous in practice: LoadConst/LoadLocal u16 operands
-                    // would need 24k+ entries to collide.
-                    let len = self.code.len();
-                    if len >= before + 2 && self.code[len - 2] == Opcode::Call as u8 {
-                        self.code[len - 2] = Opcode::TailCall as u8;
-                    } else {
-                        self.emit_opcode(Opcode::Return);
+                    // Tail-call optimisation: if the return value lowered to a
+                    // call as its final instruction, rewrite that `Call n` into
+                    // `TailCall n` and omit the `Return` opcode. `trailing_call`
+                    // is maintained by `emit_opcode`; the offset/length checks
+                    // ensure the call belongs to this expression and is truly
+                    // last. Scanning raw bytes is unsound: an operand byte of
+                    // the final instruction (e.g. the low byte of a LoadConst
+                    // index) can equal the `Call` opcode value.
+                    match self.trailing_call {
+                        Some(off) if off >= before && self.code.len() == off + 2 => {
+                            self.code[off] = Opcode::TailCall as u8;
+                        }
+                        _ => {
+                            self.emit_opcode(Opcode::Return);
+                        }
                     }
                 } else {
                     self.emit_opcode(Opcode::LoadConst);
@@ -2231,14 +2245,30 @@ impl CodeGenerator {
                                 self.emit_opcode(Opcode::LoadLocal);
                                 self.emit_u16(slot);
                                 // Push 1
-                                let one_idx = self.add_constant(Constant::Int(1));
+                                let one = if self.checked_is_float(operand) {
+                                    Constant::Float(1.0)
+                                } else {
+                                    Constant::Int(1)
+                                };
+                                let one_idx = self.add_constant(one);
                                 self.emit_opcode(Opcode::LoadConst);
                                 self.emit_u16(one_idx);
-                                // Add or subtract
+                                // Add or subtract (typed: the checker accepts any
+                                // numeric operand, so pick the opcode by type)
                                 if *op == UnaryOp::PreInc {
-                                    self.emit_opcode(Opcode::IAdd);
-                                } else {
+                                    if self.checked_is_int(operand) {
+                                        self.emit_opcode(Opcode::IAdd);
+                                    } else if self.checked_is_float(operand) {
+                                        self.emit_opcode(Opcode::FAdd);
+                                    } else {
+                                        self.emit_opcode(Opcode::Add);
+                                    }
+                                } else if self.checked_is_int(operand) {
                                     self.emit_opcode(Opcode::ISub);
+                                } else if self.checked_is_float(operand) {
+                                    self.emit_opcode(Opcode::FSub);
+                                } else {
+                                    self.emit_opcode(Opcode::Sub);
                                 }
                                 // Duplicate the result (new value stays on stack)
                                 self.emit_opcode(Opcode::Dup);
@@ -2262,14 +2292,29 @@ impl CodeGenerator {
                                 // Duplicate it (one for result, one for computation)
                                 self.emit_opcode(Opcode::Dup);
                                 // Push 1
-                                let one_idx = self.add_constant(Constant::Int(1));
+                                let one = if self.checked_is_float(operand) {
+                                    Constant::Float(1.0)
+                                } else {
+                                    Constant::Int(1)
+                                };
+                                let one_idx = self.add_constant(one);
                                 self.emit_opcode(Opcode::LoadConst);
                                 self.emit_u16(one_idx);
-                                // Add or subtract
+                                // Add or subtract (typed by operand type)
                                 if *op == UnaryOp::PostInc {
-                                    self.emit_opcode(Opcode::IAdd);
-                                } else {
+                                    if self.checked_is_int(operand) {
+                                        self.emit_opcode(Opcode::IAdd);
+                                    } else if self.checked_is_float(operand) {
+                                        self.emit_opcode(Opcode::FAdd);
+                                    } else {
+                                        self.emit_opcode(Opcode::Add);
+                                    }
+                                } else if self.checked_is_int(operand) {
                                     self.emit_opcode(Opcode::ISub);
+                                } else if self.checked_is_float(operand) {
+                                    self.emit_opcode(Opcode::FSub);
+                                } else {
+                                    self.emit_opcode(Opcode::Sub);
                                 }
                                 // Store back (new value)
                                 self.emit_opcode(Opcode::StoreLocal);
@@ -4191,69 +4236,77 @@ mod tests {
     }
 
     #[test]
-    fn test_addition_emits_add() {
+    fn test_addition_emits_typed_iadd_for_int_operands() {
         let bytecode = compile_source("let x = 1 + 2").unwrap();
+        assert!(find_opcode(&bytecode, Opcode::IAdd));
+    }
+
+    #[test]
+    fn test_addition_falls_back_to_add_for_mixed_operands() {
+        // Typed emission must not be blanket: int + float keeps the runtime
+        // dispatch opcode.
+        let bytecode = compile_source("let x = 1 + 2.5").unwrap();
         assert!(find_opcode(&bytecode, Opcode::Add));
     }
 
     #[test]
-    fn test_subtraction_emits_sub() {
+    fn test_subtraction_emits_typed_isub_for_int_operands() {
         let bytecode = compile_source("let x = 5 - 3").unwrap();
-        assert!(find_opcode(&bytecode, Opcode::Sub));
+        assert!(find_opcode(&bytecode, Opcode::ISub));
     }
 
     #[test]
-    fn test_multiplication_emits_mul() {
+    fn test_multiplication_emits_typed_imul_for_int_operands() {
         let bytecode = compile_source("let x = 4 * 5").unwrap();
-        assert!(find_opcode(&bytecode, Opcode::Mul));
+        assert!(find_opcode(&bytecode, Opcode::IMul));
     }
 
     #[test]
-    fn test_division_emits_div() {
+    fn test_division_emits_typed_idiv_for_int_operands() {
         let bytecode = compile_source("let x = 10 / 2").unwrap();
-        assert!(find_opcode(&bytecode, Opcode::Div));
+        assert!(find_opcode(&bytecode, Opcode::IDiv));
     }
 
     #[test]
-    fn test_modulo_emits_mod() {
+    fn test_modulo_emits_typed_imod_for_int_operands() {
         let bytecode = compile_source("let x = 10 % 3").unwrap();
-        assert!(find_opcode(&bytecode, Opcode::Mod));
+        assert!(find_opcode(&bytecode, Opcode::IMod));
     }
 
     #[test]
-    fn test_less_than_emits_lt() {
+    fn test_less_than_emits_typed_ilt_for_int_operands() {
         let bytecode = compile_source("let x = 1 < 2").unwrap();
-        assert!(find_opcode(&bytecode, Opcode::Lt));
+        assert!(find_opcode(&bytecode, Opcode::ILt));
     }
 
     #[test]
-    fn test_greater_than_emits_gt() {
+    fn test_greater_than_emits_typed_igt_for_int_operands() {
         let bytecode = compile_source("let x = 2 > 1").unwrap();
-        assert!(find_opcode(&bytecode, Opcode::Gt));
+        assert!(find_opcode(&bytecode, Opcode::IGt));
     }
 
     #[test]
-    fn test_less_than_or_equal_emits_le() {
+    fn test_less_than_or_equal_emits_typed_ile_for_int_operands() {
         let bytecode = compile_source("let x = 1 <= 2").unwrap();
-        assert!(find_opcode(&bytecode, Opcode::Le));
+        assert!(find_opcode(&bytecode, Opcode::ILe));
     }
 
     #[test]
-    fn test_greater_than_or_equal_emits_ge() {
+    fn test_greater_than_or_equal_emits_typed_ige_for_int_operands() {
         let bytecode = compile_source("let x = 2 >= 1").unwrap();
-        assert!(find_opcode(&bytecode, Opcode::Ge));
+        assert!(find_opcode(&bytecode, Opcode::IGe));
     }
 
     #[test]
-    fn test_equality_emits_eq() {
+    fn test_equality_emits_typed_ieq_for_int_operands() {
         let bytecode = compile_source("let x = 1 == 1").unwrap();
-        assert!(find_opcode(&bytecode, Opcode::Eq));
+        assert!(find_opcode(&bytecode, Opcode::IEq));
     }
 
     #[test]
-    fn test_not_equal_emits_ne() {
+    fn test_not_equal_emits_typed_ine_for_int_operands() {
         let bytecode = compile_source("let x = 1 != 2").unwrap();
-        assert!(find_opcode(&bytecode, Opcode::Ne));
+        assert!(find_opcode(&bytecode, Opcode::INe));
     }
 
     #[test]
@@ -4275,9 +4328,9 @@ mod tests {
     }
 
     #[test]
-    fn test_negation_emits_neg() {
+    fn test_negation_emits_typed_ineg_for_int_operand() {
         let bytecode = compile_source("let x = -42").unwrap();
-        assert!(find_opcode(&bytecode, Opcode::Neg));
+        assert!(find_opcode(&bytecode, Opcode::INeg));
     }
 
     #[test]
@@ -4368,7 +4421,7 @@ mod tests {
         "#,
         )
         .unwrap();
-        assert!(find_opcode(&bytecode, Opcode::Add));
+        assert!(find_opcode(&bytecode, Opcode::IAdd));
         assert!(find_opcode(&bytecode, Opcode::StoreLocal));
     }
 
@@ -4381,7 +4434,7 @@ mod tests {
         "#,
         )
         .unwrap();
-        assert!(find_opcode(&bytecode, Opcode::Sub));
+        assert!(find_opcode(&bytecode, Opcode::ISub));
     }
 
     // ==========================================================================
@@ -4546,7 +4599,7 @@ mod tests {
         )
         .unwrap();
         assert!(find_opcode(&bytecode, Opcode::LoadLocal)); // Loading parameters
-        assert!(find_opcode(&bytecode, Opcode::Mul));
+        assert!(find_opcode(&bytecode, Opcode::IMul));
         assert!(find_opcode(&bytecode, Opcode::Return));
     }
 
@@ -4798,7 +4851,7 @@ mod tests {
         "#,
         )
         .unwrap();
-        assert!(find_opcode(&bytecode, Opcode::Add));
+        assert!(find_opcode(&bytecode, Opcode::IAdd));
         assert!(find_opcode(&bytecode, Opcode::Dup));
     }
 
@@ -4811,7 +4864,7 @@ mod tests {
         "#,
         )
         .unwrap();
-        assert!(find_opcode(&bytecode, Opcode::Add));
+        assert!(find_opcode(&bytecode, Opcode::IAdd));
     }
 
     #[test]
@@ -4823,7 +4876,7 @@ mod tests {
         "#,
         )
         .unwrap();
-        assert!(find_opcode(&bytecode, Opcode::Sub));
+        assert!(find_opcode(&bytecode, Opcode::ISub));
     }
 
     #[test]
@@ -4835,7 +4888,22 @@ mod tests {
         "#,
         )
         .unwrap();
-        assert!(find_opcode(&bytecode, Opcode::Sub));
+        assert!(find_opcode(&bytecode, Opcode::ISub));
+    }
+
+    #[test]
+    fn test_float_increment_emits_fadd() {
+        // Regression: the checker accepts ++/-- on any numeric operand, so
+        // codegen must not unconditionally emit the int-only IAdd (that
+        // crashed at runtime with "Expected int, got float").
+        let bytecode = compile_source(
+            r#"
+            var f = 1.5
+            f++
+        "#,
+        )
+        .unwrap();
+        assert!(find_opcode(&bytecode, Opcode::FAdd));
     }
 
     // ==========================================================================
@@ -4845,10 +4913,10 @@ mod tests {
     #[test]
     fn test_complex_arithmetic_expression() {
         let bytecode = compile_source("let x = (1 + 2) * (3 - 4) / 5").unwrap();
-        assert!(find_opcode(&bytecode, Opcode::Add));
-        assert!(find_opcode(&bytecode, Opcode::Sub));
-        assert!(find_opcode(&bytecode, Opcode::Mul));
-        assert!(find_opcode(&bytecode, Opcode::Div));
+        assert!(find_opcode(&bytecode, Opcode::IAdd));
+        assert!(find_opcode(&bytecode, Opcode::ISub));
+        assert!(find_opcode(&bytecode, Opcode::IMul));
+        assert!(find_opcode(&bytecode, Opcode::IDiv));
     }
 
     #[test]
@@ -5279,8 +5347,8 @@ mod tests {
             find_opcode(&bytecode, Opcode::Pow),
             "Power operator in expression should emit Pow"
         );
-        assert!(find_opcode(&bytecode, Opcode::Add));
-        assert!(find_opcode(&bytecode, Opcode::Mul));
+        assert!(find_opcode(&bytecode, Opcode::IAdd));
+        assert!(find_opcode(&bytecode, Opcode::IMul));
     }
 
     // ==========================================================================
