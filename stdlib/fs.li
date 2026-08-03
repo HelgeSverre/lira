@@ -66,3 +66,9 @@ fn size(path: string) -> int {
     }
     return file_size(path)
 }
+
+// Seek to position in file, return new position
+// whence: 0 = start, 1 = current, 2 = end
+fn seek(fd: int, offset: int, whence: int) -> int {
+    return file_seek(fd, offset, whence)
+}

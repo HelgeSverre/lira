@@ -318,6 +318,10 @@ example_test!(
     test_pattern_constructor_verify,
     "pattern_constructor_verify.li"
 );
+example_test!(test_match_range, "match_range.li");
+example_test!(test_match_struct, "match_struct.li");
+example_test!(test_match_or, "match_or.li");
+example_test!(test_match_binding, "match_binding.li");
 
 // Functions and closures
 example_test!(test_lambda, "lambda.li");
@@ -344,6 +348,8 @@ example_test!(test_module_comprehensive, "module_comprehensive.li");
 example_test!(test_classes_basic, "classes_basic.li");
 example_test!(test_class_inheritance, "class_inheritance.li");
 example_test!(test_class_methods, "class_methods.li");
+example_test!(test_class_this, "class_this.li");
+example_test!(test_class_super, "class_super.li");
 example_test!(test_enums_basic, "enums_basic.li");
 example_test!(test_enum_data, "enum_data.li");
 example_test!(test_generic_enum, "generic_enum.li");
@@ -361,6 +367,7 @@ example_test!(test_range_expressions, "range_expressions.li");
 
 // I/O tests
 example_test!(test_file_io, "file_io.li");
+example_test!(test_file_seek, "file_seek.li");
 example_test!(test_stdlib_demo, "stdlib_demo.li");
 example_test!(test_math_test, "math_test.li");
 example_test!(test_smoke_test_fs, "smoke_test_fs.li");
@@ -415,6 +422,7 @@ example_test!(test_if_expressions, "if_expressions.li");
 example_test!(test_interface_basic, "interface_basic.li");
 example_test!(test_loop_control, "loop_control.li");
 example_test!(test_main_entry_point, "main_entry_point.li");
+example_test!(test_map_literals, "map_literals.li");
 example_test!(test_match_exhaustive_enum, "match_exhaustive_enum.li");
 example_test!(
     test_match_non_exhaustive_enum,

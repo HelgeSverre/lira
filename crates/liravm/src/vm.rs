@@ -2730,6 +2730,20 @@ impl VM {
                     _ => Err("file_size requires string argument".to_string()),
                 }
             }
+            // file_seek(fd: int, offset: int, whence: int) -> int
+            16 => {
+                let whence = self.pop()?;
+                let offset = self.pop()?;
+                let fd = self.pop()?;
+                let (Value::Int(fd), Value::Int(offset), Value::Int(whence)) =
+                    (&fd, &offset, &whence)
+                else {
+                    return Err("file_seek requires (int, int, int) arguments".to_string());
+                };
+                let pos = self.runtime.file_seek(*fd, *offset, *whence).unwrap_or(-1);
+                self.stack.push(Value::Int(pos));
+                Ok(())
+            }
 
             // ================================================================
             // Environment syscalls (20-29)

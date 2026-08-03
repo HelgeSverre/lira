@@ -87,8 +87,4 @@ println("=== All Class Tests Passed ===")
 // ============================================================
 // KNOWN ISSUES / PHASE 7 WORK:
 // - class literals create Struct types in type checker
-// - class inheritance (extends) not parsed
-// - super calls not implemented
-// - this.field in methods not implemented
-// - inline method definitions not implemented
 // ============================================================

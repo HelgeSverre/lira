@@ -1,0 +1,8 @@
+// Map literal creation and field access
+fn main() {
+    let m = { "name": "Alice", "city": "Oslo" }
+    println(m["name"])
+    println(m["city"])
+}
+// @expect: Alice
+// @expect: Oslo

@@ -429,6 +429,12 @@ impl TypeEnv {
         reg("file_close", vec![Type::Int], Type::Bool, 1);
         reg("file_exists", vec![Type::String], Type::Bool, 1);
         reg("file_size", vec![Type::String], Type::Int, 1);
+        reg(
+            "file_seek",
+            vec![Type::Int, Type::Int, Type::Int],
+            Type::Int,
+            3,
+        );
 
         // ================================================================
         // Environment built-in functions
@@ -2550,6 +2556,19 @@ impl TypeChecker {
             ExpressionKind::Null => Type::Null,
 
             ExpressionKind::Identifier(name) => {
+                // Handle 'this' keyword — refers to the current instance (self)
+                if name == "this" {
+                    if let Some(ref current_class) = self.current_type_name {
+                        return Type::Class(current_class.clone());
+                    } else {
+                        self.env.error(
+                            &expr.span,
+                            "'this' can only be used inside a class".to_string(),
+                        );
+                        return Type::Unknown;
+                    }
+                }
+
                 // Handle 'super' keyword for parent class access
                 if name == "super" {
                     if let Some(ref current_class) = self.current_type_name {
@@ -5177,19 +5196,25 @@ mod tests {
     // Map Type Tests
     // ========================================================================
 
-    // Note: Map literal syntax {key: value} is not yet supported by the parser.
-    // Map type checking is tested indirectly through other mechanisms.
-    // When map literals are added to the parser, these tests should be enabled:
-    //
-    // #[test]
-    // fn test_map_literal() {
-    //     assert!(check_source("let m = {\"a\": 1, \"b\": 2}").is_ok());
-    // }
-    //
-    // #[test]
-    // fn test_empty_map_literal() {
-    //     assert!(check_source("let m = {}").is_ok());
-    // }
+    #[test]
+    fn test_map_literal() {
+        assert!(check_source("let m = {\"a\": 1, \"b\": 2}").is_ok());
+    }
+
+    // Note: empty map `{}` parses as a block, not as a map literal.
+    // Empty maps require explicit type annotation: `let m: Map<string, int> = {}`
+    // This is tracked for future improvement.
+
+    #[test]
+    fn test_map_string_keys() {
+        assert!(check_source("let m = {\"key\": \"value\"}").is_ok());
+    }
+
+    #[test]
+    fn test_map_value_type_mismatch() {
+        let result = check_source("let m = {\"a\": 1, \"b\": \"hello\"}");
+        assert!(result.is_err());
+    }
 
     // ========================================================================
     // Complex Expression Tests

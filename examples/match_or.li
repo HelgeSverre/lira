@@ -1,0 +1,38 @@
+// Match with or-patterns (|)
+// @expect: vowel
+// @expect: vowel
+// @expect: vowel
+// @expect: vowel
+// @expect: vowel
+// @expect: other
+// @expect: warm
+// @expect: warm
+// @expect: other
+
+fn classify_char(c: int) -> string {
+    return match c {
+        97 | 101 | 105 | 111 | 117 => "vowel",
+        _ => "other"
+    }
+}
+
+enum Color { Red, Green, Blue }
+
+fn classify_color(c: Color) -> string {
+    return match c {
+        Color::Red | Color::Green => "warm",
+        _ => "other"
+    }
+}
+
+fn main() {
+    print(classify_char(97))
+    print(classify_char(101))
+    print(classify_char(105))
+    print(classify_char(111))
+    print(classify_char(117))
+    print(classify_char(98))
+    print(classify_color(Color::Red))
+    print(classify_color(Color::Green))
+    print(classify_color(Color::Blue))
+}
