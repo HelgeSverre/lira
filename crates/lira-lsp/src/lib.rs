@@ -336,7 +336,8 @@ impl LanguageServer for LiraLanguageServer {
             None => return Ok(None),
         };
 
-        let tokens = semantic_tokens::get_semantic_tokens(&content);
+        let analysis = self.analyzed(&uri);
+        let tokens = semantic_tokens::get_semantic_tokens(&content, analysis.as_deref());
         Ok(Some(SemanticTokensResult::Tokens(tokens)))
     }
 
