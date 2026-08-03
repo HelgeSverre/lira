@@ -12,3 +12,15 @@ fn main() {
     }
     print("done")
 }
+
+// @expect: odd
+// @expect: even
+// @expect: odd
+// @expect: even
+// @expect: odd
+// @expect: even
+// @expect: odd
+// @expect: even
+// @expect: odd
+// @expect: even
+// @expect: done

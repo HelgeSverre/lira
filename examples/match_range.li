@@ -1,0 +1,21 @@
+// Match with range patterns (exclusive and inclusive)
+// @expect: low
+// @expect: mid
+// @expect: high
+// @expect: other
+
+fn classify(n: int) -> string {
+    return match n {
+        0..5 => "low",
+        5..=10 => "mid",
+        11..20 => "high",
+        _ => "other"
+    }
+}
+
+fn main() {
+    print(classify(3))
+    print(classify(7))
+    print(classify(15))
+    print(classify(100))
+}

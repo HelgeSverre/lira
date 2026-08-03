@@ -138,6 +138,7 @@ impl Parser {
         std::mem::discriminant(&self.peek().kind) == std::mem::discriminant(kind)
     }
 
+    #[allow(dead_code)]
     fn check_any(&self, kinds: &[TokenKind]) -> bool {
         kinds.iter().any(|k| self.check(k))
     }
@@ -160,6 +161,79 @@ impl Parser {
             }
         }
         false
+    }
+
+    /// Check whether the current brace-delimited token span looks like a map
+    /// literal (`{ key: val, ... }`) rather than a block.
+    ///
+    /// We are called from `prefix()` after `LBrace` has been consumed by
+    /// `advance()`, so `self.current` is the first token inside the braces.
+    fn is_map_literal_start(&self) -> bool {
+        if self.current >= self.tokens.len() {
+            return false;
+        }
+        if matches!(self.tokens[self.current].kind, TokenKind::RBrace) {
+            return false;
+        }
+
+        let mut depth: u32 = 0;
+        let mut i = self.current;
+        while i < self.tokens.len() {
+            match &self.tokens[i].kind {
+                TokenKind::LBrace | TokenKind::LBracket | TokenKind::LParen => {
+                    depth += 1;
+                }
+                TokenKind::RBrace | TokenKind::RBracket | TokenKind::RParen if depth == 0 => {
+                    break;
+                }
+                TokenKind::RBrace | TokenKind::RBracket | TokenKind::RParen => {
+                    depth -= 1;
+                }
+                TokenKind::Colon if depth == 0 => return true,
+                TokenKind::Semicolon if depth == 0 => return false,
+                TokenKind::Let
+                | TokenKind::Fn
+                | TokenKind::If
+                | TokenKind::For
+                | TokenKind::While
+                | TokenKind::Match
+                | TokenKind::Return
+                | TokenKind::Var
+                    if depth == 0 =>
+                {
+                    return false;
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        false
+    }
+
+    fn parse_map_literal(&mut self, span: Span) -> Result<Expression, String> {
+        self.consume(&TokenKind::LBrace, "Expected '{'")?;
+
+        let mut pairs = Vec::new();
+
+        loop {
+            if self.check(&TokenKind::RBrace) {
+                break;
+            }
+            let key = self.expression()?;
+            self.consume(&TokenKind::Colon, "Expected ':' in map literal")?;
+            let value = self.expression()?;
+            pairs.push((key, value));
+
+            if !self.match_token(&TokenKind::Comma) {
+                break;
+            }
+            if self.check(&TokenKind::RBrace) {
+                break;
+            }
+        }
+
+        self.consume(&TokenKind::RBrace, "Expected '}' after map literal")?;
+        Ok(self.expr(ExpressionKind::Map(pairs), span))
     }
 
     /// Check if the tokens after current position look like a struct literal start.
@@ -258,6 +332,7 @@ impl Parser {
         name: String,
         type_ann: TypeExpr,
         default: Option<Expression>,
+        is_mutable: bool,
         span: Span,
     ) -> Parameter {
         Parameter {
@@ -265,6 +340,7 @@ impl Parser {
             name,
             type_ann,
             default,
+            is_mutable,
             span,
         }
     }
@@ -523,7 +599,7 @@ impl Parser {
                 if self.check(&TokenKind::This) || self.check(&TokenKind::Self_) {
                     self.advance();
                     // Check for 'self mut' or just 'self'
-                    let _is_mut = self.match_token(&TokenKind::Mut);
+                    let is_mut = self.match_token(&TokenKind::Mut);
                     params.push(self.param(
                         "self".to_string(),
                         TypeExpr {
@@ -531,6 +607,7 @@ impl Parser {
                             span: span.clone(),
                         },
                         None,
+                        is_mut,
                         span,
                     ));
                     if !self.match_token(&TokenKind::Comma) {
@@ -550,6 +627,7 @@ impl Parser {
                             span: span.clone(),
                         },
                         None,
+                        false,
                         span,
                     ));
                     if !self.match_token(&TokenKind::Comma) {
@@ -576,7 +654,7 @@ impl Parser {
                     None
                 };
 
-                params.push(self.param(name, type_ann, default, span));
+                params.push(self.param(name, type_ann, default, false, span));
 
                 if !self.match_token(&TokenKind::Comma) {
                     break;
@@ -1197,10 +1275,8 @@ impl Parser {
     fn break_statement(&mut self, span: Span) -> Result<Statement, String> {
         let value = if self.check(&TokenKind::RBrace) || self.check(&TokenKind::Eof) {
             None
-        } else if !self.check_any(&[TokenKind::If, TokenKind::While, TokenKind::For]) {
-            Some(self.expression()?)
         } else {
-            None
+            Some(self.expression()?)
         };
 
         Ok(self.stmt(StatementKind::Break(value), span))
@@ -1678,7 +1754,12 @@ impl Parser {
                 Ok(self.expr(ExpressionKind::Array(elements), span))
             }
             TokenKind::LBrace => {
-                // Block expression or struct literal
+                // Block expression, map literal, or struct literal (structs
+                // are handled in the Identifier case via is_struct_literal_start).
+                if self.is_map_literal_start() {
+                    self.current -= 1; // put back { for parse_map_literal
+                    return self.parse_map_literal(span);
+                }
                 self.current -= 1; // Put back the brace
                 let block = self.block()?;
                 Ok(self.expr(ExpressionKind::Block(block), span))
@@ -2165,7 +2246,7 @@ impl Parser {
                         span: param_span.clone(),
                     }
                 };
-                params.push(self.param(name, type_ann, None, param_span));
+                params.push(self.param(name, type_ann, None, false, param_span));
                 if !self.match_token(&TokenKind::Comma) {
                     break;
                 }
@@ -2184,10 +2265,33 @@ impl Parser {
         ))
     }
 
+    /// Parse a match-arm pattern at the top level. This is the or-pattern
+    /// entry point — `|` has the lowest precedence among pattern operators.
     fn pattern(&mut self) -> Result<Pattern, String> {
         let span = self.span();
+        let mut first = self.primary_pattern()?;
 
-        // Wildcard - must check actual identifier value, not just variant
+        while self.match_token(&TokenKind::Pipe) {
+            let mut patterns = if let PatternKind::Or(patterns) = first.kind {
+                patterns
+            } else {
+                vec![first]
+            };
+            let next = self.primary_pattern()?;
+            patterns.push(next);
+            first = self.pat(PatternKind::Or(patterns), span.clone());
+        }
+
+        Ok(first)
+    }
+
+    /// Parse a primary pattern (no `|` at this level). Handles literals,
+    /// ranges, identifiers (variable / constructor / struct / binding),
+    /// anonymous structs, and tuples.
+    fn primary_pattern(&mut self) -> Result<Pattern, String> {
+        let span = self.span();
+
+        // Wildcard — check actual identifier value for `_`
         if let TokenKind::Identifier(name) = &self.peek().kind {
             if name == "_" {
                 self.advance();
@@ -2195,7 +2299,7 @@ impl Parser {
             }
         }
 
-        // Literal patterns
+        // Literal or range pattern
         match &self.peek().kind {
             TokenKind::IntLiteral(_)
             | TokenKind::FloatLiteral(_)
@@ -2204,22 +2308,44 @@ impl Parser {
             | TokenKind::BoolLiteral(_)
             | TokenKind::Null => {
                 let expr = self.prefix()?;
+
+                // Range: literal .. literal  or  literal ..= literal
+                if self.check(&TokenKind::DotDot) || self.check(&TokenKind::DotDotEq) {
+                    let inclusive = self.match_token(&TokenKind::DotDotEq);
+                    if !inclusive {
+                        self.consume(&TokenKind::DotDot, "Expected '..' after range start")?;
+                    }
+                    let end = self.primary_pattern()?;
+                    let start_pat = Pattern {
+                        id: self.node_id.next(),
+                        kind: PatternKind::Literal(expr),
+                        span: span.clone(),
+                    };
+                    return Ok(self.pat(
+                        PatternKind::Range {
+                            start: Box::new(start_pat),
+                            end: Box::new(end),
+                            inclusive,
+                        },
+                        span,
+                    ));
+                }
+
                 return Ok(self.pat(PatternKind::Literal(expr), span));
             }
             _ => {}
         }
 
-        // Variable or constructor
+        // Identifier — variable, constructor, struct, or binding
         if let TokenKind::Identifier(name) = &self.peek().kind.clone() {
             let name = name.clone();
             self.advance();
 
-            // Check for enum variant pattern: Color::Red
+            // Enum variant: Color::Red
             if self.match_token(&TokenKind::ColonColon) {
                 let variant_name = self.expect_identifier("Expected variant name after '::'")?;
                 let full_name = format!("{}::{}", name, variant_name);
 
-                // Check for associated data: Color::RGB(r, g, b)
                 if self.match_token(&TokenKind::LParen) {
                     let mut fields = Vec::new();
                     if !self.check(&TokenKind::RParen) {
@@ -2240,7 +2366,6 @@ impl Parser {
                     ));
                 }
 
-                // Unit variant: Color::Red
                 return Ok(self.pat(
                     PatternKind::Constructor {
                         name: full_name,
@@ -2250,8 +2375,8 @@ impl Parser {
                 ));
             }
 
+            // Constructor pattern: Some(x)
             if self.match_token(&TokenKind::LParen) {
-                // Constructor pattern: Some(x)
                 let mut fields = Vec::new();
                 if !self.check(&TokenKind::RParen) {
                     loop {
@@ -2265,8 +2390,79 @@ impl Parser {
                 return Ok(self.pat(PatternKind::Constructor { name, fields }, span));
             }
 
-            // Variable binding
+            // Struct pattern: Point { x, y }
+            if self.match_token(&TokenKind::LBrace) {
+                let mut fields = Vec::new();
+                if !self.check(&TokenKind::RBrace) {
+                    loop {
+                        let field_name =
+                            self.expect_identifier("Expected field name in struct pattern")?;
+                        let field_pattern = if self.match_token(&TokenKind::Colon) {
+                            self.pattern()?
+                        } else {
+                            self.pat(PatternKind::Variable(field_name.clone()), self.span())
+                        };
+                        fields.push((field_name, field_pattern));
+                        if !self.match_token(&TokenKind::Comma) {
+                            break;
+                        }
+                    }
+                }
+                self.consume(&TokenKind::RBrace, "Expected '}' after struct pattern")?;
+                return Ok(self.pat(
+                    PatternKind::Struct {
+                        name,
+                        fields,
+                        rest: false,
+                    },
+                    span,
+                ));
+            }
+
+            // Binding pattern: x @ inner
+            if self.match_token(&TokenKind::At) {
+                let inner = self.primary_pattern()?;
+                return Ok(self.pat(
+                    PatternKind::Binding {
+                        name,
+                        pattern: Box::new(inner),
+                    },
+                    span,
+                ));
+            }
+
+            // Simple variable binding
             return Ok(self.pat(PatternKind::Variable(name), span));
+        }
+
+        // Anonymous struct pattern: { x, y }
+        if self.check(&TokenKind::LBrace) {
+            self.advance();
+            let mut fields = Vec::new();
+            if !self.check(&TokenKind::RBrace) {
+                loop {
+                    let field_name =
+                        self.expect_identifier("Expected field name in struct pattern")?;
+                    let field_pattern = if self.match_token(&TokenKind::Colon) {
+                        self.pattern()?
+                    } else {
+                        self.pat(PatternKind::Variable(field_name.clone()), self.span())
+                    };
+                    fields.push((field_name, field_pattern));
+                    if !self.match_token(&TokenKind::Comma) {
+                        break;
+                    }
+                }
+            }
+            self.consume(&TokenKind::RBrace, "Expected '}' after struct pattern")?;
+            return Ok(self.pat(
+                PatternKind::Struct {
+                    name: String::new(),
+                    fields,
+                    rest: false,
+                },
+                span,
+            ));
         }
 
         // Tuple pattern
@@ -3130,7 +3326,38 @@ mod tests {
             if let StatementKind::FnDecl { params, .. } = &methods[0].kind {
                 assert_eq!(params.len(), 1);
                 assert_eq!(params[0].name, "self");
-                // Note: mutability should be tracked somehow
+                assert!(
+                    params[0].is_mutable,
+                    "self mut should set is_mutable to true"
+                );
+            } else {
+                panic!("Expected function");
+            }
+        } else {
+            panic!("Expected ImplDecl");
+        }
+    }
+
+    #[test]
+    fn test_self_param_without_mut() {
+        let source = r#"
+            impl Counter {
+                fn read(self) -> int {
+                    return self.value
+                }
+            }
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let program = parse(&tokens).unwrap();
+
+        if let StatementKind::ImplDecl { methods, .. } = &program.statements[0].kind {
+            if let StatementKind::FnDecl { params, .. } = &methods[0].kind {
+                assert_eq!(params.len(), 1);
+                assert_eq!(params[0].name, "self");
+                assert!(
+                    !params[0].is_mutable,
+                    "self without mut should set is_mutable to false"
+                );
             } else {
                 panic!("Expected function");
             }
@@ -3492,5 +3719,54 @@ mod tests {
         // depth guard. Must return Err instead of overflowing.
         let deep = "(".repeat(5000);
         assert!(parse(&tokenize(&deep).unwrap()).is_err());
+    }
+
+    #[test]
+    fn test_break_without_value() {
+        let source = r#"
+            fn main() {
+                loop {
+                    break
+                }
+            }
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let program = parse(&tokens).unwrap();
+        if let StatementKind::FnDecl { body, .. } = &program.statements[0].kind {
+            if let StatementKind::Loop {
+                body: loop_body, ..
+            } = &body.statements[0].kind
+            {
+                if let StatementKind::Break(val) = &loop_body.statements[0].kind {
+                    assert!(val.is_none(), "break with no value should have None");
+                    return;
+                }
+            }
+        }
+        panic!("Expected break");
+    }
+
+    #[test]
+    fn test_break_with_if_expression_value() {
+        let source = r#"
+            fn main() {
+                loop {
+                    break if true { 1 } else { 0 }
+                }
+            }
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let program = parse(&tokens).unwrap();
+        if let StatementKind::FnDecl { body, .. } = &program.statements[0].kind {
+            if let StatementKind::Loop {
+                body: loop_body, ..
+            } = &body.statements[0].kind
+            {
+                if let StatementKind::Break(Some(_)) = &loop_body.statements[0].kind {
+                    return;
+                }
+            }
+        }
+        panic!("Expected break with if expression value");
     }
 }

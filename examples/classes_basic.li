@@ -69,11 +69,22 @@ for p in points {
 
 println("=== All Class Tests Passed ===")
 
+// @expect: === Class vs Struct ===
+// @expect: 10
+// @expect: 20
+// @expect: 30
+// @expect: 40
+// @expect: === Functions with Struct Parameters ===
+// @expect: 15
+// @expect: === Nested Structs ===
+// @expect: Alice lives in Springfield
+// @expect: === Array of Structs ===
+// @expect: Point: 0, 0
+// @expect: Point: 1, 1
+// @expect: Point: 2, 4
+// @expect: === All Class Tests Passed ===
+
 // ============================================================
 // KNOWN ISSUES / PHASE 7 WORK:
 // - class literals create Struct types in type checker
-// - class inheritance (extends) not parsed
-// - super calls not implemented
-// - this.field in methods not implemented
-// - inline method definitions not implemented
 // ============================================================

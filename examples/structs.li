@@ -72,3 +72,24 @@ println(p3.y)
 
 println("Person greeting:")
 println(person.greet())
+
+// @expect: Point x:
+// @expect: 10
+// @expect: Point y:
+// @expect: 20
+// @expect: Person name:
+// @expect: Alice
+// @expect: Person age:
+// @expect: 30
+// @expect: Line start x:
+// @expect: 0
+// @expect: Line end y:
+// @expect: 50
+// @expect: Point sum:
+// @expect: 30
+// @expect: Added point x:
+// @expect: 4
+// @expect: Added point y:
+// @expect: 6
+// @expect: Person greeting:
+// @expect: Hello, Alice

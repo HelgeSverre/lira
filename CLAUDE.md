@@ -24,14 +24,14 @@ just lsp            # Run LSP server (for testing)
 
 ```bash
 cargo build --package lirac --package liravm
-cargo test --workspace
+cargo nextest run --workspace
 ```
 
 **Run a single test:**
 
 ```bash
-cargo test --package lirac --test integration -- <test_name>
-cargo test --package liravm -- <test_name>
+cargo nextest run --package lirac --test integration -- <test_name>
+cargo nextest run --package liravm -- <test_name>
 ```
 
 ## Architecture

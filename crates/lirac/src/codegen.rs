@@ -28,13 +28,14 @@ const SYSCALL_BUILTINS: &[(&str, u8, usize)] = &[
     ("time_timezone_offset", 133, 0),
     ("time_components", 134, 1),
     ("time_from_components", 135, 6),
-    // File I/O (syscalls 10-15)
+    // File I/O (syscalls 10-16)
     ("file_open", 10, 2),
     ("file_read", 11, 2),
     ("file_write", 12, 2),
     ("file_close", 13, 1),
     ("file_exists", 14, 1),
     ("file_size", 15, 1),
+    ("file_seek", 16, 3),
     // Environment (syscalls 20-21, 200-207)
     ("env_get", 20, 1),
     ("env_args", 21, 0),
@@ -174,6 +175,8 @@ pub struct CodeGenerator {
     /// Also holds each class's OWN methods (inherited methods are resolved by
     /// walking `class_parents` at instance-construction time).
     struct_methods: HashMap<String, HashMap<String, usize>>,
+    /// Current class being compiled (None if not inside a class method)
+    current_class_name: Option<String>,
     /// Class inheritance edges: class_name -> parent class name (if any). Used to
     /// resolve the full method set (own + inherited, child overrides win) when a
     /// class instance is constructed. Only classes appear here.
@@ -250,6 +253,7 @@ impl CodeGenerator {
             errors: Vec::new(),
             debug_info: DebugInfo::new(),
             struct_methods: HashMap::new(),
+            current_class_name: None,
             class_parents: HashMap::new(),
             captures: Vec::new(),
             function_defaults: HashMap::new(),
@@ -1142,16 +1146,20 @@ impl CodeGenerator {
     }
 
     /// Whether a pattern emits a runtime test (vs. always matching by binding).
-    /// Literals and constructors always test; a tuple tests if any element does;
-    /// or-patterns/bindings test if any alternative/inner does.
+    /// Literals, constructors, and ranges always test; a tuple tests if any
+    /// element does; or-patterns/bindings test if any alternative/inner does.
+    /// Struct patterns don't need a runtime check (the type checker ensures the
+    /// type matches) but do need variable binding in `bind_pattern_variables`.
     fn pattern_needs_check(pattern: &Pattern) -> bool {
         match &pattern.kind {
             PatternKind::Wildcard | PatternKind::Variable(_) => false,
-            PatternKind::Literal(_) | PatternKind::Constructor { .. } => true,
+            PatternKind::Literal(_)
+            | PatternKind::Constructor { .. }
+            | PatternKind::Range { .. } => true,
             PatternKind::Tuple(patterns) => patterns.iter().any(Self::pattern_needs_check),
             PatternKind::Or(patterns) => patterns.iter().any(Self::pattern_needs_check),
             PatternKind::Binding { pattern, .. } => Self::pattern_needs_check(pattern),
-            _ => false,
+            PatternKind::Struct { .. } => false,
         }
     }
 
@@ -1183,17 +1191,17 @@ impl CodeGenerator {
                 // but the precondition guarantees a test is required here.
                 self.generate_pattern_check(pattern);
             }
-            // Variable/wildcard never reach here (filtered by
-            // pattern_needs_check). Any remaining kind (Struct/Range/Or/Binding
-            // nested in a tuple) has no sub-pattern codegen yet: emit a hard
-            // error instead of the old silent always-match `true`, keeping the
-            // stack balanced (element consumed, bool left) so the rest of
-            // codegen can run before compilation fails on the error.
+            PatternKind::Range { .. }
+            | PatternKind::Struct { .. }
+            | PatternKind::Binding { .. }
+            | PatternKind::Or(_) => {
+                // These patterns need a runtime check — delegate to the full
+                // pattern check which consumes the element and leaves a bool.
+                self.generate_pattern_check(pattern);
+            }
             _ => {
-                self.errors.push(CodegenError::GenericError {
-                    message: "this nested pattern is not yet supported in a tuple pattern"
-                        .to_string(),
-                });
+                // Unreachable: pattern_needs_check would have returned false,
+                // preventing generate_subpattern_test from being called.
                 self.emit_opcode(Opcode::Pop);
                 let false_idx = self.add_constant(Constant::Bool(false));
                 self.emit_opcode(Opcode::LoadConst);
@@ -1293,33 +1301,217 @@ impl CodeGenerator {
                 // Stack: [acc] - the combined boolean.
                 false // Needs runtime check
             }
-            PatternKind::Struct { .. }
-            | PatternKind::Range { .. }
-            | PatternKind::Or(_)
-            | PatternKind::Binding { .. } => {
-                // These pattern forms have no `match` codegen yet. The parser
-                // does not currently produce them in match arms, so this is a
-                // guard: emitting a hard error (instead of the old silent
-                // always-match) prevents a silent miscompile if parser support
-                // is added later. The arms are listed explicitly (no `_`) so a
-                // future `PatternKind` variant forces a decision here.
-                let kind = match &pattern.kind {
-                    PatternKind::Struct { .. } => "struct",
-                    PatternKind::Range { .. } => "range",
-                    PatternKind::Or(_) => "or (`|`)",
-                    _ => "binding (`@`)",
-                };
-                self.errors.push(CodegenError::GenericError {
-                    message: format!("{kind} patterns are not yet supported in match arms"),
-                });
-                // Consume the loaded subject and leave a `false` so the arm is
-                // treated as non-matching and the stack stays balanced.
-                // Compilation fails on the error above before this can run.
+            PatternKind::Struct { .. } => {
+                // Struct patterns always match (the type checker already ensures
+                // the subject is the right type). Destructuring happens in
+                // `bind_pattern_variables`. Pop the subject — it will be
+                // reloaded for binding.
                 self.emit_opcode(Opcode::Pop);
+                true
+            }
+            PatternKind::Range {
+                start,
+                end,
+                inclusive,
+            } => {
+                // Range pattern `lo..hi` or `lo..=hi`: check if subject is
+                // within [low, high]. Start and end are literal patterns.
+                // Stack: [subject]
+                //
+                // Strategy: save subject, compare low and high bounds, AND.
+                let low_expr = match &start.kind {
+                    PatternKind::Literal(expr) => expr,
+                    _ => {
+                        self.errors.push(CodegenError::GenericError {
+                            message: "range start must be a literal".to_string(),
+                        });
+                        self.emit_opcode(Opcode::Pop);
+                        let false_idx = self.add_constant(Constant::Bool(false));
+                        self.emit_opcode(Opcode::LoadConst);
+                        self.emit_u16(false_idx);
+                        return false;
+                    }
+                };
+                let high_expr = match &end.kind {
+                    PatternKind::Literal(expr) => expr,
+                    _ => {
+                        self.errors.push(CodegenError::GenericError {
+                            message: "range end must be a literal".to_string(),
+                        });
+                        self.emit_opcode(Opcode::Pop);
+                        let false_idx = self.add_constant(Constant::Bool(false));
+                        self.emit_opcode(Opcode::LoadConst);
+                        self.emit_u16(false_idx);
+                        return false;
+                    }
+                };
+
+                // Save a copy of subject for the high-bound comparison.
+                let subj_copy = self.alloc_temp();
+                self.emit_opcode(Opcode::Dup);
+                self.store_temp(subj_copy);
+                // Stack: [subject]
+
+                // Compare subject >= low
+                self.generate_expression(low_expr);
+                self.emit_opcode(Opcode::Ge);
+                // Stack: [low_ok]
+                let low_ok = self.alloc_temp();
+                self.store_temp(low_ok);
+                // Stack: []
+
+                // Compare subject <= high (or < for exclusive)
+                self.load_temp(subj_copy);
+                self.generate_expression(high_expr);
+                if *inclusive {
+                    self.emit_opcode(Opcode::Le);
+                } else {
+                    self.emit_opcode(Opcode::Lt);
+                }
+                // Stack: [high_ok]
+
+                // AND both checks
+                self.load_temp(low_ok);
+                self.emit_opcode(Opcode::And);
+                // Stack: [combined_bool]
+
+                false // Needs runtime check
+            }
+            PatternKind::Or(patterns) => {
+                // Or-pattern `A | B`: matches if any sub-pattern matches.
+                // The subject is on the stack. We save it and OR the checks.
+                if patterns.is_empty() {
+                    self.emit_opcode(Opcode::Pop);
+                    let false_idx = self.add_constant(Constant::Bool(false));
+                    self.emit_opcode(Opcode::LoadConst);
+                    self.emit_u16(false_idx);
+                    return false;
+                }
+
+                // If any sub-pattern always matches, the whole pattern does.
+                if patterns.iter().any(|p| !Self::pattern_needs_check(p)) {
+                    self.emit_opcode(Opcode::Pop);
+                    return true;
+                }
+
+                // Save subject for reuse across sub-pattern checks.
+                let subj = self.alloc_temp();
+                self.store_temp(subj);
+                // Stack: []
+
+                // Accumulator starts at false.
                 let false_idx = self.add_constant(Constant::Bool(false));
                 self.emit_opcode(Opcode::LoadConst);
                 self.emit_u16(false_idx);
-                false
+                // Stack: [false_acc]
+
+                for pa in patterns {
+                    // Reload and duplicate subject for this sub-pattern.
+                    self.load_temp(subj);
+                    self.emit_opcode(Opcode::Dup);
+                    self.store_temp(subj);
+                    // Stack: [acc, subject]
+
+                    // Check this sub-pattern inline (consumes subject, leaves
+                    // bool). We can't call generate_pattern_check because that
+                    // function also handles "always matches" cases differently.
+                    match &pa.kind {
+                        PatternKind::Literal(expr) => {
+                            self.generate_expression(expr);
+                            self.emit_opcode(Opcode::Eq);
+                        }
+                        PatternKind::Constructor { name, .. } => {
+                            let variant_name = name
+                                .rfind("::")
+                                .map_or(name.as_str(), |pos| &name[pos + 2..]);
+                            let variant_field =
+                                self.add_constant(Constant::String("__variant".to_string()));
+                            self.emit_opcode(Opcode::GetField);
+                            self.emit_u16(variant_field);
+                            let expected =
+                                self.add_constant(Constant::String(variant_name.to_string()));
+                            self.emit_opcode(Opcode::LoadConst);
+                            self.emit_u16(expected);
+                            self.emit_opcode(Opcode::Eq);
+                        }
+                        PatternKind::Range {
+                            start,
+                            end,
+                            inclusive,
+                        } => {
+                            let low_expr = match &start.kind {
+                                PatternKind::Literal(expr) => expr,
+                                _ => {
+                                    self.errors.push(CodegenError::GenericError {
+                                        message: "range start in or-pattern must be a literal"
+                                            .to_string(),
+                                    });
+                                    self.emit_opcode(Opcode::Pop);
+                                    let fi = self.add_constant(Constant::Bool(false));
+                                    self.emit_opcode(Opcode::LoadConst);
+                                    self.emit_u16(fi);
+                                    return false;
+                                }
+                            };
+                            let high_expr = match &end.kind {
+                                PatternKind::Literal(expr) => expr,
+                                _ => {
+                                    self.errors.push(CodegenError::GenericError {
+                                        message: "range end in or-pattern must be a literal"
+                                            .to_string(),
+                                    });
+                                    self.emit_opcode(Opcode::Pop);
+                                    let fi = self.add_constant(Constant::Bool(false));
+                                    self.emit_opcode(Opcode::LoadConst);
+                                    self.emit_u16(fi);
+                                    return false;
+                                }
+                            };
+                            // Stack: [acc, subject]
+                            let rc = self.alloc_temp();
+                            self.emit_opcode(Opcode::Dup);
+                            self.store_temp(rc);
+                            self.generate_expression(low_expr);
+                            self.emit_opcode(Opcode::Ge);
+                            let lk = self.alloc_temp();
+                            self.store_temp(lk);
+                            self.load_temp(rc);
+                            self.generate_expression(high_expr);
+                            if *inclusive {
+                                self.emit_opcode(Opcode::Le);
+                            } else {
+                                self.emit_opcode(Opcode::Lt);
+                            }
+                            self.load_temp(lk);
+                            self.emit_opcode(Opcode::And);
+                        }
+                        PatternKind::Struct { .. } => {
+                            self.emit_opcode(Opcode::Pop);
+                            let ti = self.add_constant(Constant::Bool(true));
+                            self.emit_opcode(Opcode::LoadConst);
+                            self.emit_u16(ti);
+                        }
+                        _ => {
+                            self.emit_opcode(Opcode::Pop);
+                            let fi = self.add_constant(Constant::Bool(false));
+                            self.emit_opcode(Opcode::LoadConst);
+                            self.emit_u16(fi);
+                        }
+                    }
+                    // Stack: [acc, check_bool]
+                    self.emit_opcode(Opcode::Or);
+                    // Stack: [new_acc]
+                }
+                // Stack: [acc]
+
+                false // Needs runtime check
+            }
+            PatternKind::Binding { pattern: inner, .. } => {
+                // Binding pattern `x @ inner`: delegate the runtime check to
+                // the inner pattern. Variable binding (the `@ x` part) is
+                // handled by `bind_pattern_variables`.
+                // Stack: [subject]
+                self.generate_pattern_check(inner)
             }
         }
     }
@@ -1398,6 +1590,27 @@ impl CodeGenerator {
                 }
                 // Pop the original tuple
                 self.emit_opcode(Opcode::Pop);
+            }
+            PatternKind::Struct { fields, .. } => {
+                // Destructure struct and bind each field. Stack has the struct.
+                for (field_name, pat) in fields.iter() {
+                    self.emit_opcode(Opcode::Dup);
+                    let field_idx = self.add_constant(Constant::String(field_name.clone()));
+                    self.emit_opcode(Opcode::GetField);
+                    self.emit_u16(field_idx);
+                    self.bind_pattern_variables(pat);
+                }
+                // Pop the original struct
+                self.emit_opcode(Opcode::Pop);
+            }
+            PatternKind::Or(patterns) => {
+                // Or-pattern: bind variables from the first arm (the checker
+                // ensures all arms bind the same variables).
+                if let Some(first) = patterns.first() {
+                    self.bind_pattern_variables(first);
+                } else {
+                    self.emit_opcode(Opcode::Pop);
+                }
             }
             _ => {
                 // Other patterns
@@ -1879,6 +2092,7 @@ impl CodeGenerator {
                             // Track self parameter's type for method dispatch within impl methods
                             if param.name == "self" {
                                 self.define_local_type("self", type_name);
+                                self.define_local_type("this", type_name);
                             }
                         }
 
@@ -1909,6 +2123,8 @@ impl CodeGenerator {
                 // so dispatch stays dynamic (method-as-field) and virtual
                 // dispatch works: `self.m()` inside an inherited method reads the
                 // concrete instance's field, hitting the subclass override.
+                let prev_class = self.current_class_name.take();
+                self.current_class_name = Some(name.clone());
                 for method in methods {
                     if let StatementKind::FnDecl {
                         name: method_name,
@@ -1954,6 +2170,7 @@ impl CodeGenerator {
                             self.define_local(&param.name);
                             if param.name == "self" {
                                 self.define_local_type("self", name);
+                                self.define_local_type("this", name);
                             }
                         }
 
@@ -1972,6 +2189,7 @@ impl CodeGenerator {
                         self.next_local = prev_next_local;
                     }
                 }
+                self.current_class_name = prev_class;
             }
             StatementKind::EnumDecl { .. }
             | StatementKind::InterfaceDecl { .. }
@@ -2031,6 +2249,19 @@ impl CodeGenerator {
             }
 
             ExpressionKind::Identifier(name) => {
+                // `this` inside a class method loads the receiver (slot 0 = self)
+                if name == "this" {
+                    self.emit_opcode(Opcode::LoadLocal);
+                    self.emit_u16(0);
+                    return;
+                }
+                // `super` alone loads the receiver; super.method() is handled in
+                // the Call path.
+                if name == "super" {
+                    self.emit_opcode(Opcode::LoadLocal);
+                    self.emit_u16(0);
+                    return;
+                }
                 if let Some(slot) = self.lookup_local(name) {
                     self.emit_opcode(Opcode::LoadLocal);
                     self.emit_u16(slot);
@@ -2479,6 +2710,59 @@ impl CodeGenerator {
                 if let ExpressionKind::FieldAccess { object, field } = &callee.kind {
                     // Check if this is a static method call on a type (e.g., Counter.new())
                     if let ExpressionKind::Identifier(type_name) = &object.kind {
+                        // super.method() — direct call to parent's method, bypassing
+                        // virtual dispatch.
+                        if type_name == "super" {
+                            let current_class = self.current_class_name.clone();
+                            if let Some(current_class) = current_class {
+                                let parent_and_offset = self
+                                    .class_parents
+                                    .get(&current_class)
+                                    .cloned()
+                                    .flatten()
+                                    .and_then(|parent_class| {
+                                        self.struct_methods
+                                            .get(&parent_class)
+                                            .and_then(|methods| methods.get(field))
+                                            .map(|&offset| (parent_class, offset))
+                                    });
+                                if let Some((parent_class, parent_offset)) = parent_and_offset {
+                                    // Push receiver (self = slot 0) as first arg
+                                    self.emit_opcode(Opcode::LoadLocal);
+                                    self.emit_u16(0);
+                                    // Push additional arguments
+                                    for arg in args {
+                                        self.generate_expression(&arg.value);
+                                    }
+                                    let idx = self
+                                        .add_constant_internal(Constant::Function(parent_offset));
+                                    if parent_offset == 0 {
+                                        let mangled_name = format!("{}_{}", parent_class, field);
+                                        self.pending_func_patches.push((idx, mangled_name));
+                                    }
+                                    self.emit_opcode(Opcode::LoadConst);
+                                    self.emit_u16(idx);
+                                    self.emit_opcode(Opcode::Call);
+                                    self.emit_u8((args.len() + 1) as u8);
+                                    return;
+                                } else {
+                                    self.errors.push(CodegenError::GenericError {
+                                        message: format!(
+                                            "Method '{}' not found on parent class",
+                                            field,
+                                        ),
+                                    });
+                                    return;
+                                }
+                            } else {
+                                self.errors.push(CodegenError::GenericError {
+                                    message: "'super' can only be used inside a class method"
+                                        .to_string(),
+                                });
+                                return;
+                            }
+                        }
+
                         // Check if there's a method in struct_methods for this type
                         let has_static_method = self
                             .struct_methods
@@ -3570,10 +3854,25 @@ impl CodeGenerator {
                 self.emit_u16(inclusive_field);
             }
 
-            ExpressionKind::Map(_) => {
-                self.errors.push(CodegenError::GenericError {
-                    message: "Map literals not yet implemented".to_string(),
-                });
+            ExpressionKind::Map(pairs) => {
+                self.emit_opcode(Opcode::NewObject);
+
+                for (key, value) in pairs {
+                    match &key.kind {
+                        ExpressionKind::StringLiteral(s) => {
+                            self.emit_opcode(Opcode::Dup);
+                            self.generate_expression(value);
+                            let key_idx = self.add_constant(Constant::String(s.clone()));
+                            self.emit_opcode(Opcode::SetField);
+                            self.emit_u16(key_idx);
+                        }
+                        _ => {
+                            self.errors.push(CodegenError::GenericError {
+                                message: "Map literal keys must be string literals".to_string(),
+                            });
+                        }
+                    }
+                }
             }
 
             ExpressionKind::Path { segments } => {
@@ -3686,7 +3985,7 @@ impl CodeGenerator {
                 receiver,
                 method,
                 args,
-                type_args: _, // TODO: Handle explicit type args for monomorphization
+                type_args: _, // Type-erased at runtime (monomorphization deferred, ROADMAP T7.6)
             } => {
                 // Check if this is a method call on a primitive type
                 let receiver_type = self.expr_type_name(receiver);
@@ -3935,40 +4234,218 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_match_pattern_errors_instead_of_always_matching() {
-        // Regression guard: `Or`/`Struct`/`Range`/`Binding` patterns used to
-        // fall through to a silent always-match (`return true`), which is a
-        // miscompile — the arm would fire for ANY subject. They must now push a
-        // structured error and report needing a runtime check (`false`), never
-        // an unconditional match.
-        for kind in [
-            PatternKind::Or(vec![pat(PatternKind::Literal(int_lit(1)))]),
-            PatternKind::Range {
+    fn match_pattern_codegen_for_all_kinds() {
+        // Verify that Range, Struct, Or, and Binding patterns now generate
+        // code correctly instead of emitting errors.
+
+        // Range pattern 1..5 (exclusive)
+        {
+            let mut generator = CodeGenerator::new();
+            let always_matches = generator.generate_pattern_check(&pat(PatternKind::Range {
                 start: Box::new(pat(PatternKind::Literal(int_lit(1)))),
                 end: Box::new(pat(PatternKind::Literal(int_lit(5)))),
                 inclusive: false,
-            },
-            PatternKind::Struct {
+            }));
+            assert!(
+                !always_matches,
+                "range pattern must report needing a runtime check"
+            );
+            assert!(
+                generator.errors.is_empty(),
+                "range pattern must not record an error, got: {:?}",
+                generator.errors
+            );
+        }
+
+        // Struct pattern (always matches, type checker ensures correctness)
+        {
+            let mut generator = CodeGenerator::new();
+            let always_matches = generator.generate_pattern_check(&pat(PatternKind::Struct {
                 name: "Point".to_string(),
                 fields: vec![],
                 rest: false,
-            },
-            PatternKind::Binding {
-                name: "x".to_string(),
-                pattern: Box::new(pat(PatternKind::Literal(int_lit(1)))),
-            },
-        ] {
-            let mut generator = CodeGenerator::new();
-            let always_matches = generator.generate_pattern_check(&pat(kind));
+            }));
             assert!(
-                !always_matches,
-                "unsupported pattern must NOT report an unconditional match"
+                always_matches,
+                "struct pattern must report an unconditional match"
             );
             assert!(
-                !generator.errors.is_empty(),
-                "unsupported pattern must record a structured error"
+                generator.errors.is_empty(),
+                "struct pattern must not record an error"
             );
         }
+
+        // Or pattern: 1 | 2
+        {
+            let mut generator = CodeGenerator::new();
+            let always_matches = generator.generate_pattern_check(&pat(PatternKind::Or(vec![
+                pat(PatternKind::Literal(int_lit(1))),
+                pat(PatternKind::Literal(int_lit(2))),
+            ])));
+            assert!(
+                !always_matches,
+                "or-pattern must report needing a runtime check"
+            );
+            assert!(
+                generator.errors.is_empty(),
+                "or-pattern must not record an error, got: {:?}",
+                generator.errors
+            );
+        }
+
+        // Binding pattern: x @ 1
+        {
+            let mut generator = CodeGenerator::new();
+            let always_matches = generator.generate_pattern_check(&pat(PatternKind::Binding {
+                name: "x".to_string(),
+                pattern: Box::new(pat(PatternKind::Literal(int_lit(1)))),
+            }));
+            assert!(
+                !always_matches,
+                "binding pattern with literal inner must report needing a runtime check"
+            );
+            assert!(
+                generator.errors.is_empty(),
+                "binding pattern must not record an error, got: {:?}",
+                generator.errors
+            );
+        }
+    }
+
+    #[test]
+    fn match_range_inclusive_generates_correct_opcodes() {
+        let bytecode = compile_source(
+            r#"
+            fn test(x: int) -> string {
+                return match x {
+                    1..=5 => "low",
+                    _ => "other"
+                }
+            }
+        "#,
+        )
+        .unwrap();
+        assert!(find_opcode(&bytecode, Opcode::Ge));
+        assert!(find_opcode(&bytecode, Opcode::Le));
+        assert!(find_opcode(&bytecode, Opcode::And));
+    }
+
+    #[test]
+    fn match_range_exclusive_generates_correct_opcodes() {
+        let bytecode = compile_source(
+            r#"
+            fn test(x: int) -> string {
+                return match x {
+                    1..5 => "low",
+                    _ => "other"
+                }
+            }
+        "#,
+        )
+        .unwrap();
+        assert!(find_opcode(&bytecode, Opcode::Ge));
+        assert!(find_opcode(&bytecode, Opcode::Lt));
+        assert!(find_opcode(&bytecode, Opcode::And));
+    }
+
+    #[test]
+    fn match_or_pattern_generates_or_opcode() {
+        let bytecode = compile_source(
+            r#"
+            enum Color { Red, Green, Blue }
+            fn test(c: Color) -> string {
+                return match c {
+                    Color::Red | Color::Green => "warm",
+                    _ => "other"
+                }
+            }
+        "#,
+        )
+        .unwrap();
+        assert!(
+            find_opcode(&bytecode, Opcode::Or),
+            "Or-pattern must emit Or opcode"
+        );
+    }
+
+    #[test]
+    fn match_binding_pattern_compiles() {
+        let result = compile_source(
+            r#"
+            enum Option { None, Some(int) }
+            fn test(o: Option) -> string {
+                return match o {
+                    val @ Option::Some(x) => "some",
+                    _ => "none"
+                }
+            }
+        "#,
+        );
+        assert!(
+            result.is_ok(),
+            "Binding pattern must compile: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn match_struct_pattern_compiles() {
+        let result = compile_source(
+            r#"
+            struct Point { x: int, y: int }
+            fn test() -> int {
+                let p = Point { x: 10, y: 20 }
+                return match p {
+                    Point { x, y } => x + y,
+                }
+            }
+        "#,
+        );
+        assert!(
+            result.is_ok(),
+            "Struct pattern must compile: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn match_nested_tuple_with_range_inner_compiles() {
+        // Regression: nested patterns like Range inside a tuple used to error.
+        let result = compile_source(
+            r#"
+            fn test(t: (int, int)) -> string {
+                return match t {
+                    (1..=5, _) => "low",
+                    (_, 1..5) => "high",
+                    _ => "other"
+                }
+            }
+        "#,
+        );
+        assert!(
+            result.is_ok(),
+            "Nested tuple with range must compile: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn match_or_with_mixed_kinds_compiles() {
+        let result = compile_source(
+            r#"
+            fn test(x: int) -> string {
+                return match x {
+                    1 | 2 | 3 => "small",
+                    _ => "other"
+                }
+            }
+        "#,
+        );
+        assert!(
+            result.is_ok(),
+            "Or-pattern with literals must compile: {:?}",
+            result.err()
+        );
     }
 
     /// Check if a specific opcode appears in the bytecode's code section
@@ -4708,6 +5185,28 @@ mod tests {
         let bytecode = compile_source("let arr = [10, 20, 30]").unwrap();
         assert!(find_opcode(&bytecode, Opcode::ArraySet));
         assert!(find_opcode(&bytecode, Opcode::Dup)); // Dup for keeping array ref
+    }
+
+    #[test]
+    fn test_map_literal_emits_newobject() {
+        let bytecode = compile_source(
+            r#"
+            let m = { "name": "Alice", "age": "30" }
+        "#,
+        )
+        .unwrap();
+        assert!(find_opcode(&bytecode, Opcode::NewObject));
+    }
+
+    #[test]
+    fn test_map_literal_emits_setfield() {
+        let bytecode = compile_source(
+            r#"
+            let m = { "key": "value" }
+        "#,
+        )
+        .unwrap();
+        assert!(find_opcode(&bytecode, Opcode::SetField));
     }
 
     // ==========================================================================

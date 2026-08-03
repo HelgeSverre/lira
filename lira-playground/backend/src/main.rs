@@ -8,6 +8,7 @@ mod session_handlers;
 mod vm_thread;
 
 use axum::{
+    extract::DefaultBodyLimit,
     routing::{get, post},
     Router,
 };
@@ -53,6 +54,7 @@ async fn main() {
         .route("/api/check", post(handlers::check))
         .route("/api/step", post(handlers::step))
         .route("/ws", get(handlers::websocket))
+        .layer(DefaultBodyLimit::max(5 * 1024 * 1024)) // 5 MB
         .layer(cors)
         // Serve frontend static files with SPA fallback
         .fallback_service(serve_dir);

@@ -69,3 +69,7 @@ fn main() {
 }
 
 main()
+
+// @expect-contains: === Worker Pool Demo ===
+// @expect-contains: === Demo Complete ===
+// @expect-contains: Collected all 6 results

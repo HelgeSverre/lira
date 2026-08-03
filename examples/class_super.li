@@ -1,0 +1,31 @@
+// super.method() tests — exercises direct parent-method calls that bypass
+// virtual dispatch.
+// @expect: woof
+// @expect: generic
+// @expect: normal-sound: meow
+
+class Animal {
+    fn sound(this) -> string { return "generic" }
+}
+
+class Dog extends Animal {
+    override fn sound(this) -> string { return "woof" }
+    fn parent_sound(this) -> string {
+        return super.sound()
+    }
+}
+
+class Cat extends Animal {
+    override fn sound(this) -> string { return "meow" }
+}
+
+fn main() {
+    let d = Dog { }
+    println(d.sound())           // woof (overridden)
+    println(d.parent_sound())    // generic (super call bypasses override)
+
+    let c = Cat { }
+    println("normal-sound: " + c.sound())  // meow (overridden)
+}
+
+main()

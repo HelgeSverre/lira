@@ -48,17 +48,14 @@ run file:
     cargo build --package lira --release
     ./target/release/lira run {{ file }}
 
-# Run all tests
+# Run all tests (via nextest — faster parallel execution, all failures printed)
 [group('dev')]
 test:
-    cargo test --package lirac --package liravm --package lira-core --package lira-spec --package lira-playground
-    cargo test --package lirac --test integration
+    cargo nextest run --package lirac --package liravm --package lira-core --package lira-spec --package lira-playground
 
-# Run all tests with output
+# Run all tests with verbose output (alias for test — nextest always prints failures)
 [group('dev')]
-test-verbose:
-    cargo test --package lirac --package liravm --package lira-core --package lira-spec --package lira-playground -- --nocapture
-    cargo test --package lirac --test integration -- --nocapture
+test-verbose: test
 
 # Type check without building
 [group('dev')]
@@ -150,12 +147,11 @@ spec-compare:
 # Run specification conformance tests
 [group('spec')]
 spec-test:
-    cargo test --package lira-spec
+    cargo nextest run --package lira-spec
 
-# Run specification conformance tests with output
+# Run specification conformance tests with output (alias — nextest always prints failures)
 [group('spec')]
-spec-test-verbose:
-    cargo test --package lira-spec -- --nocapture
+spec-test-verbose: spec-test
 
 # Check spec crate compiles
 [group('spec')]
@@ -179,7 +175,7 @@ playground-server port="3001":
 # Run playground unit tests
 [group('playground')]
 playground-test:
-    cargo test --package lira-playground
+    cargo nextest run --package lira-playground
 
 # Run playground E2E tests (requires frontend deps installed)
 [group('playground')]

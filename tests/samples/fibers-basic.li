@@ -40,3 +40,7 @@ fn main() {
 }
 
 main()
+
+// @expect-contains: === Fiber Basics Demo ===
+// @expect-contains: Spawning 3 worker fibers...
+// @expect-contains: === Demo Complete ===

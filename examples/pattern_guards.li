@@ -51,3 +51,21 @@ println(fizzbuzz(15))  // FizzBuzz
 println(fizzbuzz(9))   // Fizz
 println(fizzbuzz(10))  // Buzz
 println(fizzbuzz(7))   // number
+
+// @expect: Testing pattern guards:
+// @expect: zero
+// @expect: negative
+// @expect: large
+// @expect: even
+// @expect: odd
+// @expect: Testing grade scores:
+// @expect: A
+// @expect: B
+// @expect: C
+// @expect: D
+// @expect: F
+// @expect: Testing FizzBuzz:
+// @expect: FizzBuzz
+// @expect: Fizz
+// @expect: Buzz
+// @expect: number

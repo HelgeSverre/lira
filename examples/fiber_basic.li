@@ -12,3 +12,7 @@ println("Use spawn worker(1) to create fibers in fiber mode")
 
 // fiber_id() and fiber_yield() are available as built-ins
 println("Fiber primitives available")
+
+// @expect: Fiber example
+// @expect: Use spawn worker(1) to create fibers in fiber mode
+// @expect: Fiber primitives available

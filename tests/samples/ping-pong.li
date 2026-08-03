@@ -71,3 +71,6 @@ fn main() {
 }
 
 main()
+
+// @expect-contains: === Ping-Pong Demo ===
+// @expect-contains: === Demo Complete ===

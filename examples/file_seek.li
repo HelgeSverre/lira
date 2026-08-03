@@ -1,0 +1,31 @@
+// @expect: 0
+// @expect: hello
+// @expect: 6
+// @expect: world
+// @expect: 11
+
+let path = "/tmp/test_li_seek.txt"
+
+let fd = file_open(path, 1)
+file_write(fd, "hello world")
+file_close(fd)
+
+let fd2 = file_open(path, 0)
+
+let pos = file_seek(fd2, 0, 0)
+println(pos)
+
+let data = file_read(fd2, 5)
+println(data)
+
+let pos2 = file_seek(fd2, 6, 0)
+println(pos2)
+
+let data2 = file_read(fd2, 5)
+println(data2)
+
+let pos3 = file_seek(fd2, 0, 2)
+println(pos3)
+
+file_close(fd2)
+remove(path)

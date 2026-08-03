@@ -83,3 +83,31 @@ println(times3(4))   // 12
 println(times7(4))   // 28
 
 println("=== All Lambda Tests Passed ===")
+
+// @expect: === Basic Lambdas ===
+// @expect: 10
+// @expect: 42
+// @expect: 7
+// @expect: 10
+// @expect: === Lambda with Expressions ===
+// @expect: 16
+// @expect: 49
+// @expect: 1
+// @expect: 2
+// @expect: 3
+// @expect: 16
+// @expect: === Higher-Order Functions ===
+// @expect: 12
+// @expect: 16
+// @expect: 20
+// @expect: === Closures (Captured Variables) ===
+// @expect: 8
+// @expect: 12
+// @expect: 13
+// @expect: 17
+// @expect: 3
+// @expect: 13
+// @expect: 23
+// @expect: 12
+// @expect: 28
+// @expect: === All Lambda Tests Passed ===

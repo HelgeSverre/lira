@@ -87,3 +87,25 @@ for i in [1, 1, 1, 1, 1] {
 println(count)  // 5
 
 println("=== All For-In Tests Passed ===")
+
+// @expect: === Basic For-In Loop ===
+// @expect: 15
+// @expect: after empty
+// @expect: === For-In with Different Types ===
+// @expect: apple
+// @expect: banana
+// @expect: cherry
+// @expect: true
+// @expect: false
+// @expect: true
+// @expect: === Nested For Loops ===
+// @expect: 21
+// @expect: === For-In with Expressions ===
+// @expect: 24
+// @expect: === For-In with Break ===
+// @expect: 99
+// @expect: === For-In with Continue ===
+// @expect: 30
+// @expect: === For-In Counter ===
+// @expect: 5
+// @expect: === All For-In Tests Passed ===

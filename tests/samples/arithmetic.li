@@ -14,3 +14,8 @@ fn main() {
     print(b)
     print(c)
 }
+
+// @expect: 30
+// @expect: 70
+// @expect: 56
+// @expect: 12

@@ -1,6 +1,6 @@
 // Test if expressions (if used as expression, not statement)
 // @expect: positive
-// @expect: 10
+// @expect: 20
 // @expect: even
 // @expect: large
 

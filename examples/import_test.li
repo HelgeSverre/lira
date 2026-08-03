@@ -20,3 +20,11 @@ let content = read_file(test_file)
 println("read_file: " + content)
 
 println("=== Import Test Passed ===")
+
+// @expect: === Import Test ===
+// @expect: abs(-5): 5
+// @expect: min(3, 7): 3
+// @expect: max(3, 7): 7
+// @expect: write_file success: true
+// @expect: read_file: Hello from import test!
+// @expect: === Import Test Passed ===

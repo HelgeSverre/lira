@@ -1,6 +1,6 @@
 // A match over an enum that omits a variant with no wildcard must be rejected
 // at compile time (exhaustiveness checking).
-// @expect-error
+// @expect-compile-error
 
 enum Color {
     Red,

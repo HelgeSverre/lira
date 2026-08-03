@@ -425,7 +425,7 @@ impl Scheduler {
     /// Check if all fibers are finished or blocked
     pub fn is_deadlocked(&self) -> bool {
         if self.fibers.is_empty() {
-            return false;
+            return true;
         }
 
         for fiber in self.fibers.values() {
@@ -975,5 +975,50 @@ mod tests {
 
         // Channel should be closed
         assert!(sched.channels.get(&ch).unwrap().closed);
+    }
+
+    #[test]
+    fn test_is_deadlocked_empty_scheduler() {
+        let sched = Scheduler::new();
+        // An empty scheduler has no fibers at all — it is deadlocked
+        assert!(sched.is_deadlocked());
+    }
+
+    #[test]
+    fn test_is_deadlocked_with_runnable_fiber() {
+        let mut sched = Scheduler::new();
+        sched.spawn(0);
+        // A Ready fiber is runnable → not deadlocked
+        assert!(!sched.is_deadlocked());
+    }
+
+    #[test]
+    fn test_is_deadlocked_all_finished() {
+        let mut sched = Scheduler::new();
+        let _id = sched.spawn(0);
+        sched.schedule(); // make it running
+        sched.finish_current(Value::Int(42)); // mark finished
+                                              // The only fiber is finished → deadlocked
+        assert!(sched.is_deadlocked());
+    }
+
+    #[test]
+    fn test_is_deadlocked_blocked_and_finished() {
+        let mut sched = Scheduler::new();
+        // Spawn one that finishes
+        let _id1 = sched.spawn(0);
+        sched.schedule();
+        sched.finish_current(Value::Null);
+        // Spawn one that blocks on receive
+        let _id2 = sched.spawn(0);
+        sched.schedule();
+        let ch = sched.create_channel(1);
+        // Simulate blocking: set fiber state directly
+        if let Some(fiber) = sched.current_fiber_mut() {
+            fiber.state = FiberState::BlockedReceive(ch);
+        }
+        sched.current = None;
+        // One finished + one blocked with no ready_queue → deadlocked
+        assert!(sched.is_deadlocked());
     }
 }

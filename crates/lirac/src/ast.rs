@@ -178,6 +178,7 @@ pub struct Parameter {
     pub name: String,
     pub type_ann: TypeExpr,
     pub default: Option<Expression>,
+    pub is_mutable: bool,
     pub span: Span,
 }
 

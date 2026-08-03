@@ -1,0 +1,28 @@
+// 'this' keyword tests — exercises this.field and this.method() inside class methods.
+// 'this' is an alias for the receiver (self) in method bodies.
+// @expect: name: Rex
+// @expect: bark: Rex says Woof
+// @expect: this-check: Rex
+
+class Animal {
+    name: string
+    fn speak(this) -> string { return "..." }
+    fn who(this) -> string {
+        return "this-check: " + this.name
+    }
+}
+
+class Dog extends Animal {
+    override fn speak(this) -> string {
+        return this.name + " says Woof"
+    }
+}
+
+fn main() {
+    let d = Dog { name: "Rex" }
+    println("name: " + d.name)
+    println("bark: " + d.speak())
+    println(d.who())
+}
+
+main()

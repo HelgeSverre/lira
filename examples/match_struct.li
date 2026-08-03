@@ -1,0 +1,24 @@
+// Match with struct destructuring patterns
+// @expect: 30
+// @expect: 300
+
+struct Point { x: int, y: int }
+
+struct Rect { width: int, height: int }
+
+fn sum(p: Point) -> int {
+    return match p {
+        Point { x, y } => x + y,
+    }
+}
+
+fn area(r: Rect) -> int {
+    return match r {
+        Rect { width: w, height: h } => w * h,
+    }
+}
+
+fn main() {
+    print(sum(Point { x: 10, y: 20 }))
+    print(area(Rect { width: 15, height: 20 }))
+}

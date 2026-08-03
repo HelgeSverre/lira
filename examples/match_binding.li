@@ -1,0 +1,18 @@
+// Match with binding patterns (@)
+// @expect: 84
+// @expect: 100
+// @expect: 200
+
+fn describe(n: int) -> int {
+    return match n {
+        x @ 42 => x * 2,
+        x @ 100 => x,
+        x => x * 40
+    }
+}
+
+fn main() {
+    print(describe(42))
+    print(describe(100))
+    print(describe(5))
+}

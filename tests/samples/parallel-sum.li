@@ -58,3 +58,8 @@ fn main() {
 }
 
 main()
+
+// @expect-contains: === Parallel Sum Demo ===
+// @expect-contains: Collected all 4 partial sums
+// @expect-contains: Expected total: 5050
+// @expect-contains: === Demo Complete ===

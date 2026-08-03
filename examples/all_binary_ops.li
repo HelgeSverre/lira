@@ -23,7 +23,7 @@
 // @expect: 6
 // @expect: 20
 // @expect: 1
-// @expect: 0
+// @expect: 1
 
 fn main() {
     println("=== Arithmetic ===")

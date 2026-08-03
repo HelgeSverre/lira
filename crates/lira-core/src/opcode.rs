@@ -84,7 +84,7 @@ pub enum Opcode {
     ChanSend = 0xA1,
     ChanRecv = 0xA2,
     ChanClose = 0xA3,
-    ChanTryRecv = 0xA4,
+    // Reserved: ChanTryRecv (0xA4) — non-blocking recv not yet implemented
     Select = 0xA5,
 
     // Closure operations
@@ -315,12 +315,12 @@ const OPCODE_TABLE: [Option<Opcode>; 256] = [
     N,
     N, // 0x93-0x9F
     // 0xA0-0xAF: Channel ops
-    Some(Opcode::ChanNew),     // 0xA0
-    Some(Opcode::ChanSend),    // 0xA1
-    Some(Opcode::ChanRecv),    // 0xA2
-    Some(Opcode::ChanClose),   // 0xA3
-    Some(Opcode::ChanTryRecv), // 0xA4
-    Some(Opcode::Select),      // 0xA5
+    Some(Opcode::ChanNew),   // 0xA0
+    Some(Opcode::ChanSend),  // 0xA1
+    Some(Opcode::ChanRecv),  // 0xA2
+    Some(Opcode::ChanClose), // 0xA3
+    N,                       // 0xA4 (reserved: ChanTryRecv)
+    Some(Opcode::Select),    // 0xA5
     N,
     N,
     N,

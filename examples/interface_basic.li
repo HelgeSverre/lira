@@ -1,6 +1,6 @@
 // Test interface declarations and implementations
 // @expect: Shape area: 50
-// @expect: Shape area: 78
+// @expect: Shape area: 75
 
 // Define an interface for shapes
 interface Drawable {

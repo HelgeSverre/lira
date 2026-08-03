@@ -58,3 +58,6 @@ fn main() {
 }
 
 main()
+
+// @expect-contains: === Producer-Consumer Demo ===
+// @expect-contains: === Demo Complete ===

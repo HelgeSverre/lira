@@ -14,3 +14,7 @@ select {
 }
 
 println("Select test complete")
+
+// @expect: Channels created
+// @expect: Default case executed (no channels ready)
+// @expect: Select test complete
