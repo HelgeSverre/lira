@@ -12,6 +12,16 @@ use lira_core::opcode::Opcode;
 use lira_core::{BYTECODE_MAGIC, BYTECODE_VERSION};
 use std::collections::HashMap;
 
+/// Check if an expression is statically known to produce an int value.
+fn is_int_expr(e: &Expression) -> bool {
+    matches!(&e.kind, ExpressionKind::IntLiteral(_))
+}
+
+/// Check if an expression is statically known to produce a float value.
+fn is_float_expr(e: &Expression) -> bool {
+    matches!(&e.kind, ExpressionKind::FloatLiteral(_))
+}
+
 /// Table of syscall-based builtins: (function_name, syscall_number, required_arg_count).
 /// Special builtins (print, chan, send, recv, close, fiber_yield, fiber_id, len, push, pop)
 /// use custom opcodes and are handled as explicit match arms instead.
@@ -2063,19 +2073,22 @@ impl CodeGenerator {
                 self.generate_expression(left);
                 self.generate_expression(right);
 
+                let both_int = is_int_expr(left) && is_int_expr(right);
+                let both_float = is_float_expr(left) && is_float_expr(right);
+
                 let opcode = match op {
-                    BinaryOp::Add => Opcode::Add,
-                    BinaryOp::Sub => Opcode::Sub,
-                    BinaryOp::Mul => Opcode::Mul,
-                    BinaryOp::Div => Opcode::Div,
-                    BinaryOp::Mod => Opcode::Mod,
+                    BinaryOp::Add => if both_int { Opcode::IAdd } else if both_float { Opcode::FAdd } else { Opcode::Add },
+                    BinaryOp::Sub => if both_int { Opcode::ISub } else if both_float { Opcode::FSub } else { Opcode::Sub },
+                    BinaryOp::Mul => if both_int { Opcode::IMul } else if both_float { Opcode::FMul } else { Opcode::Mul },
+                    BinaryOp::Div => if both_int { Opcode::IDiv } else if both_float { Opcode::FDiv } else { Opcode::Div },
+                    BinaryOp::Mod => if both_int { Opcode::IMod } else if both_float { Opcode::FMod } else { Opcode::Mod },
                     BinaryOp::Pow => Opcode::Pow,
-                    BinaryOp::Eq => Opcode::Eq,
-                    BinaryOp::Ne => Opcode::Ne,
-                    BinaryOp::Lt => Opcode::Lt,
-                    BinaryOp::Le => Opcode::Le,
-                    BinaryOp::Gt => Opcode::Gt,
-                    BinaryOp::Ge => Opcode::Ge,
+                    BinaryOp::Eq => if both_int { Opcode::IEq } else if both_float { Opcode::FEq } else { Opcode::Eq },
+                    BinaryOp::Ne => if both_int { Opcode::INe } else if both_float { Opcode::FNe } else { Opcode::Ne },
+                    BinaryOp::Lt => if both_int { Opcode::ILt } else if both_float { Opcode::FLt } else { Opcode::Lt },
+                    BinaryOp::Le => if both_int { Opcode::ILe } else if both_float { Opcode::FLe } else { Opcode::Le },
+                    BinaryOp::Gt => if both_int { Opcode::IGt } else if both_float { Opcode::FGt } else { Opcode::Gt },
+                    BinaryOp::Ge => if both_int { Opcode::IGe } else if both_float { Opcode::FGe } else { Opcode::Ge },
                     BinaryOp::And => Opcode::And,
                     BinaryOp::Or => Opcode::Or,
                     BinaryOp::BitAnd => Opcode::BitAnd,
@@ -2099,7 +2112,10 @@ impl CodeGenerator {
                 match op {
                     UnaryOp::Neg => {
                         self.generate_expression(operand);
-                        self.emit_opcode(Opcode::Neg);
+                        let opcode = if is_int_expr(operand) { Opcode::INeg }
+                            else if is_float_expr(operand) { Opcode::FNeg }
+                            else { Opcode::Neg };
+                        self.emit_opcode(opcode);
                     }
                     UnaryOp::Not => {
                         self.generate_expression(operand);

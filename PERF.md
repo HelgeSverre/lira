@@ -78,6 +78,33 @@ All arithmetic dispatches through runtime `Value` tag matching even though the t
 **Combined result (fixes 1-3, 5): ~8.5% speedup** measured on 25× fib(30).
 Baseline: 14.00s avg. Optimized: 12.90s avg. 10 runs each, all 58+112 tests pass.
 
+### Round 2: Phase A + B partial (fused decode, lookup table, pre-sized locals, typed VM handlers)
+
+Additional optimizations applied:
+- `Opcode::from_byte` → 256-entry const lookup table (was 48-arm match)
+- Main loop: fused byte read + opcode decode into single step (was `decode_next()` → `execute_opcode()`)
+- Pre-sized `locals` and `call_stack` Vecs from 256/64 → 4096/4096 to reduce reallocation during deep recursion
+- 24 typed opcodes defined in lira-core (`IAdd` through `FGe`), VM handlers implemented
+- Codegen emits typed opcodes for literal-on-literal binary/unary operations
+
+**Result: 10.7s** (13.5s → 12.7s → 10.7s). ~21% total improvement from original.
+
+### Known limitation: expr_types collision
+
+`NodeId` resets per compilation unit (file), so `SemanticTables.expr_types` has
+collisions when multiple files are compiled. Codegen cannot reliably use
+`expr_types` for identifier-typed opcodes. Fix requires globally-unique NodeId.
+
+### Path to 5s
+
+The typed opcodes are wired up in the VM but codegen only emits them for
+literal-on-literal operations. To unlock the full ~40% typed-opcode speedup:
+
+1. Make `NodeId` globally unique (file-id prefix) → `expr_types` becomes reliable
+2. Codegen queries `expr_types` to emit typed opcodes for ALL int/float expressions
+3. Estimated impact: 10.7s → ~6-7s
+4. For the remaining gap to 5s: value Drop optimization (A1) + TCO/inlining
+
 ## Value Size
 
 `Value` enum is **16 bytes** (verified via `size_of`):

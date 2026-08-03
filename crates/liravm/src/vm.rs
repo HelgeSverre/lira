@@ -171,10 +171,10 @@ impl VM {
 
         Self {
             program,
-            stack: Vec::with_capacity(1024),
-            call_stack: Vec::with_capacity(64),
+            stack: Vec::with_capacity(4096),
+            call_stack: Vec::with_capacity(4096),
             ip: 0,
-            locals: Vec::with_capacity(256),
+            locals: Vec::with_capacity(4096),
             debug: false,
             scheduler,
             fiber_mode: false,
@@ -1016,9 +1016,18 @@ impl VM {
                 gc::force_collect();
             }
 
-            let opcode = self.decode_next()?;
+            // Decode and execute in one step — avoid the separate decode_next call
+            // which would re-check bounds and convert the byte twice.
+            let opcode_byte = self.program.code[self.ip];
+            self.ip += 1;
+            let opcode = Opcode::from_byte(opcode_byte).ok_or_else(|| {
+                format!(
+                    "Invalid opcode: 0x{:02X} at offset {}",
+                    opcode_byte,
+                    self.ip - 1
+                )
+            })?;
 
-            // Execute the opcode
             if let Some(exit_code) = self.execute_opcode(opcode)? {
                 return Ok(exit_code);
             }
@@ -1029,6 +1038,162 @@ impl VM {
     fn execute_opcode(&mut self, opcode: Opcode) -> Result<Option<i32>, String> {
         match opcode {
             Opcode::Nop => Ok(None),
+
+            // ── Typed integer arithmetic: no Value tag matching ──
+            Opcode::IAdd => {
+                let b = self.pop_int()?;
+                let a = self.pop_int()?;
+                self.stack.push(Value::Int(a.wrapping_add(b)));
+                Ok(None)
+            }
+            Opcode::ISub => {
+                let b = self.pop_int()?;
+                let a = self.pop_int()?;
+                self.stack.push(Value::Int(a.wrapping_sub(b)));
+                Ok(None)
+            }
+            Opcode::IMul => {
+                let b = self.pop_int()?;
+                let a = self.pop_int()?;
+                self.stack.push(Value::Int(a.wrapping_mul(b)));
+                Ok(None)
+            }
+            Opcode::IDiv => {
+                let b = self.pop_int()?;
+                if b == 0 {
+                    return Err("Division by zero".to_string());
+                }
+                let a = self.pop_int()?;
+                self.stack.push(Value::Int(a / b));
+                Ok(None)
+            }
+            Opcode::IMod => {
+                let b = self.pop_int()?;
+                if b == 0 {
+                    return Err("Division by zero".to_string());
+                }
+                let a = self.pop_int()?;
+                self.stack.push(Value::Int(a % b));
+                Ok(None)
+            }
+            Opcode::INeg => {
+                let a = self.pop_int()?;
+                self.stack.push(Value::Int(-a));
+                Ok(None)
+            }
+
+            // ── Typed float arithmetic ──
+            Opcode::FAdd => {
+                let b = self.pop_float()?;
+                let a = self.pop_float()?;
+                self.stack.push(Value::Float(a + b));
+                Ok(None)
+            }
+            Opcode::FSub => {
+                let b = self.pop_float()?;
+                let a = self.pop_float()?;
+                self.stack.push(Value::Float(a - b));
+                Ok(None)
+            }
+            Opcode::FMul => {
+                let b = self.pop_float()?;
+                let a = self.pop_float()?;
+                self.stack.push(Value::Float(a * b));
+                Ok(None)
+            }
+            Opcode::FDiv => {
+                let b = self.pop_float()?;
+                let a = self.pop_float()?;
+                self.stack.push(Value::Float(a / b));
+                Ok(None)
+            }
+            Opcode::FMod => {
+                let b = self.pop_float()?;
+                let a = self.pop_float()?;
+                self.stack.push(Value::Float(a % b));
+                Ok(None)
+            }
+            Opcode::FNeg => {
+                let a = self.pop_float()?;
+                self.stack.push(Value::Float(-a));
+                Ok(None)
+            }
+
+            // ── Typed integer comparison ──
+            Opcode::IEq => {
+                let b = self.pop_int()?;
+                let a = self.pop_int()?;
+                self.stack.push(Value::Bool(a == b));
+                Ok(None)
+            }
+            Opcode::INe => {
+                let b = self.pop_int()?;
+                let a = self.pop_int()?;
+                self.stack.push(Value::Bool(a != b));
+                Ok(None)
+            }
+            Opcode::ILt => {
+                let b = self.pop_int()?;
+                let a = self.pop_int()?;
+                self.stack.push(Value::Bool(a < b));
+                Ok(None)
+            }
+            Opcode::ILe => {
+                let b = self.pop_int()?;
+                let a = self.pop_int()?;
+                self.stack.push(Value::Bool(a <= b));
+                Ok(None)
+            }
+            Opcode::IGt => {
+                let b = self.pop_int()?;
+                let a = self.pop_int()?;
+                self.stack.push(Value::Bool(a > b));
+                Ok(None)
+            }
+            Opcode::IGe => {
+                let b = self.pop_int()?;
+                let a = self.pop_int()?;
+                self.stack.push(Value::Bool(a >= b));
+                Ok(None)
+            }
+
+            // ── Typed float comparison ──
+            Opcode::FEq => {
+                let b = self.pop_float()?;
+                let a = self.pop_float()?;
+                self.stack.push(Value::Bool(a == b));
+                Ok(None)
+            }
+            Opcode::FNe => {
+                let b = self.pop_float()?;
+                let a = self.pop_float()?;
+                self.stack.push(Value::Bool(a != b));
+                Ok(None)
+            }
+            Opcode::FLt => {
+                let b = self.pop_float()?;
+                let a = self.pop_float()?;
+                self.stack.push(Value::Bool(a < b));
+                Ok(None)
+            }
+            Opcode::FLe => {
+                let b = self.pop_float()?;
+                let a = self.pop_float()?;
+                self.stack.push(Value::Bool(a <= b));
+                Ok(None)
+            }
+            Opcode::FGt => {
+                let b = self.pop_float()?;
+                let a = self.pop_float()?;
+                self.stack.push(Value::Bool(a > b));
+                Ok(None)
+            }
+            Opcode::FGe => {
+                let b = self.pop_float()?;
+                let a = self.pop_float()?;
+                self.stack.push(Value::Bool(a >= b));
+                Ok(None)
+            }
 
             // Stack / local / object / array / closure data operations
             Opcode::LoadConst
@@ -2255,6 +2420,42 @@ impl VM {
         self.stack
             .pop()
             .ok_or_else(|| "Stack underflow".to_string())
+    }
+
+    /// Pop an integer value from the operand stack, returning an error if the
+    /// value is not an int. Skips the `Ok(Value::Int(...))` wrapping that
+    /// `pop()` + match would require.
+    fn pop_int(&mut self) -> Result<i64, String> {
+        let stack_base = self.stack_base();
+        if self.stack.len() <= stack_base {
+            return Err("Stack underflow".to_string());
+        }
+        match self.stack.pop() {
+            Some(Value::Int(n)) => Ok(n),
+            Some(v) => {
+                let msg = format!("Expected int, got {}", v.type_name());
+                self.stack.push(v);
+                Err(msg)
+            }
+            None => Err("Stack underflow".to_string()),
+        }
+    }
+
+    /// Pop a float value from the operand stack.
+    fn pop_float(&mut self) -> Result<f64, String> {
+        let stack_base = self.stack_base();
+        if self.stack.len() <= stack_base {
+            return Err("Stack underflow".to_string());
+        }
+        match self.stack.pop() {
+            Some(Value::Float(f)) => Ok(f),
+            Some(v) => {
+                let msg = format!("Expected float, got {}", v.type_name());
+                self.stack.push(v);
+                Err(msg)
+            }
+            None => Err("Stack underflow".to_string()),
+        }
     }
 
     /// Get the stack base for the current frame (to protect caller's values)
