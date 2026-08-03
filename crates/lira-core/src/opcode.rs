@@ -56,6 +56,10 @@ pub enum Opcode {
     // Function operations
     Call = 0x60,
     Return = 0x61,
+    /// Tail call: reuses the current frame instead of pushing a new one.
+    /// Follows the same encoding as Call (u8 arg_count) but the callee's
+    /// Return will return to the *current* frame's caller.
+    TailCall = 0x62,
 
     // Object operations
     GetField = 0x70,
@@ -186,7 +190,8 @@ static OPCODE_TABLE: [Option<Opcode>; 256] = [
     // 0x60-0x6F: Functions
     Some(Opcode::Call),   // 0x60
     Some(Opcode::Return), // 0x61
-    N, N, N, N, N, N, N, N, N, N, N, N, N, N, // 0x62-0x6F
+    Some(Opcode::TailCall), // 0x62
+    N, N, N, N, N, N, N, N, N, N, N, N, N, // 0x63-0x6F
     // 0x70-0x7F: Objects
     Some(Opcode::GetField),  // 0x70
     Some(Opcode::SetField),  // 0x71

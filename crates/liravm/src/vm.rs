@@ -1245,6 +1245,7 @@ impl VM {
             | Opcode::JumpIfTrue
             | Opcode::JumpIfFalse
             | Opcode::Call
+            | Opcode::TailCall
             | Opcode::Return
             | Opcode::Halt => self.execute_control_flow(opcode),
 
@@ -1888,6 +1889,46 @@ impl VM {
                         self.ip = closure_data.code_offset;
                     }
                     _ => return Err(format!("Cannot call {}", callee.type_name())),
+                }
+            }
+
+            Opcode::TailCall => {
+                let arg_count = self.read_u8()? as usize;
+                let callee = self.pop()?;
+
+                match &callee {
+                    Value::Function(code_offset) => {
+                        let code_offset = *code_offset;
+                        let mut args = Vec::with_capacity(arg_count);
+                        for _ in 0..arg_count {
+                            args.push(self.pop()?);
+                        }
+                        args.reverse();
+
+                        // Reuse the current frame: overwrite locals and jump.
+                        // The callee's Return will return to our caller.
+                        let locals_base = self.locals_base();
+                        self.locals.truncate(locals_base);
+                        for arg in args {
+                            self.locals.push(arg);
+                        }
+                        self.ip = code_offset;
+                    }
+                    Value::Closure(closure_data) => {
+                        let mut args = Vec::with_capacity(arg_count);
+                        for _ in 0..arg_count {
+                            args.push(self.pop()?);
+                        }
+                        args.reverse();
+
+                        let locals_base = self.locals_base();
+                        self.locals.truncate(locals_base);
+                        for arg in args {
+                            self.locals.push(arg);
+                        }
+                        self.ip = closure_data.code_offset;
+                    }
+                    _ => return Err(format!("Cannot tail-call {}", callee.type_name())),
                 }
             }
 

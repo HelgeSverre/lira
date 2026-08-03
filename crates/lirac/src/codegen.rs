@@ -1480,13 +1480,23 @@ impl CodeGenerator {
 
             StatementKind::Return(value) => {
                 if let Some(expr) = value {
+                    let before = self.code.len();
                     self.generate_expression(expr);
+                    // Tail-call optimisation: if the return value is a single
+                    // function call we rewrite the trailing `Call n` into
+                    // `TailCall n` and omit the `Return` opcode entirely.
+                    let len = self.code.len();
+                    if len >= before + 2 && self.code[len - 2] == Opcode::Call as u8 {
+                        self.code[len - 2] = Opcode::TailCall as u8;
+                    } else {
+                        self.emit_opcode(Opcode::Return);
+                    }
                 } else {
                     self.emit_opcode(Opcode::LoadConst);
                     let null_idx = self.add_constant(Constant::Null);
                     self.emit_u16(null_idx);
+                    self.emit_opcode(Opcode::Return);
                 }
-                self.emit_opcode(Opcode::Return);
             }
 
             StatementKind::If {
