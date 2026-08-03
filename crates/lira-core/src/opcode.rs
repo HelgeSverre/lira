@@ -144,24 +144,56 @@ const N: Option<Opcode> = None;
 
 static OPCODE_TABLE: [Option<Opcode>; 256] = [
     // 0x00-0x0F: Stack ops + gaps
-    Some(Opcode::Nop),        // 0x00
-    Some(Opcode::LoadConst),  // 0x01
-    Some(Opcode::Pop),        // 0x02
-    Some(Opcode::Dup),        // 0x03
-    N, N, N, N, N, N, N, N, N, N, N, N, // 0x04-0x0F
+    Some(Opcode::Nop),       // 0x00
+    Some(Opcode::LoadConst), // 0x01
+    Some(Opcode::Pop),       // 0x02
+    Some(Opcode::Dup),       // 0x03
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N, // 0x04-0x0F
     // 0x10-0x1F: Local ops + gaps
     Some(Opcode::LoadLocal),  // 0x10
     Some(Opcode::StoreLocal), // 0x11
-    N, N, N, N, N, N, N, N, N, N, N, N, N, N, // 0x12-0x1F
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N, // 0x12-0x1F
     // 0x20-0x2F: Arithmetic ops
-    Some(Opcode::Add),  // 0x20
-    Some(Opcode::Sub),  // 0x21
-    Some(Opcode::Mul),  // 0x22
-    Some(Opcode::Div),  // 0x23
-    Some(Opcode::Mod),  // 0x24
-    Some(Opcode::Neg),  // 0x25
-    Some(Opcode::Pow),  // 0x26
-    N, N, N, N, N, N, N, N, N, // 0x27-0x2F
+    Some(Opcode::Add), // 0x20
+    Some(Opcode::Sub), // 0x21
+    Some(Opcode::Mul), // 0x22
+    Some(Opcode::Div), // 0x23
+    Some(Opcode::Mod), // 0x24
+    Some(Opcode::Neg), // 0x25
+    Some(Opcode::Pow), // 0x26
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N, // 0x27-0x2F
     // 0x30-0x3F: Comparison ops
     Some(Opcode::Eq), // 0x30
     Some(Opcode::Ne), // 0x31
@@ -169,7 +201,16 @@ static OPCODE_TABLE: [Option<Opcode>; 256] = [
     Some(Opcode::Le), // 0x33
     Some(Opcode::Gt), // 0x34
     Some(Opcode::Ge), // 0x35
-    N, N, N, N, N, N, N, N, N, N, // 0x36-0x3F
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N, // 0x36-0x3F
     // 0x40-0x4F: Logical + bitwise ops
     Some(Opcode::And),    // 0x40
     Some(Opcode::Or),     // 0x41
@@ -181,22 +222,63 @@ static OPCODE_TABLE: [Option<Opcode>; 256] = [
     Some(Opcode::Shl),    // 0x47
     Some(Opcode::Shr),    // 0x48
     Some(Opcode::UShr),   // 0x49
-    N, N, N, N, N, N, // 0x4A-0x4F
+    N,
+    N,
+    N,
+    N,
+    N,
+    N, // 0x4A-0x4F
     // 0x50-0x5F: Control flow
     Some(Opcode::Jump),        // 0x50
     Some(Opcode::JumpIfTrue),  // 0x51
     Some(Opcode::JumpIfFalse), // 0x52
-    N, N, N, N, N, N, N, N, N, N, N, N, N, // 0x53-0x5F
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N, // 0x53-0x5F
     // 0x60-0x6F: Functions
-    Some(Opcode::Call),   // 0x60
-    Some(Opcode::Return), // 0x61
+    Some(Opcode::Call),     // 0x60
+    Some(Opcode::Return),   // 0x61
     Some(Opcode::TailCall), // 0x62
-    N, N, N, N, N, N, N, N, N, N, N, N, N, // 0x63-0x6F
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N, // 0x63-0x6F
     // 0x70-0x7F: Objects
     Some(Opcode::GetField),  // 0x70
     Some(Opcode::SetField),  // 0x71
     Some(Opcode::NewObject), // 0x72
-    N, N, N, N, N, N, N, N, N, N, N, N, N, // 0x73-0x7F
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N, // 0x73-0x7F
     // 0x80-0x8F: Arrays
     Some(Opcode::NewArray),  // 0x80
     Some(Opcode::ArrayGet),  // 0x81
@@ -204,12 +286,33 @@ static OPCODE_TABLE: [Option<Opcode>; 256] = [
     Some(Opcode::ArrayLen),  // 0x83
     Some(Opcode::ArrayPush), // 0x84
     Some(Opcode::ArrayPop),  // 0x85
-    N, N, N, N, N, N, N, N, N, N, // 0x86-0x8F
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N, // 0x86-0x8F
     // 0x90-0x9F: Fiber ops
     Some(Opcode::Spawn),   // 0x90
     Some(Opcode::Yield),   // 0x91
     Some(Opcode::FiberId), // 0x92
-    N, N, N, N, N, N, N, N, N, N, N, N, N, // 0x93-0x9F
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N, // 0x93-0x9F
     // 0xA0-0xAF: Channel ops
     Some(Opcode::ChanNew),     // 0xA0
     Some(Opcode::ChanSend),    // 0xA1
@@ -217,15 +320,50 @@ static OPCODE_TABLE: [Option<Opcode>; 256] = [
     Some(Opcode::ChanClose),   // 0xA3
     Some(Opcode::ChanTryRecv), // 0xA4
     Some(Opcode::Select),      // 0xA5
-    N, N, N, N, N, N, N, N, N, N, // 0xA6-0xAF
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N, // 0xA6-0xAF
     // 0xB0-0xBF: Closure ops
     Some(Opcode::MakeClosure), // 0xB0
     Some(Opcode::LoadCapture), // 0xB1
-    N, N, N, N, N, N, N, N, N, N, N, N, N, N, // 0xB2-0xBF
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N, // 0xB2-0xBF
     // 0xC0-0xCF: Type ops
     Some(Opcode::TypeIs), // 0xC0
     Some(Opcode::Cast),   // 0xC1
-    N, N, N, N, N, N, N, N, N, N, N, N, N, N, // 0xC2-0xCF
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N, // 0xC2-0xCF
     // 0xD0-0xDF: Typed integer arithmetic
     Some(Opcode::IAdd), // 0xD0
     Some(Opcode::ISub), // 0xD1
@@ -240,7 +378,10 @@ static OPCODE_TABLE: [Option<Opcode>; 256] = [
     Some(Opcode::FDiv), // 0xD9
     Some(Opcode::FMod), // 0xDA
     Some(Opcode::FNeg), // 0xDB
-    N, N, N, N, // 0xDC-0xDF
+    N,
+    N,
+    N,
+    N, // 0xDC-0xDF
     // 0xE0-0xEF: Typed comparisons
     Some(Opcode::IEq), // 0xE0
     Some(Opcode::INe), // 0xE1
@@ -254,10 +395,24 @@ static OPCODE_TABLE: [Option<Opcode>; 256] = [
     Some(Opcode::FLe), // 0xE9
     Some(Opcode::FGt), // 0xEA
     Some(Opcode::FGe), // 0xEB
-    N, N, N, N, // 0xEC-0xEF
+    N,
+    N,
+    N,
+    N, // 0xEC-0xEF
     // 0xF0-0xFF: System ops
     Some(Opcode::Print), // 0xF0
-    N, N, N, N, N, N, N, N, N, N, N, N, // 0xF1-0xFC
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,
+    N,                     // 0xF1-0xFC
     Some(Opcode::Collect), // 0xFD
     Some(Opcode::Syscall), // 0xFE
     Some(Opcode::Halt),    // 0xFF

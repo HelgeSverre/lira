@@ -362,7 +362,7 @@ impl Runtime {
     /// Read up to `max_bytes` from an owned file (checked out of the registry).
     /// Usable off the VM thread.
     pub(crate) fn read_file_blocking(file: &mut File, max_bytes: i64) -> Result<String, String> {
-        let mut buffer = vec![0u8; max_bytes.min(1024 * 1024).max(0) as usize]; // cap at 1MB
+        let mut buffer = vec![0u8; (max_bytes as usize).clamp(0, 1024 * 1024)]; // cap at 1MB
         let bytes_read = file
             .read(&mut buffer)
             .map_err(|e| format!("Read error: {}", e))?;
@@ -859,7 +859,7 @@ impl Runtime {
 
     /// Read from an owned socket (checked out of the registry). Off-VM-thread safe.
     pub(crate) fn tcp_read_blocking(stream: &mut TcpStream, max_bytes: i64) -> String {
-        let mut buffer = vec![0u8; max_bytes.min(65536).max(0) as usize];
+        let mut buffer = vec![0u8; (max_bytes as usize).clamp(0, 65536)];
         match stream.read(&mut buffer) {
             Ok(n) => {
                 buffer.truncate(n);
@@ -927,10 +927,7 @@ impl Runtime {
         use std::net::ToSocketAddrs;
         let addr = format!("{}:80", hostname);
         match addr.to_socket_addrs() {
-            Ok(mut addrs) => addrs
-                .next()
-                .map(|a| a.ip().to_string())
-                .unwrap_or_default(),
+            Ok(mut addrs) => addrs.next().map(|a| a.ip().to_string()).unwrap_or_default(),
             Err(_) => String::new(),
         }
     }

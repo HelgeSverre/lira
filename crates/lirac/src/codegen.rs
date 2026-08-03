@@ -428,7 +428,8 @@ impl CodeGenerator {
             let ExpressionKind::Call { callee, args, .. } = &expr.kind else {
                 return false;
             };
-            args.is_empty() && matches!(&callee.kind, ExpressionKind::Identifier(name) if name == "main")
+            args.is_empty()
+                && matches!(&callee.kind, ExpressionKind::Identifier(name) if name == "main")
         });
         if !top_level_calls_main {
             if let Some(main_func) = self.functions.iter().find(|f| f.name == "main") {
@@ -1485,6 +1486,11 @@ impl CodeGenerator {
                     // Tail-call optimisation: if the return value is a single
                     // function call we rewrite the trailing `Call n` into
                     // `TailCall n` and omit the `Return` opcode entirely.
+                    // Uses byte-pattern matching because the AST-level Call
+                    // handler already emitted the opcode; we peek at the last
+                    // two bytes. The second-to-last byte being 0x60 (Call) is
+                    // unambiguous in practice: LoadConst/LoadLocal u16 operands
+                    // would need 24k+ entries to collide.
                     let len = self.code.len();
                     if len >= before + 2 && self.code[len - 2] == Opcode::Call as u8 {
                         self.code[len - 2] = Opcode::TailCall as u8;
@@ -2077,18 +2083,106 @@ impl CodeGenerator {
                 let both_float = self.checked_is_float(left) && self.checked_is_float(right);
 
                 let opcode = match op {
-                    BinaryOp::Add => if both_int { Opcode::IAdd } else if both_float { Opcode::FAdd } else { Opcode::Add },
-                    BinaryOp::Sub => if both_int { Opcode::ISub } else if both_float { Opcode::FSub } else { Opcode::Sub },
-                    BinaryOp::Mul => if both_int { Opcode::IMul } else if both_float { Opcode::FMul } else { Opcode::Mul },
-                    BinaryOp::Div => if both_int { Opcode::IDiv } else if both_float { Opcode::FDiv } else { Opcode::Div },
-                    BinaryOp::Mod => if both_int { Opcode::IMod } else if both_float { Opcode::FMod } else { Opcode::Mod },
+                    BinaryOp::Add => {
+                        if both_int {
+                            Opcode::IAdd
+                        } else if both_float {
+                            Opcode::FAdd
+                        } else {
+                            Opcode::Add
+                        }
+                    }
+                    BinaryOp::Sub => {
+                        if both_int {
+                            Opcode::ISub
+                        } else if both_float {
+                            Opcode::FSub
+                        } else {
+                            Opcode::Sub
+                        }
+                    }
+                    BinaryOp::Mul => {
+                        if both_int {
+                            Opcode::IMul
+                        } else if both_float {
+                            Opcode::FMul
+                        } else {
+                            Opcode::Mul
+                        }
+                    }
+                    BinaryOp::Div => {
+                        if both_int {
+                            Opcode::IDiv
+                        } else if both_float {
+                            Opcode::FDiv
+                        } else {
+                            Opcode::Div
+                        }
+                    }
+                    BinaryOp::Mod => {
+                        if both_int {
+                            Opcode::IMod
+                        } else if both_float {
+                            Opcode::FMod
+                        } else {
+                            Opcode::Mod
+                        }
+                    }
                     BinaryOp::Pow => Opcode::Pow,
-                    BinaryOp::Eq => if both_int { Opcode::IEq } else if both_float { Opcode::FEq } else { Opcode::Eq },
-                    BinaryOp::Ne => if both_int { Opcode::INe } else if both_float { Opcode::FNe } else { Opcode::Ne },
-                    BinaryOp::Lt => if both_int { Opcode::ILt } else if both_float { Opcode::FLt } else { Opcode::Lt },
-                    BinaryOp::Le => if both_int { Opcode::ILe } else if both_float { Opcode::FLe } else { Opcode::Le },
-                    BinaryOp::Gt => if both_int { Opcode::IGt } else if both_float { Opcode::FGt } else { Opcode::Gt },
-                    BinaryOp::Ge => if both_int { Opcode::IGe } else if both_float { Opcode::FGe } else { Opcode::Ge },
+                    BinaryOp::Eq => {
+                        if both_int {
+                            Opcode::IEq
+                        } else if both_float {
+                            Opcode::FEq
+                        } else {
+                            Opcode::Eq
+                        }
+                    }
+                    BinaryOp::Ne => {
+                        if both_int {
+                            Opcode::INe
+                        } else if both_float {
+                            Opcode::FNe
+                        } else {
+                            Opcode::Ne
+                        }
+                    }
+                    BinaryOp::Lt => {
+                        if both_int {
+                            Opcode::ILt
+                        } else if both_float {
+                            Opcode::FLt
+                        } else {
+                            Opcode::Lt
+                        }
+                    }
+                    BinaryOp::Le => {
+                        if both_int {
+                            Opcode::ILe
+                        } else if both_float {
+                            Opcode::FLe
+                        } else {
+                            Opcode::Le
+                        }
+                    }
+                    BinaryOp::Gt => {
+                        if both_int {
+                            Opcode::IGt
+                        } else if both_float {
+                            Opcode::FGt
+                        } else {
+                            Opcode::Gt
+                        }
+                    }
+                    BinaryOp::Ge => {
+                        if both_int {
+                            Opcode::IGe
+                        } else if both_float {
+                            Opcode::FGe
+                        } else {
+                            Opcode::Ge
+                        }
+                    }
                     BinaryOp::And => Opcode::And,
                     BinaryOp::Or => Opcode::Or,
                     BinaryOp::BitAnd => Opcode::BitAnd,
@@ -2112,9 +2206,13 @@ impl CodeGenerator {
                 match op {
                     UnaryOp::Neg => {
                         self.generate_expression(operand);
-                        let opcode = if self.checked_is_int(operand) { Opcode::INeg }
-                            else if self.checked_is_float(operand) { Opcode::FNeg }
-                            else { Opcode::Neg };
+                        let opcode = if self.checked_is_int(operand) {
+                            Opcode::INeg
+                        } else if self.checked_is_float(operand) {
+                            Opcode::FNeg
+                        } else {
+                            Opcode::Neg
+                        };
                         self.emit_opcode(opcode);
                     }
                     UnaryOp::Not => {
@@ -2789,11 +2887,51 @@ impl CodeGenerator {
                 let both_float = self.checked_is_float(target) && self.checked_is_float(value);
 
                 let opcode = match op {
-                    BinaryOp::Add => if both_int { Opcode::IAdd } else if both_float { Opcode::FAdd } else { Opcode::Add },
-                    BinaryOp::Sub => if both_int { Opcode::ISub } else if both_float { Opcode::FSub } else { Opcode::Sub },
-                    BinaryOp::Mul => if both_int { Opcode::IMul } else if both_float { Opcode::FMul } else { Opcode::Mul },
-                    BinaryOp::Div => if both_int { Opcode::IDiv } else if both_float { Opcode::FDiv } else { Opcode::Div },
-                    BinaryOp::Mod => if both_int { Opcode::IMod } else if both_float { Opcode::FMod } else { Opcode::Mod },
+                    BinaryOp::Add => {
+                        if both_int {
+                            Opcode::IAdd
+                        } else if both_float {
+                            Opcode::FAdd
+                        } else {
+                            Opcode::Add
+                        }
+                    }
+                    BinaryOp::Sub => {
+                        if both_int {
+                            Opcode::ISub
+                        } else if both_float {
+                            Opcode::FSub
+                        } else {
+                            Opcode::Sub
+                        }
+                    }
+                    BinaryOp::Mul => {
+                        if both_int {
+                            Opcode::IMul
+                        } else if both_float {
+                            Opcode::FMul
+                        } else {
+                            Opcode::Mul
+                        }
+                    }
+                    BinaryOp::Div => {
+                        if both_int {
+                            Opcode::IDiv
+                        } else if both_float {
+                            Opcode::FDiv
+                        } else {
+                            Opcode::Div
+                        }
+                    }
+                    BinaryOp::Mod => {
+                        if both_int {
+                            Opcode::IMod
+                        } else if both_float {
+                            Opcode::FMod
+                        } else {
+                            Opcode::Mod
+                        }
+                    }
                     BinaryOp::BitAnd => Opcode::BitAnd,
                     BinaryOp::BitOr => Opcode::BitOr,
                     BinaryOp::BitXor => Opcode::BitXor,
@@ -3597,8 +3735,7 @@ impl CodeGenerator {
     /// and falls back to literal shape for expressions without type info.
     fn checked_is_int(&self, expr: &Expression) -> bool {
         if let Some(ty) = self.sema.expr_types.get(&expr.id) {
-            return ty.is_numeric()
-                && !matches!(ty, Type::Float);
+            return ty.is_numeric() && !matches!(ty, Type::Float);
         }
         matches!(&expr.kind, ExpressionKind::IntLiteral(_))
     }

@@ -22,8 +22,7 @@ const TOKENS: &[&str] = &[
 ];
 
 fn source() -> impl Strategy<Value = String> {
-    prop::collection::vec(prop::sample::select(TOKENS), 0..48)
-        .prop_map(|toks| toks.join(" "))
+    prop::collection::vec(prop::sample::select(TOKENS), 0..48).prop_map(|toks| toks.join(" "))
 }
 
 proptest! {

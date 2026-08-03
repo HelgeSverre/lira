@@ -888,8 +888,10 @@ impl VM {
             IoValue::Str(s) => Value::String(Rc::new(s)),
             IoValue::Bool(b) => Value::Bool(b),
             IoValue::Strs(items) => {
-                let arr: Vec<Value> =
-                    items.into_iter().map(|s| Value::String(Rc::new(s))).collect();
+                let arr: Vec<Value> = items
+                    .into_iter()
+                    .map(|s| Value::String(Rc::new(s)))
+                    .collect();
                 Value::Array(Gc::new(GcCell::new(arr)))
             }
             IoValue::HttpResponse { status, body } => {
@@ -1060,25 +1062,25 @@ impl VM {
             }
             Opcode::IDiv => {
                 let b = pop_int_fast(&mut self.stack)?;
+                let a = pop_int_fast(&mut self.stack)?;
                 if b == 0 {
                     return Err("Division by zero".to_string());
                 }
-                let a = pop_int_fast(&mut self.stack)?;
                 self.stack.push(Value::Int(a / b));
                 Ok(None)
             }
             Opcode::IMod => {
                 let b = pop_int_fast(&mut self.stack)?;
-                if b == 0 {
-                    return Err("Division by zero".to_string());
-                }
                 let a = pop_int_fast(&mut self.stack)?;
+                if b == 0 {
+                    return Err("Modulo by zero".to_string());
+                }
                 self.stack.push(Value::Int(a % b));
                 Ok(None)
             }
             Opcode::INeg => {
                 let a = pop_int_fast(&mut self.stack)?;
-                self.stack.push(Value::Int(-a));
+                self.stack.push(Value::Int(a.wrapping_neg()));
                 Ok(None)
             }
 
@@ -1912,6 +1914,10 @@ impl VM {
                         for arg in args {
                             self.locals.push(arg);
                         }
+                        if let Some(frame) = self.call_stack.last_mut() {
+                            frame.captures = None;
+                            frame.func_offset = code_offset;
+                        }
                         self.ip = code_offset;
                     }
                     Value::Closure(closure_data) => {
@@ -1925,6 +1931,10 @@ impl VM {
                         self.locals.truncate(locals_base);
                         for arg in args {
                             self.locals.push(arg);
+                        }
+                        if let Some(frame) = self.call_stack.last_mut() {
+                            frame.captures = Some(closure_data.clone());
+                            frame.func_offset = closure_data.code_offset;
                         }
                         self.ip = closure_data.code_offset;
                     }
@@ -2491,7 +2501,6 @@ fn pop_float_fast(stack: &mut Vec<Value>) -> Result<f64, String> {
 }
 
 impl VM {
-
     fn read_u8(&mut self) -> Result<u8, String> {
         if self.ip >= self.program.code.len() {
             return Err("Unexpected end of bytecode".to_string());
@@ -2868,7 +2877,8 @@ impl VM {
                 if let Some(fiber) = self.io_offload_target() {
                     if let Some(mut file) = self.runtime.checkout_file(fd) {
                         self.offload_io(crate::io_pool::IoJob::new(fiber, move || {
-                            let bytes = Runtime::write_file_blocking(&mut file, &data).unwrap_or(-1);
+                            let bytes =
+                                Runtime::write_file_blocking(&mut file, &data).unwrap_or(-1);
                             Ok(crate::io_pool::IoValue::FileOp {
                                 fd,
                                 file,
@@ -3151,7 +3161,8 @@ impl VM {
             82 => {
                 let max_bytes = self.pop()?;
                 let socket_id = self.pop()?;
-                let (Value::Int(socket_id), Value::Int(max_bytes)) = (&socket_id, &max_bytes) else {
+                let (Value::Int(socket_id), Value::Int(max_bytes)) = (&socket_id, &max_bytes)
+                else {
                     return Err("tcp_read requires (int, int) arguments".to_string());
                 };
                 let (socket_id, max_bytes) = (*socket_id, *max_bytes);
@@ -3185,7 +3196,9 @@ impl VM {
                 let hostname = (**hostname).clone();
                 if let Some(fiber) = self.io_offload_target() {
                     self.offload_io(crate::io_pool::IoJob::new(fiber, move || {
-                        Ok(crate::io_pool::IoValue::Str(Runtime::dns_lookup_blocking(&hostname)))
+                        Ok(crate::io_pool::IoValue::Str(Runtime::dns_lookup_blocking(
+                            &hostname,
+                        )))
                     }));
                     return Ok(());
                 }
@@ -3225,7 +3238,8 @@ impl VM {
                     }));
                     return Ok(());
                 }
-                self.stack.push(Value::Bool(self.runtime.os_remove_all(&path)));
+                self.stack
+                    .push(Value::Bool(self.runtime.os_remove_all(&path)));
                 Ok(())
             }
             // listdir(path: string) -> [string]  (offloaded: dir scan)
@@ -3273,11 +3287,14 @@ impl VM {
                 let (from, to) = (self.absolutize(from), self.absolutize(to));
                 if let Some(fiber) = self.io_offload_target() {
                     self.offload_io(crate::io_pool::IoJob::new(fiber, move || {
-                        Ok(crate::io_pool::IoValue::Bool(std::fs::copy(&from, &to).is_ok()))
+                        Ok(crate::io_pool::IoValue::Bool(
+                            std::fs::copy(&from, &to).is_ok(),
+                        ))
                     }));
                     return Ok(());
                 }
-                self.stack.push(Value::Bool(self.runtime.os_copy(&from, &to)));
+                self.stack
+                    .push(Value::Bool(self.runtime.os_copy(&from, &to)));
                 Ok(())
             }
 
@@ -3345,11 +3362,11 @@ impl VM {
                     }));
                     return Ok(());
                 }
-                let (status, response_body) = match self.runtime.http_post(&url, &body, &content_type)
-                {
-                    Ok((status, _headers, response_body)) => (status, response_body),
-                    Err(e) => (-1, e),
-                };
+                let (status, response_body) =
+                    match self.runtime.http_post(&url, &body, &content_type) {
+                        Ok((status, _headers, response_body)) => (status, response_body),
+                        Err(e) => (-1, e),
+                    };
                 let arr = vec![Value::Int(status), Value::String(Rc::new(response_body))];
                 self.stack.push(Value::Array(Gc::new(GcCell::new(arr))));
                 Ok(())

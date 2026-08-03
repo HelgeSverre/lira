@@ -1501,7 +1501,10 @@ impl Parser {
             // in the unary-minus arm below).
             TokenKind::BigIntLiteral(m) => Err(format!(
                 "{}:{}: integer literal {} out of range for int (max {})",
-                span.line, span.column, m, i64::MAX
+                span.line,
+                span.column,
+                m,
+                i64::MAX
             )),
             TokenKind::FloatLiteral(n) => Ok(self.expr(ExpressionKind::FloatLiteral(*n), span)),
             TokenKind::StringLiteral(s) => {
@@ -1582,7 +1585,10 @@ impl Parser {
                     }
                     return Err(format!(
                         "{}:{}: integer literal -{} out of range for int (min {})",
-                        lit_span.line, lit_span.column, m, i64::MIN
+                        lit_span.line,
+                        lit_span.column,
+                        m,
+                        i64::MIN
                     ));
                 }
                 let operand = self.parse_precedence(Precedence::Unary)?;

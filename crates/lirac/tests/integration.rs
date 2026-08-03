@@ -834,8 +834,8 @@ main()
 fn test_runtime_error_includes_function_named_call_stack() {
     // A runtime error (division by zero) raised inside `inner`, called by
     // `outer` via a tail call (`return inner()`). The tail-call optimisation
-    // reuses `outer`'s frame for `inner`, so the stack shows `outer` (not
-    // `inner`) innermost, then `main`.
+    // reuses `outer`'s frame for `inner` and updates the frame metadata,
+    // so the stack correctly shows `inner` innermost, then `main`.
     let source = "\
 fn inner() -> int {
     let z = 0
@@ -863,12 +863,12 @@ fn main() {
         first_line
     );
 
-    // outer's frame is reused for inner by TCO. Stack: outer → main.
-    let outer_pos = err.find("at outer").expect("stack should name `outer`");
+    // inner is innermost, main is outermost. outer's frame was reused by TCO.
+    let inner_pos = err.find("at inner").expect("stack should name `inner`");
     let main_pos = err.find("at main").expect("stack should name `main`");
     assert!(
-        outer_pos < main_pos,
-        "Stack should order outer before main, got:\n{}",
+        inner_pos < main_pos,
+        "Stack should order inner before main, got:\n{}",
         err
     );
 }

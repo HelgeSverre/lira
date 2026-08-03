@@ -250,7 +250,12 @@ fn render_stmts(stmts: &[Stmt], out: &mut String, indent: usize, loop_id: &mut u
     for stmt in stmts {
         match stmt {
             Stmt::Assign(lv, e) => {
-                out.push_str(&format!("{}{} = {}\n", pad, render_lval(lv), render_expr(e)));
+                out.push_str(&format!(
+                    "{}{} = {}\n",
+                    pad,
+                    render_lval(lv),
+                    render_expr(e)
+                ));
             }
             Stmt::Compound(lv, op, e) => {
                 out.push_str(&format!(
@@ -350,8 +355,7 @@ fn bool_expr() -> impl Strategy<Value = Bool> {
     ];
     leaf.prop_recursive(2, 8, 2, |inner| {
         prop_oneof![
-            (inner.clone(), inner.clone())
-                .prop_map(|(a, b)| Bool::And(Box::new(a), Box::new(b))),
+            (inner.clone(), inner.clone()).prop_map(|(a, b)| Bool::And(Box::new(a), Box::new(b))),
             (inner.clone(), inner.clone()).prop_map(|(a, b)| Bool::Or(Box::new(a), Box::new(b))),
             inner.prop_map(|a| Bool::Not(Box::new(a))),
         ]
