@@ -32,23 +32,72 @@ pub type ChannelId = u64;
 ///
 /// Cyclic-capable heap variants (`Array`, `Object`, `Closure`) are
 /// garbage-collected via [`gc::Gc`]; the tracing collector reclaims reference
-/// cycles that plain reference counting cannot. The `#[unsafe_ignore_trace]` on
-/// `String` is sound because `IString` (`Rc<String>`) never holds a `Gc` and so
-/// has nothing for the tracer to reach; the remaining scalar variants are
-/// `Copy` and derive `Trace` trivially.
-#[derive(Debug, Clone, Trace, Finalize)]
+/// cycles that plain reference counting cannot. `String` is skipped by the
+/// tracer because `IString` (`Rc<String>`) never holds a `Gc` and so has
+/// nothing for the tracer to reach; the remaining scalar variants are `Copy`
+/// and trace trivially.
+///
+/// `Trace` and `Finalize` are implemented by hand instead of derived: the
+/// derive emits a `Drop` impl that calls `gc::finalizer_safe()` (a
+/// thread-local read) on every single drop. On call-heavy workloads that
+/// overhead profiled at ~11% of VM runtime, and it buys nothing here —
+/// `Finalize::finalize` is a no-op for `Value` (the `Gc` field finalizers are
+/// empty; their real cleanup runs in `Gc::drop`), so the generated `Drop` was
+/// pure overhead. Field drops (Gc unroot, Rc decrement) still run as usual.
+#[derive(Debug, Clone)]
 pub enum Value {
     Null,
     Bool(bool),
     Int(i64),
     Float(f64),
-    String(#[unsafe_ignore_trace] IString), // Interned string for memory efficiency
+    String(IString), // Interned string for memory efficiency
     Array(Gc<GcCell<Vec<Value>>>),
     Object(Gc<GcCell<HashMap<String, Value>>>),
     Function(usize),          // Code offset
     Closure(Gc<ClosureData>), // Closure with captured values
     Fiber(FiberId),           // Fiber handle
     Channel(ChannelId),       // Channel handle
+}
+
+impl Finalize for Value {}
+
+unsafe impl Trace for Value {
+    unsafe fn trace(&self) {
+        match self {
+            Value::Array(a) => a.trace(),
+            Value::Object(o) => o.trace(),
+            Value::Closure(c) => c.trace(),
+            _ => {}
+        }
+    }
+
+    unsafe fn root(&self) {
+        match self {
+            Value::Array(a) => a.root(),
+            Value::Object(o) => o.root(),
+            Value::Closure(c) => c.root(),
+            _ => {}
+        }
+    }
+
+    unsafe fn unroot(&self) {
+        match self {
+            Value::Array(a) => a.unroot(),
+            Value::Object(o) => o.unroot(),
+            Value::Closure(c) => c.unroot(),
+            _ => {}
+        }
+    }
+
+    fn finalize_glue(&self) {
+        Finalize::finalize(self);
+        match self {
+            Value::Array(a) => a.finalize_glue(),
+            Value::Object(o) => o.finalize_glue(),
+            Value::Closure(c) => c.finalize_glue(),
+            _ => {}
+        }
+    }
 }
 
 /// Closure data containing function code and captured values

@@ -135,6 +135,7 @@ pub enum Opcode {
 }
 
 impl Opcode {
+    #[inline(always)]
     pub fn from_byte(byte: u8) -> Option<Self> {
         OPCODE_TABLE[byte as usize]
     }
@@ -142,7 +143,7 @@ impl Opcode {
 
 const N: Option<Opcode> = None;
 
-static OPCODE_TABLE: [Option<Opcode>; 256] = [
+const OPCODE_TABLE: [Option<Opcode>; 256] = [
     // 0x00-0x0F: Stack ops + gaps
     Some(Opcode::Nop),       // 0x00
     Some(Opcode::LoadConst), // 0x01

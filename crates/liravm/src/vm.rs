@@ -1332,10 +1332,8 @@ impl VM {
                 };
                 let object = self.pop()?;
 
-                // Match by reference: `Value` now implements `Drop` (GC derive),
-                // so moving the inner `Gc` out of an owned `Value` is rejected
-                // (E0509). Borrowing the handle and cloning what we need keeps the
-                // `_` arm's `object.type_name()` usable too.
+                // Match by reference: borrowing the handle and cloning what we
+                // need keeps the `_` arm's `object.type_name()` usable too.
                 match &object {
                     Value::Object(obj) => {
                         let value = obj
@@ -1466,12 +1464,10 @@ impl VM {
                 let code_offset = self.read_u16()? as usize;
                 let capture_count = self.read_u8()? as usize;
 
-                // Pop captured values from stack (in reverse order)
-                let mut captures = Vec::with_capacity(capture_count);
-                for _ in 0..capture_count {
-                    captures.push(self.pop()?);
-                }
-                captures.reverse();
+                // The captured values are the top `capture_count` operand-stack
+                // slots in declaration order; drain them in one move.
+                let start = self.stack_top_start(capture_count)?;
+                let captures: Vec<Value> = self.stack.drain(start..).collect();
 
                 let closure = ClosureData {
                     code_offset,
@@ -1835,57 +1831,48 @@ impl VM {
                 let arg_count = self.read_u8()? as usize;
                 let callee = self.pop()?;
 
-                // Match by reference: `Value: Drop` (GC derive) forbids moving the
-                // inner `Gc` out of an owned `Value` (E0509). Cloning the `Gc`
-                // handle inside the arm is a cheap refcount bump.
+                // Match by reference; cloning the `Gc` handle inside the arm is
+                // a cheap root-count bump.
                 match &callee {
                     Value::Function(code_offset) => {
                         let code_offset = *code_offset;
-                        let mut args = Vec::with_capacity(arg_count);
-                        for _ in 0..arg_count {
-                            args.push(self.pop()?);
-                        }
-                        args.reverse();
+                        // The arguments are the top `arg_count` operand-stack
+                        // slots, already in declaration order; move them into
+                        // locals with one drain instead of pop + reverse into a
+                        // temporary Vec (which allocated on every call).
+                        let start = self.stack_top_start(arg_count)?;
 
-                        // Save stack base AFTER popping args - this isolates the caller's stack
+                        // Save stack base AFTER reserving args - this isolates the caller's stack
                         let frame = CallFrame {
                             func_offset: code_offset,
                             return_addr: self.ip,
                             locals_base: self.locals.len(),
                             local_count: arg_count,
-                            stack_base: self.stack.len(),
+                            stack_base: start,
                             captures: None,
                         };
                         self.call_stack.push(frame);
 
-                        for arg in args {
-                            self.locals.push(arg);
-                        }
+                        self.locals.extend(self.stack.drain(start..));
 
                         // Jump to function
                         self.ip = code_offset;
                     }
                     Value::Closure(closure_data) => {
-                        let mut args = Vec::with_capacity(arg_count);
-                        for _ in 0..arg_count {
-                            args.push(self.pop()?);
-                        }
-                        args.reverse();
+                        let start = self.stack_top_start(arg_count)?;
 
-                        // Save stack base AFTER popping args - this isolates the caller's stack
+                        // Save stack base AFTER reserving args - this isolates the caller's stack
                         let frame = CallFrame {
                             func_offset: closure_data.code_offset,
                             return_addr: self.ip,
                             locals_base: self.locals.len(),
                             local_count: arg_count,
-                            stack_base: self.stack.len(),
+                            stack_base: start,
                             captures: Some(closure_data.clone()),
                         };
                         self.call_stack.push(frame);
 
-                        for arg in args {
-                            self.locals.push(arg);
-                        }
+                        self.locals.extend(self.stack.drain(start..));
 
                         // Jump to closure code
                         self.ip = closure_data.code_offset;
@@ -1901,40 +1888,30 @@ impl VM {
                 match &callee {
                     Value::Function(code_offset) => {
                         let code_offset = *code_offset;
-                        let mut args = Vec::with_capacity(arg_count);
-                        for _ in 0..arg_count {
-                            args.push(self.pop()?);
-                        }
-                        args.reverse();
+                        let start = self.stack_top_start(arg_count)?;
 
                         // Reuse the current frame: overwrite locals and jump.
                         // The callee's Return will return to our caller.
                         let locals_base = self.locals_base();
                         self.locals.truncate(locals_base);
-                        for arg in args {
-                            self.locals.push(arg);
-                        }
+                        self.locals.extend(self.stack.drain(start..));
                         if let Some(frame) = self.call_stack.last_mut() {
                             frame.captures = None;
                             frame.func_offset = code_offset;
+                            frame.local_count = arg_count;
                         }
                         self.ip = code_offset;
                     }
                     Value::Closure(closure_data) => {
-                        let mut args = Vec::with_capacity(arg_count);
-                        for _ in 0..arg_count {
-                            args.push(self.pop()?);
-                        }
-                        args.reverse();
+                        let start = self.stack_top_start(arg_count)?;
 
                         let locals_base = self.locals_base();
                         self.locals.truncate(locals_base);
-                        for arg in args {
-                            self.locals.push(arg);
-                        }
+                        self.locals.extend(self.stack.drain(start..));
                         if let Some(frame) = self.call_stack.last_mut() {
                             frame.captures = Some(closure_data.clone());
                             frame.func_offset = closure_data.code_offset;
+                            frame.local_count = arg_count;
                         }
                         self.ip = closure_data.code_offset;
                     }
@@ -2005,9 +1982,7 @@ impl VM {
                 let type_id = self.read_u8()?;
                 let value = self.pop()?;
                 let result = match type_id {
-                    // Cast to int. Match by reference: `Value` now implements
-                    // `Drop` (via the GC derive), so moving a field out of an
-                    // owned `Value` is rejected (E0509).
+                    // Cast to int.
                     2 => match &value {
                         Value::Int(n) => Value::Int(*n),
                         Value::Float(f) => Value::Int(*f as i64),
@@ -2463,6 +2438,7 @@ impl VM {
 
     // Helper methods
 
+    #[inline(always)]
     fn pop(&mut self) -> Result<Value, String> {
         let stack_base = self.stack_base();
         if self.stack.len() <= stack_base {
@@ -2473,7 +2449,23 @@ impl VM {
             .ok_or_else(|| "Stack underflow".to_string())
     }
 
+    /// Start index of the top `count` operand-stack values, or an underflow
+    /// error. Used with `Vec::drain` to move argument/capture blocks out of
+    /// the stack in one go (they are already in declaration order), avoiding
+    /// a per-call temporary Vec plus `reverse()`. The check is against the
+    /// current frame's stack base so malformed bytecode can never drain into
+    /// the caller's stack slots.
+    #[inline(always)]
+    fn stack_top_start(&self, count: usize) -> Result<usize, String> {
+        let base = self.stack_base();
+        if self.stack.len() < base + count {
+            return Err("Stack underflow".to_string());
+        }
+        Ok(self.stack.len() - count)
+    }
+
     /// Get the stack base for the current frame (to protect caller's values)
+    #[inline(always)]
     fn stack_base(&self) -> usize {
         self.call_stack.last().map(|f| f.stack_base).unwrap_or(0)
     }
@@ -2501,29 +2493,36 @@ fn pop_float_fast(stack: &mut Vec<Value>) -> Result<f64, String> {
 }
 
 impl VM {
+    #[inline(always)]
     fn read_u8(&mut self) -> Result<u8, String> {
-        if self.ip >= self.program.code.len() {
-            return Err("Unexpected end of bytecode".to_string());
-        }
-        let value = self.program.code[self.ip];
+        // `get` gives a single bounds check instead of indexing + separate len check.
+        let value = *self
+            .program
+            .code
+            .get(self.ip)
+            .ok_or_else(|| "Unexpected end of bytecode".to_string())?;
         self.ip += 1;
         Ok(value)
     }
 
+    #[inline(always)]
     fn read_u16(&mut self) -> Result<u16, String> {
-        if self.ip + 2 > self.program.code.len() {
-            return Err("Unexpected end of bytecode".to_string());
-        }
-        let lo = self.program.code[self.ip] as u16;
-        let hi = self.program.code[self.ip + 1] as u16;
-        self.ip += 2;
-        Ok(lo | (hi << 8))
+        let ip = self.ip;
+        let bytes = self
+            .program
+            .code
+            .get(ip..ip + 2)
+            .ok_or_else(|| "Unexpected end of bytecode".to_string())?;
+        self.ip = ip + 2;
+        Ok(u16::from_le_bytes([bytes[0], bytes[1]]))
     }
 
+    #[inline(always)]
     fn read_i16(&mut self) -> Result<i16, String> {
         Ok(self.read_u16()? as i16)
     }
 
+    #[inline(always)]
     fn locals_base(&self) -> usize {
         self.call_stack.last().map(|f| f.locals_base).unwrap_or(0)
     }
@@ -2650,9 +2649,8 @@ impl VM {
             // Single argument: error reads "NAME requires <type> argument".
             ($name:literal, $a:ident $b:ident => $ret:ident : $method:ident) => {{
                 let $b = self.pop()?;
-                // Match by reference: `Value: Drop` (GC derive) forbids moving the
-                // inner value out of an owned `Value` (E0509). `sys_call!` derefs
-                // the resulting reference bindings back to the method's arg types.
+                // Match by reference; `sys_call!` derefs the resulting reference
+                // bindings back to the method's arg types.
                 match &$b {
                     sys_pat!($a, $b) => {
                         let result = self.runtime.$method(sys_call!($a, $b));
