@@ -137,6 +137,32 @@ function's signature are derived from the same recorded `Type::Function`. They
 have to be — Cranelift cannot check an indirect call, so a mismatch returns
 whatever happened to be in the return register rather than failing to compile.
 
+## Optionals and Result
+
+`string?` is a `string` that may be null — the pointer already has a spare
+value. `int?` does not: every bit pattern of an `i64` is a valid `int`. Those
+wrap their payload in a one-slot heap box, and null means none.
+
+```
+int?    →  null  |  ┌ header ┐
+                    │ slot   │  the int
+                    └────────┘
+string? →  null  |  the string pointer itself
+```
+
+`T` flows into `T?` implicitly (boxing where needed) and back out where the
+checker has established the value is present; unwrapping a null reports rather
+than reading through it. `a ?? b` yields the unwrapped type, so `get_null() ?? 0`
+is an `int`.
+
+`Result<T, E>` is a tag and one payload slot, but unlike a user enum its payload
+types come from the `Result<T, E>` at each use rather than from one shared
+declaration. That is why `Result::Ok(x)` takes its type from the context it is
+returned into.
+
+`expr?` propagates both: an absent optional returns null from the enclosing
+function, and an `Err` is handed back to the caller unchanged.
+
 ## Fibers: the interesting part
 
 The bytecode VM can suspend a fiber by saving an instruction pointer, because
@@ -245,17 +271,19 @@ ranges, ranges as values, `break`/`continue`, blocks as expressions;
 patterns, plus guards; structs with nested and narrow fields; enums with
 payloads and `__enum`/`__variant` reflection; tuples, tuple patterns and
 destructuring `let`; lambdas, closures with captures, and functions as values;
+optionals including boxed scalar optionals, `??`, `?.` and `?`; `Result<T, E>`
+with typed payloads;
 arrays with indexing, assignment, `push`, `pop` and `len`; strings with
 concatenation, interpolation, comparison and `len`; `spawn`, `chan`, `send`,
 `recv`, `close`, `fiber_yield`, `fiber_id`.
 
-Of the repository's 124 examples, 81 compile natively and produce byte-identical
+Of the repository's 124 examples, 86 compile natively and produce byte-identical
 output to the bytecode VM. Six more compile and run correctly but cannot be
 compared byte-for-byte: they print timestamps, random UUIDs, or `env_args`,
 which differ between an interpreted script and a compiled binary by nature. The
 rest use constructs listed below and are declined with a reason.
 
-42 examples are pinned as regression tests in `tests/parity.rs`, and every
+46 examples are pinned as regression tests in `tests/parity.rs`, and every
 example that type-checks is required to either compile or be declined cleanly —
 an internal error fails the suite.
 
@@ -263,9 +291,7 @@ an internal error fails the suite.
 
 | Not lowered | Notes |
 |---|---|
-| Maps, `Result` | Needs a hashed representation and a built-in enum |
-| `T?` where `T` is not a reference | No spare bit pattern for a null `int` |
-| Optional chaining, `?` | Follows from optionals |
+| Maps | Needs a hashed representation in the runtime |
 | Class inheritance | Needs prefixed layouts and a vtable |
 | Generics | Type-erased in the VM; native wants monomorphisation |
 | `select` | Needs multi-channel parking |
@@ -289,6 +315,9 @@ Two more limits worth knowing:
 - `print` terminates the line, matching the VM's `Print` opcode, which always
   appends a newline. The runtime keeps newline-free entry points for when that
   is fixed.
+- A function whose body ends in a bare expression returns it. The VM returns
+  null instead, so `examples/null_and_optionals.li` differs — the native result
+  is the one the example's own comments expect.
 
 ## Platform support
 

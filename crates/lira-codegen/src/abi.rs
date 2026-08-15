@@ -70,27 +70,16 @@ pub fn repr_of(ty: &Type) -> CodegenResult<Repr> {
         // A channel handle comes back from the checker as `Any`, and so does an
         // erased generic. Both are pointer-shaped at runtime.
         Type::Any | Type::TypeParam(_) | Type::Interface(_) => Repr::Ref,
-        // `T?` is a nullable pointer, which only works when `T` is already
-        // pointer-shaped; a null `int` has no bit pattern to spare.
-        Type::Optional(inner) => {
-            let inner_repr = repr_of(inner)?;
-            if !inner_repr.is_ref() {
-                return Err(CodegenError::unsupported(format!(
-                    "optional `{}?` wraps a non-reference type; the native backend has no niche for it yet",
-                    inner.display_name()
-                )));
-            }
-            Repr::Ref
-        }
+        // `T?` is always a nullable pointer. When `T` is already pointer-shaped
+        // that is the pointer itself; a scalar has no bit pattern to spare for
+        // null, so it is boxed (see `optional_is_boxed`).
+        Type::Optional(_) => Repr::Ref,
         // A tuple is an array of uniform slots, as in the bytecode VM. The
         // element types differ per position, but `Type::Tuple` carries them, so
         // each slot is still read back at its declared type.
         Type::Tuple(_) => Repr::Ref,
-        Type::Result { .. } => {
-            return Err(CodegenError::unsupported(
-                "`Result` values are not lowered by the native backend yet",
-            ))
-        }
+        // `Result` is the built-in tagged union registered in `LayoutMap`.
+        Type::Result { .. } => Repr::Ref,
         // A function value is a closure object: code pointer plus captures.
         Type::Function { .. } => Repr::Ref,
         // An unconstrained type variable is what an empty literal such as
@@ -102,6 +91,17 @@ pub fn repr_of(ty: &Type) -> CodegenResult<Repr> {
             ))
         }
     })
+}
+
+/// Whether `T?` stores its payload in a box rather than being the payload
+/// pointer itself.
+///
+/// A `string?` is just a `string` that may be null. An `int?` cannot be: every
+/// bit pattern of an `i64` is a valid `int`, so there is no spare value to mean
+/// "none". Those wrap their payload in a one-slot heap cell, and null means
+/// none.
+pub fn optional_is_boxed(inner: &Type) -> bool {
+    !repr_of(inner).map(|r| r.is_ref()).unwrap_or(false)
 }
 
 /// True when the type's values are unsigned, which decides between `sextend`
@@ -165,8 +165,17 @@ mod tests {
     }
 
     #[test]
-    fn optional_scalars_are_rejected_rather_than_mis_lowered() {
-        assert!(repr_of(&Type::Optional(Box::new(Type::Int))).is_err());
-        assert!(repr_of(&Type::Optional(Box::new(Type::String))).is_ok());
+    fn optionals_are_pointers_and_scalars_among_them_are_boxed() {
+        assert!(repr_of(&Type::Optional(Box::new(Type::Int)))
+            .unwrap()
+            .is_ref());
+        assert!(repr_of(&Type::Optional(Box::new(Type::String)))
+            .unwrap()
+            .is_ref());
+        // A reference is already nullable; a scalar needs a box around it.
+        assert!(optional_is_boxed(&Type::Int));
+        assert!(optional_is_boxed(&Type::Float));
+        assert!(!optional_is_boxed(&Type::String));
+        assert!(!optional_is_boxed(&Type::Array(Box::new(Type::Int))));
     }
 }

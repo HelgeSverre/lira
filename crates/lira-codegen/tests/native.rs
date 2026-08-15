@@ -884,6 +884,128 @@ fn a_captured_name_shadowed_inside_the_body_is_not_captured() {
 }
 
 // ---------------------------------------------------------------------- //
+// Optionals and Result                                                    //
+// ---------------------------------------------------------------------- //
+
+#[test]
+fn scalar_optionals_are_boxed_so_null_has_a_representation() {
+    assert_lines(
+        r#"
+        fn get_value() -> int? { return 42 }
+        fn get_null() -> int? { return null }
+        fn get_string() -> string? { return null }
+        println(get_value() ?? 0)
+        println(get_null() ?? 0)
+        println(get_string() ?? "default")
+        println(get_value())
+        println(get_null())
+        println("value: " + get_value())
+        println("value: " + get_null())
+        "#,
+        &[
+            "42",
+            "0",
+            "default",
+            "42",
+            "null",
+            "value: 42",
+            "value: null",
+        ],
+    );
+}
+
+#[test]
+fn the_try_operator_propagates_an_absent_optional() {
+    assert_lines(
+        r#"
+        fn get_some() -> int? { return 42 }
+        fn get_none() -> int? { return null }
+        fn try_some() -> int? {
+            let x = get_some()?
+            return x + 1
+        }
+        fn try_none() -> int? {
+            let x = get_none()?
+            return x + 1
+        }
+        println(try_some())
+        println(try_none())
+        "#,
+        &["43", "null"],
+    );
+}
+
+#[test]
+fn result_carries_the_payload_types_from_its_context() {
+    assert_lines(
+        r#"
+        fn divide(a: int, b: int) -> Result<int, string> {
+            if b == 0 {
+                return Result::Err("division by zero")
+            }
+            return Result::Ok(a / b)
+        }
+        fn calculate(x: int, y: int) -> Result<int, string> {
+            let result = divide(x, y)?
+            return Result::Ok(result * 10)
+        }
+        match calculate(100, 10) {
+            Result::Ok(v) => println(v),
+            Result::Err(e) => println("error: " + e)
+        }
+        match calculate(1, 0) {
+            Result::Ok(v) => println(v),
+            Result::Err(e) => println("error: " + e)
+        }
+        "#,
+        &["100", "error: division by zero"],
+    );
+}
+
+#[test]
+fn optional_chaining_short_circuits_on_null() {
+    assert_lines(
+        r#"
+        struct Person { name: string, age: int }
+        let p = Person { name: "Alice", age: 30 }
+        println("valid: " + p?.name)
+        println("null: " + null?.name)
+        "#,
+        &["valid: Alice", "null: null"],
+    );
+}
+
+#[test]
+fn null_coalescing_leaves_a_non_nullable_value_alone() {
+    assert_lines(
+        r#"
+        println(null ?? 42)
+        println(100 ?? 42)
+        "#,
+        &["42", "100"],
+    );
+}
+
+#[test]
+fn a_function_body_may_end_in_a_bare_expression() {
+    assert_lines(
+        r#"
+        fn describe(x: int) -> string {
+            match x {
+                0 => "zero",
+                1 => "one",
+                _ => "other"
+            }
+        }
+        println(describe(0))
+        println(describe(1))
+        println(describe(42))
+        "#,
+        &["zero", "one", "other"],
+    );
+}
+
+// ---------------------------------------------------------------------- //
 // Diagnostics                                                             //
 // ---------------------------------------------------------------------- //
 

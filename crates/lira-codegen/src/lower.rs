@@ -29,11 +29,12 @@ use lirac::ast::{
 use lirac::checker::Type;
 use lirac::sema::SemanticTables;
 
-use crate::abi::{is_unsigned, repr_of, Repr};
+use crate::abi::{is_unsigned, optional_is_boxed, repr_of, Repr};
 use crate::error::{CodegenError, CodegenResult};
 use crate::layout::{
     self, storage_size, LayoutMap, CLOSURE_CAPTURES_OFFSET, CLOSURE_CODE_OFFSET,
-    CLOSURE_COUNT_OFFSET, ENUM_PAYLOAD_OFFSET, ENUM_TAG_OFFSET, HEADER_SIZE, SLOT_SIZE,
+    CLOSURE_COUNT_OFFSET, ENUM_PAYLOAD_OFFSET, ENUM_TAG_OFFSET, HEADER_SIZE, OPTIONAL_SLOT_OFFSET,
+    SLOT_SIZE,
 };
 use crate::runtime;
 
@@ -341,6 +342,14 @@ impl<'a> Lowerer<'a> {
                 other => other,
             })?;
 
+            // A name can be declared more than once at the top level — two
+            // merged modules, or a `var` reassigned by redeclaration. The first
+            // cell stands; later declarations store into it.
+            if let Some(existing) = self.globals.get(&name) {
+                known.insert(name.clone(), existing.ty.clone());
+                continue;
+            }
+
             let symbol = format!("lira__global__{}", name);
             let mut description = DataDescription::new();
             // Every global is one 8-byte cell: a scalar, or a pointer to a heap
@@ -451,6 +460,10 @@ impl<'a> Lowerer<'a> {
     /// they have not distinguished it from an enum; settle that here.
     fn normalize(&self, ty: Type) -> Type {
         match ty {
+            Type::Result { ok_type, err_type } => Type::Result {
+                ok_type: Box::new(self.normalize(*ok_type)),
+                err_type: Box::new(self.normalize(*err_type)),
+            },
             Type::Struct(name) | Type::Class(name) | Type::Enum(name) => self.user_type(&name),
             Type::Array(inner) => Type::Array(Box::new(self.normalize(*inner))),
             Type::Optional(inner) => Type::Optional(Box::new(self.normalize(*inner))),
@@ -622,21 +635,28 @@ impl<'a> Lowerer<'a> {
                 gen.declare_local(name, ty.clone(), Some(value))?;
             }
 
-            let terminated = gen.lower_block(decl.body)?;
+            // A body may end in a bare expression rather than a `return` —
+            // `fn f() -> string { match x { ... } }` is the common shape.
+            let expected = (!matches!(ret_ty, Type::Void)).then(|| ret_ty.clone());
+            let (tail, terminated) = gen.lower_block_value(decl.body, expected.as_ref())?;
             if !terminated {
-                // Falling off the end of a value-returning function is a checker
-                // error; here it can only mean a `void` function.
-                if matches!(ret_ty, Type::Void) {
-                    gen.builder.ins().return_(&[]);
-                } else {
-                    return Err(CodegenError::unsupported_at(
-                        format!(
-                            "`{}` can finish without returning a `{}`",
-                            decl.name,
-                            ret_ty.display_name()
-                        ),
-                        decl.span,
-                    ));
+                match (&ret_ty, tail) {
+                    (Type::Void, _) => {
+                        gen.builder.ins().return_(&[]);
+                    }
+                    (_, Some(value)) => {
+                        gen.builder.ins().return_(&[value]);
+                    }
+                    (_, None) => {
+                        return Err(CodegenError::unsupported_at(
+                            format!(
+                                "`{}` can finish without returning a `{}`",
+                                decl.name,
+                                ret_ty.display_name()
+                            ),
+                            decl.span,
+                        ))
+                    }
                 }
             }
             gen.pop_scope();
@@ -961,7 +981,7 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
     /// block (a `return`, `break` or `continue`), so the caller knows not to
     /// append a fall-through jump.
     fn lower_block(&mut self, block: &AstBlock) -> CodegenResult<bool> {
-        Ok(self.lower_block_value(block)?.1)
+        Ok(self.lower_block_value(block, None)?.1)
     }
 
     /// Lower a block and return the value of its trailing expression, if it has
@@ -969,7 +989,11 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
     ///
     /// `let status = if c { "yes" } else { "no" }` puts a block in value
     /// position, so the last expression statement in a block is its result.
-    fn lower_block_value(&mut self, block: &AstBlock) -> CodegenResult<(Option<Value>, bool)> {
+    fn lower_block_value(
+        &mut self,
+        block: &AstBlock,
+        expected: Option<&Type>,
+    ) -> CodegenResult<(Option<Value>, bool)> {
         self.push_scope();
         let mut terminated = false;
         let mut value = None;
@@ -982,7 +1006,10 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
             }
             if index == last {
                 if let StatementKind::Expression(expr) = &stmt.kind {
-                    value = self.lower_expr(expr)?;
+                    value = match expected {
+                        Some(expected) => self.lower_expr_typed(expr, expected)?,
+                        None => self.lower_expr(expr)?,
+                    };
                     terminated = self.terminated;
                     break;
                 }
@@ -1459,6 +1486,21 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
         // pointer and failing to convert it back.
         if !matches!(expected, Type::Any | Type::Unknown) {
             match &expr.kind {
+                // `return Result::Ok(x)` — the variant's payload type comes from
+                // the `Result<T, E>` the context expects, not from the call.
+                ExpressionKind::Call { callee, args, .. } => {
+                    if let Some(value) = self.lower_result_construction(callee, args, expected)? {
+                        return Ok(Some(value));
+                    }
+                }
+                ExpressionKind::EnumVariant {
+                    enum_name,
+                    variant_name,
+                } if enum_name == layout::RESULT_TYPE => {
+                    return self
+                        .lower_result_variant(variant_name, None, expected, &expr.span)
+                        .map(Some)
+                }
                 ExpressionKind::Match { subject, arms } => {
                     return self.lower_match(subject, arms, expected, &expr.span)
                 }
@@ -1539,6 +1581,20 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
         to: &Type,
         span: &Span,
     ) -> CodegenResult<Value> {
+        // `T` flows into `T?` implicitly, and back out where the checker has
+        // already established the value is present.
+        if let Type::Optional(inner) = to {
+            if !matches!(from, Type::Optional(_) | Type::Null) {
+                return self.wrap_optional(value, from, inner, span);
+            }
+        }
+        if let Type::Optional(inner) = from {
+            if !matches!(to, Type::Optional(_)) {
+                let unwrapped = self.unwrap_optional(value, inner)?;
+                return self.coerce(unwrapped, inner, to, span);
+            }
+        }
+
         let from_repr = repr_of(from)?;
         let to_repr = repr_of(to)?;
         if from_repr == to_repr {
@@ -1717,7 +1773,7 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
             }
 
             ExpressionKind::Block(block) => {
-                let (value, terminated) = self.lower_block_value(block)?;
+                let (value, terminated) = self.lower_block_value(block, None)?;
                 self.terminated = terminated;
                 Ok(value)
             }
@@ -1783,18 +1839,14 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
             } => self
                 .lower_range_value(start.as_deref(), end.as_deref(), *inclusive, &expr.span)
                 .map(Some),
-            ExpressionKind::Try(_) => Err(CodegenError::unsupported_at(
-                "the `?` operator is not lowered by the native backend yet",
-                &expr.span,
-            )),
+            ExpressionKind::Try(inner) => self.lower_try(inner, &expr.span).map(Some),
             ExpressionKind::Select(_) => Err(CodegenError::unsupported_at(
                 "`select` is not lowered by the native backend yet",
                 &expr.span,
             )),
-            ExpressionKind::OptionalAccess { .. } => Err(CodegenError::unsupported_at(
-                "optional chaining is not lowered by the native backend yet",
-                &expr.span,
-            )),
+            ExpressionKind::OptionalAccess { object, field } => self
+                .lower_optional_access(object, field, &expr.span)
+                .map(Some),
             ExpressionKind::TypeCheck { .. } => Err(CodegenError::unsupported_at(
                 "runtime type checks are not lowered by the native backend yet",
                 &expr.span,
@@ -2254,26 +2306,54 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
         span: &Span,
     ) -> CodegenResult<Value> {
         let left_ty = self.ty_of(left)?;
-        if !repr_of(&left_ty)?.is_ref() {
-            return Err(CodegenError::unsupported_at(
-                "`??` needs a nullable reference on the left",
-                span,
-            ));
+        let _ = span;
+        match left_ty.clone() {
+            // The result is the unwrapped type: `get_null() ?? 0` is an `int`.
+            Type::Optional(inner) => self.lower_coalesce(left, &left_ty, &inner, right),
+            // A `null` literal is never present, so the right side always wins.
+            Type::Null => {
+                let right_ty = self.ty_of(right)?;
+                self.lower_expr_value(right, &right_ty)
+            }
+            // A plain reference is nullable as it stands.
+            ty if repr_of(&ty)?.is_ref() => self.lower_coalesce(left, &ty, &ty, right),
+            // Anything else can never be null, so the left side always wins.
+            ty => self.lower_expr_value(left, &ty),
         }
-        let ptr = self.pointer_ty();
-        let l = self.lower_expr_value(left, &left_ty)?;
+    }
+
+    /// `a ?? b`, evaluating `b` only when `a` is null.
+    ///
+    /// `result_ty` is what the expression yields — for `int? ?? 0` that is
+    /// `int`, so the present branch unwraps the box.
+    fn lower_coalesce(
+        &mut self,
+        left: &Expression,
+        left_ty: &Type,
+        result_ty: &Type,
+        right: &Expression,
+    ) -> CodegenResult<Value> {
+        let l = self.lower_expr_value(left, left_ty)?;
+        let present = self.builder.create_block();
         let rhs_block = self.builder.create_block();
         let merge = self.builder.create_block();
-        self.builder.append_block_param(merge, ptr);
+        let clif = repr_of(result_ty)?
+            .clif(self.pointer_ty())
+            .ok_or_else(|| CodegenError::internal("`??` cannot produce a `void`"))?;
+        self.builder.append_block_param(merge, clif);
 
         let is_null = self.builder.ins().icmp_imm_s(IntCC::Equal, l, 0);
         self.builder
             .ins()
-            .brif(is_null, rhs_block, &[], merge, &[l.into()]);
+            .brif(is_null, rhs_block, &[], present, &[]);
         self.terminated = true;
 
+        self.goto(present);
+        let unwrapped = self.coerce(l, left_ty, result_ty, &left.span)?;
+        self.jump_to(merge, &[unwrapped]);
+
         self.goto(rhs_block);
-        let r = self.lower_expr_value(right, &left_ty)?;
+        let r = self.lower_expr_value(right, result_ty)?;
         self.jump_to(merge, &[r]);
 
         self.goto(merge);
@@ -2346,11 +2426,17 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
     }
 
     fn value_to_string(&mut self, value: Value, ty: &Type, span: &Span) -> CodegenResult<Value> {
-        // `string?` is the same pointer as `string`; the runtime renders a null
-        // one as "null".
+        // A boxed optional renders as its payload, or as "null" when absent.
+        if let Type::Optional(inner) = ty {
+            if optional_is_boxed(inner) {
+                return self.optional_to_string(value, inner, span);
+            }
+        }
+        // `null` and `string?` are both the string path: the runtime renders a
+        // null pointer as "null".
         let ty = strip_optional(ty);
         Ok(match repr_of(ty)? {
-            _ if matches!(ty, Type::String) => value,
+            _ if matches!(ty, Type::String | Type::Null) => value,
             Repr::Int => self.call_rt_value("lira_rt_int_to_str", &[value])?,
             Repr::Float => self.call_rt_value("lira_rt_float_to_str", &[value])?,
             Repr::Bool => self.call_rt_value("lira_rt_bool_to_str", &[value])?,
@@ -2364,6 +2450,36 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
                 ))
             }
         })
+    }
+
+    /// Render a boxed optional: its payload when present, "null" when not.
+    fn optional_to_string(
+        &mut self,
+        value: Value,
+        inner: &Type,
+        span: &Span,
+    ) -> CodegenResult<Value> {
+        let ptr = self.pointer_ty();
+        let present = self.builder.create_block();
+        let absent = self.builder.create_block();
+        let merge = self.builder.create_block();
+        self.builder.append_block_param(merge, ptr);
+
+        let is_null = self.builder.ins().icmp_imm_s(IntCC::Equal, value, 0);
+        self.builder.ins().brif(is_null, absent, &[], present, &[]);
+        self.terminated = true;
+
+        self.goto(present);
+        let payload = self.unwrap_optional(value, inner)?;
+        let rendered = self.value_to_string(payload, inner, span)?;
+        self.jump_to(merge, &[rendered]);
+
+        self.goto(absent);
+        let null_text = self.string_constant("null")?;
+        self.jump_to(merge, &[null_text]);
+
+        self.goto(merge);
+        Ok(self.builder.block_params(merge)[0])
     }
 
     fn lower_cast(
@@ -2763,11 +2879,17 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
                 // opcode always appends a newline, and the examples' expected
                 // output depends on it. The runtime keeps separate
                 // newline-free entry points for when that is fixed.
-                let symbol = match repr_of(&ty)? {
-                    _ if matches!(ty, Type::String) => "lira_rt_println_str",
-                    Repr::Int => "lira_rt_println_int",
-                    Repr::Float => "lira_rt_println_float",
-                    Repr::Bool => "lira_rt_println_bool",
+                let (symbol, value) = match repr_of(&ty)? {
+                    _ if matches!(ty, Type::String | Type::Null) => ("lira_rt_println_str", value),
+                    Repr::Int => ("lira_rt_println_int", value),
+                    Repr::Float => ("lira_rt_println_float", value),
+                    Repr::Bool => ("lira_rt_println_bool", value),
+                    // An optional renders through the string path, which knows
+                    // how to say "null".
+                    _ if matches!(arg_ty, Type::Optional(_)) => (
+                        "lira_rt_println_str",
+                        self.value_to_string(value, &arg_ty, span)?,
+                    ),
                     _ => {
                         return Err(CodegenError::unsupported_at(
                             format!(
@@ -3485,6 +3607,18 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
         // Patterns spell variants either fully (`Option::Some`) or bare
         // (`Some`); the enum comes from the subject's type either way.
         let variant_name = name.rsplit("::").next().unwrap_or(name);
+        if let Type::Result { ok_type, err_type } = subject_ty {
+            let (ok_type, err_type) = ((**ok_type).clone(), (**err_type).clone());
+            return self.test_result_constructor(
+                variant_name,
+                fields,
+                subject,
+                &ok_type,
+                &err_type,
+                fail,
+                span,
+            );
+        }
         let Type::Enum(enum_name) = subject_ty else {
             return Err(CodegenError::unsupported_at(
                 format!(
@@ -3809,6 +3943,23 @@ fn infer_with(
 
         ExpressionKind::Identifier(name) => resolve(name)?,
 
+        // `object?.field` yields the field type made optional.
+        ExpressionKind::OptionalAccess { object, field } => {
+            let object_ty = infer_or_checked_with(l, resolve, object)?;
+            if matches!(object_ty, Type::Null) {
+                return Some(Type::Null);
+            }
+            let inner = match &object_ty {
+                Type::Optional(inner) => (**inner).clone(),
+                other => other.clone(),
+            };
+            let (Type::Struct(name) | Type::Class(name)) = inner else {
+                return None;
+            };
+            let layout = l.layouts.structs.get(&name)?;
+            Type::Optional(Box::new(l.normalize(layout.field(field)?.ty.clone())))
+        }
+
         ExpressionKind::FieldAccess { object, field } => {
             match infer_or_checked_with(l, resolve, object)? {
                 Type::Struct(name) | Type::Class(name) => {
@@ -3997,13 +4148,26 @@ fn infer_or_checked_with(
     match l.sema.expr_types.get(&expr.id) {
         Some(ty) if !matches!(ty, Type::Unknown | Type::TypeVar(_)) => {
             let recorded = l.normalize(ty.clone());
-            if matches!(recorded, Type::Any) {
+            if is_uninformative(&recorded) {
                 infer_with(l, resolve, expr).or(Some(recorded))
             } else {
                 Some(recorded)
             }
         }
         _ => infer_with(l, resolve, expr),
+    }
+}
+
+/// Whether a recorded type says nothing native code can act on.
+///
+/// `any` is the obvious one. `any?` is the same story one level in: the checker
+/// records `Optional(Any)` for every `?.`, so taking it at face value would lose
+/// the field's real type.
+fn is_uninformative(ty: &Type) -> bool {
+    match ty {
+        Type::Any => true,
+        Type::Optional(inner) => is_uninformative(inner),
+        _ => false,
     }
 }
 
@@ -4820,5 +4984,342 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
         } else {
             result
         })
+    }
+}
+
+// ====================================================================== //
+// Optionals                                                               //
+// ====================================================================== //
+
+impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
+    /// Turn a `T` into a `T?`.
+    ///
+    /// A reference is already nullable and passes straight through. A scalar
+    /// goes into a one-slot box, because every bit pattern of an `i64` is a
+    /// valid `int` and none of them can mean "none".
+    fn wrap_optional(
+        &mut self,
+        value: Value,
+        from: &Type,
+        inner: &Type,
+        span: &Span,
+    ) -> CodegenResult<Value> {
+        if !optional_is_boxed(inner) {
+            return self.coerce(value, from, inner, span);
+        }
+        let payload = self.coerce(value, from, inner, span)?;
+        let slot = self.value_to_slot(payload, inner)?;
+        let box_object =
+            self.alloc_object(OPTIONAL_SLOT_OFFSET + SLOT_SIZE, runtime::KIND_STRUCT)?;
+        self.builder.ins().store(
+            MemFlagsData::trusted(),
+            slot,
+            box_object,
+            OPTIONAL_SLOT_OFFSET,
+        );
+        Ok(box_object)
+    }
+
+    /// Read the payload out of a `T?` that is known to be present.
+    ///
+    /// A null here is a bug in the program rather than in the lowering — the
+    /// checker allows the conversion only where the value has been tested — so
+    /// it reports rather than reading through a null pointer.
+    fn unwrap_optional(&mut self, value: Value, inner: &Type) -> CodegenResult<Value> {
+        if !optional_is_boxed(inner) {
+            return Ok(value);
+        }
+        let present = self.builder.create_block();
+        let missing = self.builder.create_block();
+        let is_null = self.builder.ins().icmp_imm_s(IntCC::Equal, value, 0);
+        self.builder.ins().brif(is_null, missing, &[], present, &[]);
+        self.terminated = true;
+
+        self.goto(missing);
+        let message = self.string_constant("unwrapped a null optional")?;
+        self.call_rt("lira_rt_abort", &[message])?;
+        self.builder.ins().trap(unreachable_trap());
+        self.terminated = true;
+
+        self.goto(present);
+        let slot = self.builder.ins().load(
+            types::I64,
+            MemFlagsData::trusted(),
+            value,
+            OPTIONAL_SLOT_OFFSET,
+        );
+        self.slot_to_value(slot, inner)
+    }
+
+    /// `expr?` — return early from the enclosing function when `expr` is
+    /// missing, otherwise carry on with the value it holds.
+    ///
+    /// Works for both `T?` and `Result`: the first propagates null, the second
+    /// propagates the `Err` variant unchanged.
+    fn lower_try(&mut self, inner_expr: &Expression, span: &Span) -> CodegenResult<Value> {
+        let subject_ty = self.ty_of(inner_expr)?;
+        let subject = self.lower_expr_value(inner_expr, &subject_ty)?;
+
+        match &subject_ty {
+            Type::Optional(inner) => {
+                let inner = (**inner).clone();
+                let present = self.builder.create_block();
+                let missing = self.builder.create_block();
+                let is_null = self.builder.ins().icmp_imm_s(IntCC::Equal, subject, 0);
+                self.builder.ins().brif(is_null, missing, &[], present, &[]);
+                self.terminated = true;
+
+                // Propagate the absence: the enclosing function returns null.
+                self.goto(missing);
+                let ret_ty = self.return_ty.clone();
+                if matches!(ret_ty, Type::Void) {
+                    self.builder.ins().return_(&[]);
+                } else {
+                    let null = self.zero_of(repr_of(&ret_ty)?);
+                    self.builder.ins().return_(&[null]);
+                }
+                self.terminated = true;
+
+                self.goto(present);
+                self.unwrap_optional(subject, &inner)
+            }
+
+            Type::Result { ok_type, .. } => {
+                let ok_type = (**ok_type).clone();
+                let ok_present = self.builder.create_block();
+                let is_err = self.builder.create_block();
+                let tag = self.builder.ins().load(
+                    types::I64,
+                    MemFlagsData::trusted(),
+                    subject,
+                    ENUM_TAG_OFFSET,
+                );
+                let is_ok = self.builder.ins().icmp_imm_s(IntCC::Equal, tag, 0);
+                self.builder.ins().brif(is_ok, ok_present, &[], is_err, &[]);
+                self.terminated = true;
+
+                // Hand the `Err` back to the caller untouched.
+                self.goto(is_err);
+                self.builder.ins().return_(&[subject]);
+                self.terminated = true;
+
+                self.goto(ok_present);
+                let slot = self.builder.ins().load(
+                    types::I64,
+                    MemFlagsData::trusted(),
+                    subject,
+                    ENUM_PAYLOAD_OFFSET,
+                );
+                self.slot_to_value(slot, &ok_type)
+            }
+
+            other => Err(CodegenError::unsupported_at(
+                format!(
+                    "`?` needs an optional or a `Result`, not a `{}`",
+                    other.display_name()
+                ),
+                span,
+            )),
+        }
+    }
+
+    /// `object?.field` — the field when `object` is present, null when it is not.
+    fn lower_optional_access(
+        &mut self,
+        object: &Expression,
+        field: &str,
+        span: &Span,
+    ) -> CodegenResult<Value> {
+        let object_ty = self.ty_of(object)?;
+        // `null?.name` is null, whatever the field would have been.
+        if matches!(object_ty, Type::Null) {
+            self.lower_expr(object)?;
+            return Ok(self.zero_of(Repr::Ref));
+        }
+        let inner = match &object_ty {
+            Type::Optional(inner) => (**inner).clone(),
+            // Chaining on a plain reference is allowed; it can still be null.
+            other => other.clone(),
+        };
+        if optional_is_boxed(&inner) {
+            return Err(CodegenError::unsupported_at(
+                "`?.` needs something with fields on the left",
+                span,
+            ));
+        }
+
+        let subject = self.lower_expr_value(object, &object_ty)?;
+        let (field_ty, offset) = {
+            let (Type::Struct(name) | Type::Class(name)) = &inner else {
+                return Err(CodegenError::unsupported_at(
+                    format!("`{}` has no fields", inner.display_name()),
+                    span,
+                ));
+            };
+            let layout = self
+                .l
+                .layouts
+                .structs
+                .get(name)
+                .ok_or_else(|| {
+                    CodegenError::unsupported_at(format!("unknown type `{}`", name), span)
+                })?
+                .clone();
+            let field_layout = layout.field(field).ok_or_else(|| {
+                CodegenError::unsupported_at(format!("`{}` has no field `{}`", name, field), span)
+            })?;
+            (
+                self.l.normalize(field_layout.ty.clone()),
+                field_layout.offset,
+            )
+        };
+
+        let result_ty = Type::Optional(Box::new(field_ty.clone()));
+        let clif = repr_of(&result_ty)?
+            .clif(self.pointer_ty())
+            .ok_or_else(|| CodegenError::internal("`?.` cannot produce a `void`"))?;
+        let present = self.builder.create_block();
+        let absent = self.builder.create_block();
+        let merge = self.builder.create_block();
+        self.builder.append_block_param(merge, clif);
+
+        let is_null = self.builder.ins().icmp_imm_s(IntCC::Equal, subject, 0);
+        self.builder.ins().brif(is_null, absent, &[], present, &[]);
+        self.terminated = true;
+
+        self.goto(present);
+        let value = self.load_at(subject, offset, &field_ty)?;
+        let wrapped = self.wrap_optional(value, &field_ty, &field_ty, span)?;
+        self.jump_to(merge, &[wrapped]);
+
+        self.goto(absent);
+        let null = self.zero_of(Repr::Ref);
+        self.jump_to(merge, &[null]);
+
+        self.goto(merge);
+        Ok(self.builder.block_params(merge)[0])
+    }
+}
+
+// ====================================================================== //
+// Result                                                                  //
+// ====================================================================== //
+
+/// Discriminants of the built-in `Result`. `Ok` is 0 so a success test is a
+/// comparison against zero.
+const RESULT_OK_TAG: i64 = 0;
+const RESULT_ERR_TAG: i64 = 1;
+
+impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
+    /// Lower `Result::Ok(x)` / `Result::Err(e)` when the expected type says what
+    /// the payload is.
+    ///
+    /// Returns `Ok(None)` when the call is not a `Result` construction, so the
+    /// caller can carry on with ordinary lowering.
+    fn lower_result_construction(
+        &mut self,
+        callee: &Expression,
+        args: &[Argument],
+        expected: &Type,
+    ) -> CodegenResult<Option<Value>> {
+        if !matches!(expected, Type::Result { .. }) {
+            return Ok(None);
+        }
+        let variant = match &callee.kind {
+            ExpressionKind::EnumVariant {
+                enum_name,
+                variant_name,
+            } if enum_name == layout::RESULT_TYPE => variant_name,
+            ExpressionKind::Path { segments } => match segments.as_slice() {
+                [enum_name, variant_name] if enum_name == layout::RESULT_TYPE => variant_name,
+                _ => return Ok(None),
+            },
+            _ => return Ok(None),
+        };
+        self.lower_result_variant(variant, args.first(), expected, &callee.span)
+            .map(Some)
+    }
+
+    fn lower_result_variant(
+        &mut self,
+        variant: &str,
+        payload: Option<&Argument>,
+        expected: &Type,
+        span: &Span,
+    ) -> CodegenResult<Value> {
+        let Type::Result { ok_type, err_type } = expected else {
+            return Err(CodegenError::unsupported_at(
+                "a `Result` value needs a `Result<T, E>` context here",
+                span,
+            ));
+        };
+        let (tag, payload_ty) = match variant {
+            "Ok" => (RESULT_OK_TAG, (**ok_type).clone()),
+            "Err" => (RESULT_ERR_TAG, (**err_type).clone()),
+            other => {
+                return Err(CodegenError::unsupported_at(
+                    format!("`Result` has no variant `{}`", other),
+                    span,
+                ))
+            }
+        };
+
+        let object = self.alloc_object(ENUM_PAYLOAD_OFFSET + SLOT_SIZE, runtime::KIND_ENUM)?;
+        let tag_value = self.builder.ins().iconst(types::I64, tag);
+        self.builder
+            .ins()
+            .store(MemFlagsData::trusted(), tag_value, object, ENUM_TAG_OFFSET);
+        if let Some(payload) = payload {
+            let value = self.lower_expr_value(&payload.value, &payload_ty)?;
+            let slot = self.value_to_slot(value, &payload_ty)?;
+            self.builder
+                .ins()
+                .store(MemFlagsData::trusted(), slot, object, ENUM_PAYLOAD_OFFSET);
+        }
+        Ok(object)
+    }
+
+    /// Match `Result::Ok(x)` / `Result::Err(e)`, binding the payload at the type
+    /// the `Result<T, E>` declares for that side.
+    fn test_result_constructor(
+        &mut self,
+        variant: &str,
+        fields: &[Pattern],
+        subject: Value,
+        ok_type: &Type,
+        err_type: &Type,
+        fail: Block,
+        span: &Span,
+    ) -> CodegenResult<()> {
+        let (tag, payload_ty) = match variant {
+            "Ok" => (RESULT_OK_TAG, ok_type.clone()),
+            "Err" => (RESULT_ERR_TAG, err_type.clone()),
+            other => {
+                return Err(CodegenError::unsupported_at(
+                    format!("`Result` has no variant `{}`", other),
+                    span,
+                ))
+            }
+        };
+        let actual = self.builder.ins().load(
+            types::I64,
+            MemFlagsData::trusted(),
+            subject,
+            ENUM_TAG_OFFSET,
+        );
+        let matched = self.builder.ins().icmp_imm_s(IntCC::Equal, actual, tag);
+        self.branch_on(matched, fail);
+
+        if let Some(sub_pattern) = fields.first() {
+            let slot = self.builder.ins().load(
+                types::I64,
+                MemFlagsData::trusted(),
+                subject,
+                ENUM_PAYLOAD_OFFSET,
+            );
+            let value = self.slot_to_value(slot, &payload_ty)?;
+            self.test_pattern(sub_pattern, value, &payload_ty, fail)?;
+        }
+        Ok(())
     }
 }

@@ -65,16 +65,24 @@ LiraStr *lira_rt_str_new(const char *bytes, int64_t len) {
     return s;
 }
 
+/* A null operand renders as "null", the same as printing one does, so
+ * `"x: " + maybe` and `println(maybe)` agree. */
+static const char LIRA_NULL_TEXT[] = "null";
+#define LIRA_NULL_TEXT_LEN 4
+
 LiraStr *lira_rt_str_concat(const LiraStr *a, const LiraStr *b) {
-    int64_t alen = a ? a->len : 0;
-    int64_t blen = b ? b->len : 0;
+    const char *adata = a ? a->data : LIRA_NULL_TEXT;
+    int64_t alen = a ? a->len : LIRA_NULL_TEXT_LEN;
+    const char *bdata = b ? b->data : LIRA_NULL_TEXT;
+    int64_t blen = b ? b->len : LIRA_NULL_TEXT_LEN;
+
     LiraStr *s = (LiraStr *)lira_rt_alloc((int64_t)sizeof(LiraStr) + alen + blen, LIRA_KIND_STRING);
     s->len = alen + blen;
     if (alen > 0) {
-        memcpy(s->data, a->data, (size_t)alen);
+        memcpy(s->data, adata, (size_t)alen);
     }
     if (blen > 0) {
-        memcpy(s->data + alen, b->data, (size_t)blen);
+        memcpy(s->data + alen, bdata, (size_t)blen);
     }
     s->data[alen + blen] = '\0';
     return s;

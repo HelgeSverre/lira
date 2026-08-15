@@ -35,6 +35,14 @@ pub const CLOSURE_CODE_OFFSET: i32 = 16;
 pub const CLOSURE_COUNT_OFFSET: i32 = 24;
 pub const CLOSURE_CAPTURES_OFFSET: i32 = 32;
 
+/// A boxed optional is a header and one 8-byte cell holding the payload.
+pub const OPTIONAL_SLOT_OFFSET: i32 = 16;
+
+/// The built-in `Result`. It is not registered as an enum layout: its payload
+/// types come from the `Result<T, E>` at each use, not from a single shared
+/// declaration, so `lower.rs` handles it against `Type::Result` directly.
+pub const RESULT_TYPE: &str = "Result";
+
 /// Every enum payload slot and every array element is a uniform 8-byte cell:
 /// floats are bit-cast into it and references are stored directly.
 pub const SLOT_SIZE: i32 = 8;
@@ -285,6 +293,12 @@ pub fn type_of_ann(ann: &lirac::ast::TypeExpr) -> Type {
         TypeExprKind::Named(name) => named_type(name),
         TypeExprKind::Generic { name, args } => match name.as_str() {
             "Array" | "List" if args.len() == 1 => Type::Array(Box::new(type_of_ann(&args[0]))),
+            // `Result<T, E>` reaches here as a generic application rather than
+            // as `TypeExprKind::Result`, depending on how it was written.
+            RESULT_TYPE if args.len() == 2 => Type::Result {
+                ok_type: Box::new(type_of_ann(&args[0])),
+                err_type: Box::new(type_of_ann(&args[1])),
+            },
             _ => named_type(name),
         },
         TypeExprKind::Optional(inner) => Type::Optional(Box::new(type_of_ann(inner))),
@@ -334,6 +348,13 @@ pub fn primitive_type(name: &str) -> Option<Type> {
 }
 
 fn named_type(name: &str) -> Type {
+    // A bare `Result` carries no payload types; treat both as unconstrained.
+    if name == RESULT_TYPE {
+        return Type::Result {
+            ok_type: Box::new(Type::Any),
+            err_type: Box::new(Type::Any),
+        };
+    }
     // A bare capitalised name is a user type. Whether it is a struct or an enum
     // is settled once the layouts are known, so record it as a struct and let
     // the lowering consult `LayoutMap` for the real answer.

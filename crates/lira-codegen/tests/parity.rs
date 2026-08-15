@@ -55,6 +55,10 @@ const PARITY_EXAMPLES: &[&str] = &[
     "pattern_tuple.li",
     "pattern_tuple_simple.li",
     "pattern_tuple_literals.li",
+    "optional_chaining.li",
+    "optional_access.li",
+    "try_operator.li",
+    "result_propagation.li",
 ];
 
 fn examples_dir() -> PathBuf {
