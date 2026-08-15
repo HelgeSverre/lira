@@ -48,6 +48,8 @@ pub enum Sig {
     Str,
     /// `[string]`
     StrArray,
+    /// `[int]`
+    IntArray,
     /// An opaque handle — a channel, or a value the backend does not model.
     Any,
     Void,
@@ -62,6 +64,7 @@ impl Sig {
             Sig::Bool => Type::Bool,
             Sig::Str => Type::String,
             Sig::StrArray => Type::Array(Box::new(Type::String)),
+            Sig::IntArray => Type::Array(Box::new(Type::Int)),
             Sig::Any => Type::Any,
             Sig::Void => Type::Void,
         }
@@ -72,7 +75,7 @@ impl Sig {
             Sig::Int => Some(Ty::I64),
             Sig::Float => Some(Ty::F64),
             Sig::Bool => Some(Ty::I8),
-            Sig::Str | Sig::StrArray | Sig::Any => Some(Ty::P),
+            Sig::Str | Sig::StrArray | Sig::IntArray | Sig::Any => Some(Ty::P),
             Sig::Void => None,
         }
     }
@@ -146,6 +149,14 @@ builtins! {
     ("time_format_iso", "lira_rt_time_format_iso", [Int], Str),
     ("time_parse_iso", "lira_rt_time_parse_iso", [Str], Int),
     ("time_timezone_offset", "lira_rt_time_timezone_offset", [], Int),
+    ("time_components", "lira_rt_time_components", [Int], IntArray),
+    (
+        "time_from_components",
+        "lira_rt_time_from_components",
+        [Int, Int, Int, Int, Int, Int],
+        Int
+    ),
+    ("time_format", "lira_rt_time_format", [Int, Str], Str),
 
     // ---- Random ---------------------------------------------------------
     ("random", "lira_rt_random", [], Float),

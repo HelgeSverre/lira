@@ -315,31 +315,67 @@ arrays with indexing, assignment, `push`, `pop` and `len`; strings with
 concatenation, interpolation, comparison and `len`; `spawn`, `chan`, `send`,
 `recv`, `close`, `fiber_yield`, `fiber_id`.
 
-Of the repository's 124 examples, 92 compile natively and produce byte-identical
-output to the bytecode VM. Six more compile and run correctly but cannot be
+Of the repository's 124 examples, 93 compile natively and produce byte-identical
+output to the bytecode VM. Eight more compile and run correctly but cannot be
 compared byte-for-byte: they print timestamps, random UUIDs, or `env_args`,
 which differ between an interpreted script and a compiled binary by nature. The
-rest use constructs listed below and are declined with a reason.
+remaining 23 use constructs listed below and are declined with a reason.
 
-53 examples are pinned as regression tests in `tests/parity.rs`, and every
+55 examples are pinned as regression tests in `tests/parity.rs`, and every
 example that type-checks is required to either compile or be declined cleanly —
 an internal error fails the suite.
 
 ## What is not supported yet
 
+Two items are large enough to be projects of their own; both are described under
+"Remaining work" below.
+
 | Not lowered | Notes |
 |---|---|
 | Generics | Type-erased in the VM; native wants monomorphisation |
 | `json_*`, `regex_*`, `http_*` | Need a dynamic value, a regex engine and an HTTP client |
+| Heterogeneous arrays | `push(node, node)` into an `[int]` is the dynamic escape hatch, and may be right to refuse permanently |
+| An unconstrained `[]` | Nothing pins the element type; the error says to annotate |
 | String indexing | Needs a decision on byte vs. character indexing |
 
-Two more limits worth knowing:
+One more limit worth knowing: **`lira jit` runs one program per process.** The
+runtime's scheduler state is process-global and single-threaded.
 
-- **Nothing is reclaimed.** Allocations come from `malloc` and are never freed.
-  The `rc` field is in the header for the ARC scheme the VM uses, but the
-  backend does not yet emit retain/release pairs.
-- **`lira jit` runs one program per process.** The runtime's scheduler state is
-  process-global and single-threaded.
+## Remaining work
+
+### Memory is never reclaimed
+
+Allocations come from `malloc` and are never freed, so a long-running native
+program grows without bound. This is the only correctness gap in the backend —
+everything else it accepts, it compiles correctly.
+
+The `rc` field is already in every object header for the scheme the VM uses. The
+work is emitting the retain/release pairs: at scope exit, on field and element
+stores, across argument passing and returns, and into the closure captures and
+fiber environments that outlive their frames. Cycles need a collector on top,
+which the VM has and which `examples/cycle_auto_gc.li` exercises. The
+alternative is a tracing collector using Cranelift's stack maps, which suits an
+unboxed backend better but needs precise root tracking through the fiber stacks.
+
+Either way it touches every lowering path, which is why it is not half-done: a
+release in the wrong place is a use-after-free, and that is worse than a leak.
+
+### Generics
+
+`fn identity<T>(x: T) -> T`, `struct Box<T>`, `enum Opt<T>` and `impl<T> Box<T>`
+are all refused. The VM erases them to a uniform tagged value; native code has
+no such representation, so the answer is monomorphisation: one copy per concrete
+type argument set, with its own layout.
+
+The checker does not help here. It records generics as erased — `sema`'s
+`generic_instantiations` table is documented as never read — so the backend
+would have to infer the bindings itself: unify each declared parameter type with
+the actual argument types at a call site, and each generic field with the value
+it is given in a literal. Instantiations are then a worklist, since one can
+demand another (`Box<T>.map<U>` produces a `Box<U>`).
+
+That is the largest single item left, and it is what blocks the four `sync_*`
+examples, which use a generic enum through the standard library.
 
 ## Differences from the bytecode VM
 

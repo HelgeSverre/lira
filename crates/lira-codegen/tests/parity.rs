@@ -66,6 +66,8 @@ const PARITY_EXAMPLES: &[&str] = &[
     "class_super.li",
     "class_this.li",
     "classes_basic.li",
+    "test_env.li",
+    "test_hash.li",
 ];
 
 fn examples_dir() -> PathBuf {

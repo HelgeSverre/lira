@@ -55,7 +55,8 @@ LiraStr *lira_rt_time_format_iso(int64_t millis) {
         return lira_rt_str_new("", 0);
     }
     char buf[64];
-    int n = snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ",
+    /* The bytecode VM renders the offset explicitly rather than as "Z". */
+    int n = snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02d.%03d+00:00",
                      utc.tm_year + 1900, utc.tm_mon + 1, utc.tm_mday, utc.tm_hour, utc.tm_min,
                      utc.tm_sec, (int)(millis % 1000));
     return lira_rt_str_new(buf, n);
@@ -84,6 +85,55 @@ int64_t lira_rt_time_parse_iso(const LiraStr *text) {
         return 0;
     }
     return (int64_t)seconds * 1000 + (matched >= 7 ? millis : 0);
+}
+
+/* [year, month, day, hour, minute, second] in UTC. */
+LiraArray *lira_rt_time_components(int64_t millis) {
+    LiraArray *parts = lira_rt_array_new(6);
+    time_t seconds = (time_t)(millis / 1000);
+    struct tm utc;
+    if (gmtime_r(&seconds, &utc) == NULL) {
+        for (int i = 0; i < 6; i++) {
+            lira_rt_array_push(parts, 0);
+        }
+        return parts;
+    }
+    lira_rt_array_push(parts, utc.tm_year + 1900);
+    lira_rt_array_push(parts, utc.tm_mon + 1);
+    lira_rt_array_push(parts, utc.tm_mday);
+    lira_rt_array_push(parts, utc.tm_hour);
+    lira_rt_array_push(parts, utc.tm_min);
+    lira_rt_array_push(parts, utc.tm_sec);
+    return parts;
+}
+
+int64_t lira_rt_time_from_components(int64_t year, int64_t month, int64_t day, int64_t hour,
+                                     int64_t minute, int64_t second) {
+    struct tm utc;
+    memset(&utc, 0, sizeof(utc));
+    utc.tm_year = (int)(year - 1900);
+    utc.tm_mon = (int)(month - 1);
+    utc.tm_mday = (int)day;
+    utc.tm_hour = (int)hour;
+    utc.tm_min = (int)minute;
+    utc.tm_sec = (int)second;
+    time_t seconds = timegm(&utc);
+    return seconds == (time_t)-1 ? 0 : (int64_t)seconds * 1000;
+}
+
+/* strftime with the caller's format, on the UTC breakdown of `millis`. */
+LiraStr *lira_rt_time_format(int64_t millis, const LiraStr *format) {
+    if (format == NULL) {
+        return lira_rt_str_new("", 0);
+    }
+    time_t seconds = (time_t)(millis / 1000);
+    struct tm utc;
+    if (gmtime_r(&seconds, &utc) == NULL) {
+        return lira_rt_str_new("", 0);
+    }
+    char buf[256];
+    size_t n = strftime(buf, sizeof(buf), format->data, &utc);
+    return lira_rt_str_new(buf, (int64_t)n);
 }
 
 int64_t lira_rt_time_timezone_offset(void) {

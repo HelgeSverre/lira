@@ -3020,8 +3020,10 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
                     return Err(arity_error(1));
                 }
                 let arg = &args[0].value;
-                let ty = self.ty_of(arg)?;
-                let value = self.lower_expr_value(arg, &ty)?;
+                let declared = self.ty_of(arg)?;
+                let value = self.lower_expr_value(arg, &declared)?;
+                // `string?` measures like the `string` it wraps.
+                let ty = strip_optional(&declared).clone();
                 let symbol = match ty {
                     Type::String => "lira_rt_str_len",
                     Type::Array(_) | Type::Tuple(_) => "lira_rt_array_len",
@@ -4127,10 +4129,22 @@ fn infer_with(
             }
         }
 
-        ExpressionKind::Index { object, .. } => match infer_or_checked_with(l, resolve, object)? {
-            Type::Array(inner) => *inner,
-            _ => return None,
-        },
+        ExpressionKind::Index { object, index } => {
+            match infer_or_checked_with(l, resolve, object)? {
+                Type::Array(inner) => *inner,
+                Type::Map(_, value) => *value,
+                Type::Tuple(items) => {
+                    let ExpressionKind::IntLiteral(position) = index.kind else {
+                        return None;
+                    };
+                    items.get(position as usize)?.clone()
+                }
+                // The checker's answer, so lowering is reached and can explain
+                // why it will not pick a side between `char` and a string.
+                Type::String => Type::Char,
+                _ => return None,
+            }
+        }
 
         ExpressionKind::Array(elements) => {
             let first = elements.first()?;
