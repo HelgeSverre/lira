@@ -13,3 +13,4 @@ path = "src/main.rs"
 lirac = { path = "../lirac", features = ["serde"] }
 liravm = { path = "../liravm" }
 lira-core = { path = "../lira-core" }
+lira-codegen = { path = "../lira-codegen" }

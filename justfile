@@ -11,22 +11,22 @@ default:
 # Build compiler, VM, and unified CLI
 [group('build')]
 build:
-    cargo build --package lira --package lirac --package liravm
+    cargo build --package lira --package lirac --package liravm --package lira-codegen
 
 # Build all packages (CLI, compiler, VM, LSP, doc generator, spec, playground)
 [group('build')]
 build-all:
-    cargo build --package lira --package lirac --package liravm --package lira-lsp --package lira-doc --package lira-spec --package lira-playground
+    cargo build --package lira --package lirac --package liravm --package lira-codegen --package lira-lsp --package lira-doc --package lira-spec --package lira-playground
 
 # Build in release mode
 [group('build')]
 release:
-    cargo build --package lira --package lirac --package liravm --release
+    cargo build --package lira --package lirac --package liravm --package lira-codegen --release
 
 # Build all in release mode
 [group('build')]
 release-all:
-    cargo build --package lira --package lirac --package liravm --package lira-lsp --package lira-doc --package lira-spec --package lira-playground --release
+    cargo build --package lira --package lirac --package liravm --package lira-codegen --package lira-lsp --package lira-doc --package lira-spec --package lira-playground --release
 
 # Clean build artifacts
 [group('build')]
@@ -48,10 +48,22 @@ run file:
     cargo build --package lira --release
     ./target/release/lira run {{ file }}
 
+# Compile a Lira file to a standalone native executable
+[group('dev')]
+build-native file out="a.out":
+    cargo build --package lira --release
+    ./target/release/lira build {{ file }} -o {{ out }}
+
+# Compile a Lira file to native code and run it in-process
+[group('dev')]
+jit file:
+    cargo build --package lira --release
+    ./target/release/lira jit {{ file }}
+
 # Run all tests (via nextest — faster parallel execution, all failures printed)
 [group('dev')]
 test:
-    cargo nextest run --package lirac --package liravm --package lira-core --package lira-spec --package lira-playground
+    cargo nextest run --package lirac --package liravm --package lira-core --package lira-codegen --package lira-spec --package lira-playground
 
 # Run all tests with verbose output (alias for test — nextest always prints failures)
 [group('dev')]

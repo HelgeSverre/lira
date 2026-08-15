@@ -1,0 +1,592 @@
+//! End-to-end tests for the native backend.
+//!
+//! Each test compiles a Lira program to a real executable, runs it, and checks
+//! its output. Going through the linker rather than the JIT is deliberate: it
+//! covers object emission and linking too, and it keeps the C runtime's
+//! single-threaded scheduler state in a process of its own, which the test
+//! harness's thread pool would otherwise share.
+
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+/// Compile `source` and return everything it wrote to stdout and stderr.
+fn run_native(source: &str) -> Result<String, String> {
+    let dir = scratch_dir();
+    std::fs::create_dir_all(&dir).expect("scratch dir");
+    let source_path = dir.join("program.li");
+    let binary_path = dir.join("program");
+    std::fs::write(&source_path, source).expect("write source");
+
+    let result = (|| {
+        lira_codegen::build_native(
+            source_path.to_str().expect("utf-8 path"),
+            source,
+            &binary_path,
+        )?;
+        let output = Command::new(&binary_path)
+            .output()
+            .map_err(|e| format!("could not run the compiled program: {}", e))?;
+        let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+        text.push_str(&String::from_utf8_lossy(&output.stderr));
+        Ok(text)
+    })();
+
+    let _ = std::fs::remove_dir_all(&dir);
+    result
+}
+
+fn scratch_dir() -> PathBuf {
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+    let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!("lira-native-test-{}-{}", std::process::id(), id))
+}
+
+/// Assert that a program prints exactly these lines.
+#[track_caller]
+fn assert_lines(source: &str, expected: &[&str]) {
+    let output = run_native(source).unwrap_or_else(|e| panic!("compilation failed: {}", e));
+    let actual: Vec<&str> = output.lines().collect();
+    assert_eq!(actual, expected, "\n--- program ---\n{}", source);
+}
+
+#[track_caller]
+fn assert_rejected(source: &str, needle: &str) {
+    match run_native(source) {
+        Ok(output) => panic!("expected a compile error, but the program ran:\n{}", output),
+        Err(error) => assert!(
+            error.contains(needle),
+            "error did not mention `{}`:\n{}",
+            needle,
+            error
+        ),
+    }
+}
+
+// ---------------------------------------------------------------------- //
+// Scalars and control flow                                                //
+// ---------------------------------------------------------------------- //
+
+#[test]
+fn arithmetic_runs_unboxed() {
+    assert_lines(
+        r#"
+        println(2 + 3 * 4)
+        println(17 / 5)
+        println(17 % 5)
+        println(2 ** 10)
+        println(-7 / 2)
+        println(1.5 + 2.25)
+        println(10 / 4.0)
+        "#,
+        &["14", "3", "2", "1024", "-3", "3.75", "2.5"],
+    );
+}
+
+#[test]
+fn integer_division_by_zero_is_reported_not_a_signal() {
+    let output = run_native("let a = 1\nlet b = 0\nprintln(a / b)").expect("compiles");
+    assert!(
+        output.contains("division by zero"),
+        "unexpected output: {}",
+        output
+    );
+}
+
+#[test]
+fn comparisons_and_short_circuit_logic() {
+    assert_lines(
+        r#"
+        fn boom() -> bool {
+            println("evaluated")
+            return true
+        }
+        println(1 < 2)
+        println(2 <= 2)
+        println("abc" == "abc")
+        println("abc" != "abd")
+        println(false && boom())
+        println(true || boom())
+        "#,
+        &["true", "true", "true", "true", "false", "true"],
+    );
+}
+
+#[test]
+fn while_loop_with_break_and_continue() {
+    assert_lines(
+        r#"
+        var i = 0
+        var total = 0
+        while i < 10 {
+            i = i + 1
+            if i % 2 != 0 { continue }
+            if i > 8 { break }
+            total = total + i
+        }
+        println(total)
+        "#,
+        &["20"],
+    );
+}
+
+#[test]
+fn infinite_loop_exits_through_break() {
+    assert_lines(
+        r#"
+        var n = 0
+        loop {
+            n = n + 1
+            if n >= 5 { break }
+        }
+        println(n)
+        "#,
+        &["5"],
+    );
+}
+
+#[test]
+fn for_loops_iterate_arrays_and_ranges() {
+    assert_lines(
+        r#"
+        var total = 0
+        for n in [1, 2, 3, 4] { total = total + n }
+        println(total)
+        var counted = 0
+        for i in 0..5 { counted = counted + i }
+        println(counted)
+        var inclusive = 0
+        for i in 1..=3 { inclusive = inclusive + i }
+        println(inclusive)
+        "#,
+        &["10", "10", "6"],
+    );
+}
+
+#[test]
+fn recursion_and_mutual_recursion() {
+    assert_lines(
+        r#"
+        fn is_even(n: int) -> bool {
+            if n == 0 { return true }
+            return is_odd(n - 1)
+        }
+        fn is_odd(n: int) -> bool {
+            if n == 0 { return false }
+            return is_even(n - 1)
+        }
+        fn fib(n: int) -> int {
+            if n < 2 { return n }
+            return fib(n - 1) + fib(n - 2)
+        }
+        println(fib(20))
+        println(is_even(10))
+        println(is_odd(10))
+        "#,
+        &["6765", "true", "false"],
+    );
+}
+
+#[test]
+fn main_is_invoked_once_even_when_the_top_level_calls_it() {
+    assert_lines("fn main() { println(\"once\") }\nmain()", &["once"]);
+    assert_lines("fn main() { println(\"auto\") }", &["auto"]);
+}
+
+// ---------------------------------------------------------------------- //
+// Strings                                                                 //
+// ---------------------------------------------------------------------- //
+
+#[test]
+fn string_concatenation_stringifies_the_other_operand() {
+    assert_lines(
+        r#"
+        let n = 42
+        println("n = " + n)
+        println("f = " + 1.5)
+        println("b = " + true)
+        println("interpolated: ${n + 1}")
+        println(len("hello"))
+        "#,
+        &["n = 42", "f = 1.5", "b = true", "interpolated: 43", "5"],
+    );
+}
+
+// ---------------------------------------------------------------------- //
+// Structs                                                                 //
+// ---------------------------------------------------------------------- //
+
+#[test]
+fn struct_fields_load_at_constant_offsets() {
+    assert_lines(
+        r#"
+        struct Point {
+            x: int
+            y: int
+
+            fn sum(self) -> int { return self.x + self.y }
+        }
+        struct Line { start: Point, end: Point }
+
+        let p = Point { x: 10, y: 20 }
+        println(p.x)
+        println(p.y)
+        println(p.sum())
+        let l = Line { start: Point { x: 1, y: 2 }, end: Point { x: 3, y: 4 } }
+        println(l.end.y)
+        "#,
+        &["10", "20", "30", "4"],
+    );
+}
+
+#[test]
+fn narrow_struct_fields_round_trip_through_memory() {
+    assert_lines(
+        r#"
+        struct Packed {
+            a: int8
+            b: int32
+            c: bool
+            d: float
+        }
+        let p = Packed { a: -5, b: 100000, c: true, d: 0.5 }
+        println(p.a)
+        println(p.b)
+        println(p.c)
+        println(p.d)
+        "#,
+        &["-5", "100000", "true", "0.5"],
+    );
+}
+
+#[test]
+fn struct_fields_are_mutable_in_place() {
+    assert_lines(
+        r#"
+        struct Counter { value: int }
+        let c = Counter { value: 1 }
+        c.value = c.value + 41
+        println(c.value)
+        "#,
+        &["42"],
+    );
+}
+
+#[test]
+fn impl_blocks_provide_static_and_instance_methods() {
+    assert_lines(
+        r#"
+        struct Counter { value: int }
+        impl Counter {
+            fn new() -> Counter { return Counter { value: 0 } }
+            fn get(self) -> int { return self.value }
+            fn bump(self) -> Counter { return Counter { value: self.value + 1 } }
+        }
+        let a = Counter.new()
+        println(a.get())
+        println(a.bump().bump().get())
+        "#,
+        &["0", "2"],
+    );
+}
+
+// ---------------------------------------------------------------------- //
+// Enums and pattern matching                                              //
+// ---------------------------------------------------------------------- //
+
+#[test]
+fn enum_payloads_survive_a_round_trip() {
+    assert_lines(
+        r#"
+        enum Shape {
+            Dot,
+            Circle(float),
+            Rect(int, int)
+        }
+        fn describe(s: Shape) -> string {
+            return match s {
+                Shape::Dot => "dot",
+                Shape::Circle(r) => "circle " + r,
+                Shape::Rect(w, h) => "rect " + (w * h)
+            }
+        }
+        println(describe(Shape::Dot))
+        println(describe(Shape::Circle(1.5)))
+        println(describe(Shape::Rect(3, 4)))
+        "#,
+        &["dot", "circle 1.5", "rect 12"],
+    );
+}
+
+#[test]
+fn match_supports_literals_ranges_guards_and_bindings() {
+    assert_lines(
+        r#"
+        fn classify(n: int) -> string {
+            return match n {
+                0 => "zero",
+                1..5 => "small",
+                5..=9 => "medium",
+                x if x < 0 => "negative",
+                other => "large:" + other
+            }
+        }
+        println(classify(0))
+        println(classify(3))
+        println(classify(7))
+        println(classify(-2))
+        println(classify(99))
+        "#,
+        &["zero", "small", "medium", "negative", "large:99"],
+    );
+}
+
+#[test]
+fn struct_patterns_bind_fields() {
+    assert_lines(
+        r#"
+        struct Point { x: int, y: int }
+        fn area(p: Point) -> int {
+            return match p {
+                Point { x, y } => x * y
+            }
+        }
+        println(area(Point { x: 6, y: 7 }))
+        "#,
+        &["42"],
+    );
+}
+
+#[test]
+fn enum_reflection_reports_the_variant_name() {
+    assert_lines(
+        r#"
+        enum Color { Red, Green, Blue }
+        let c = Color::Green
+        println(c.__enum)
+        println(c.__variant)
+        println(Color::Blue.__variant)
+        "#,
+        &["Color", "Green", "Blue"],
+    );
+}
+
+// ---------------------------------------------------------------------- //
+// Arrays                                                                  //
+// ---------------------------------------------------------------------- //
+
+#[test]
+fn arrays_index_push_and_pop() {
+    assert_lines(
+        r#"
+        let xs = [10, 20, 30]
+        println(xs[0])
+        println(len(xs))
+        push(xs, 40)
+        println(xs[3])
+        xs[1] = 99
+        println(xs[1])
+        println(pop(xs))
+        println(len(xs))
+        "#,
+        &["10", "3", "40", "99", "40", "3"],
+    );
+}
+
+#[test]
+fn out_of_bounds_indexing_is_reported() {
+    let output = run_native("let xs = [1, 2]\nprintln(xs[5])").expect("compiles");
+    assert!(
+        output.contains("out of bounds"),
+        "unexpected output: {}",
+        output
+    );
+}
+
+#[test]
+fn arrays_of_floats_survive_the_uniform_slot_representation() {
+    assert_lines(
+        r#"
+        let xs = [1.5, 2.5, 3.0]
+        var total = 0.0
+        for x in xs { total = total + x }
+        println(total)
+        println(xs[2])
+        "#,
+        &["7", "3"],
+    );
+}
+
+// ---------------------------------------------------------------------- //
+// Fibers and channels                                                     //
+// ---------------------------------------------------------------------- //
+
+#[test]
+fn spawned_fibers_interleave_at_yield_points() {
+    assert_lines(
+        r#"
+        fn ticker(name: string, rounds: int) {
+            var i = 0
+            while i < rounds {
+                println(name + i)
+                fiber_yield()
+                i = i + 1
+            }
+        }
+        fn main() {
+            spawn ticker("a", 2)
+            spawn ticker("b", 2)
+        }
+        "#,
+        &["a0", "b0", "a1", "b1"],
+    );
+}
+
+#[test]
+fn an_unbuffered_channel_is_a_rendezvous() {
+    assert_lines(
+        r#"
+        fn producer(ch, count: int) {
+            var i = 0
+            while i < count {
+                send(ch, i * 10)
+                i = i + 1
+            }
+        }
+        fn main() {
+            let ch = chan(0)
+            spawn producer(ch, 3)
+            var n = 0
+            while n < 3 {
+                println(recv(ch))
+                n = n + 1
+            }
+        }
+        "#,
+        &["0", "10", "20"],
+    );
+}
+
+#[test]
+fn a_buffered_channel_lets_the_sender_run_ahead() {
+    assert_lines(
+        r#"
+        fn producer(ch) {
+            send(ch, 1)
+            send(ch, 2)
+            println("sent both")
+        }
+        fn main() {
+            let ch = chan(4)
+            spawn producer(ch)
+            fiber_yield()
+            println(recv(ch))
+            println(recv(ch))
+        }
+        "#,
+        &["sent both", "1", "2"],
+    );
+}
+
+#[test]
+fn a_blocked_program_reports_a_deadlock_instead_of_hanging() {
+    let output = run_native(
+        r#"
+        fn main() {
+            let ch = chan(0)
+            println("waiting")
+            recv(ch)
+            println("unreachable")
+        }
+        "#,
+    )
+    .expect("compiles");
+    assert!(output.contains("waiting"), "unexpected output: {}", output);
+    assert!(output.contains("deadlock"), "unexpected output: {}", output);
+    assert!(
+        !output.contains("unreachable"),
+        "the blocked fiber should never have resumed: {}",
+        output
+    );
+}
+
+#[test]
+fn fibers_get_their_own_stacks() {
+    // Deep recursion inside a spawned fiber only works if the fiber really is
+    // running on its own stack rather than borrowing the scheduler's frame.
+    assert_lines(
+        r#"
+        fn depth(n: int) -> int {
+            if n == 0 { return 0 }
+            return 1 + depth(n - 1)
+        }
+        fn worker(ch) {
+            send(ch, depth(1000))
+        }
+        fn main() {
+            let ch = chan(1)
+            spawn worker(ch)
+            println(recv(ch))
+        }
+        "#,
+        &["1000"],
+    );
+}
+
+// ---------------------------------------------------------------------- //
+// Diagnostics                                                             //
+// ---------------------------------------------------------------------- //
+
+#[test]
+fn unsupported_constructs_are_refused_rather_than_mis_compiled() {
+    assert_rejected("let double = |x: int| x * 2\nprintln(double(5))", "lambdas");
+    assert_rejected("let t = (1, 2)\nprintln(t)", "tuples");
+    assert_rejected(
+        "class Animal { name: string }\nclass Dog extends Animal { breed: string }",
+        "inheritance",
+    );
+}
+
+#[test]
+fn a_type_error_stops_native_compilation() {
+    assert_rejected("let x: int = \"not an int\"", "");
+}
+
+#[test]
+fn the_error_points_at_the_bytecode_vm_as_the_fallback() {
+    match run_native("let t = (1, 2)") {
+        Ok(_) => panic!("expected a compile error"),
+        Err(error) => assert!(
+            error.contains("lira run"),
+            "the error should name the working alternative: {}",
+            error
+        ),
+    }
+}
+
+// ---------------------------------------------------------------------- //
+// Object emission                                                         //
+// ---------------------------------------------------------------------- //
+
+#[test]
+fn compile_object_produces_a_native_object_file() {
+    let analysis = lirac::analyze("println(1)").expect("parses");
+    let object = lira_codegen::aot::compile_object(&analysis.program, &analysis.sema)
+        .expect("emits an object");
+    assert!(!object.is_empty());
+    if cfg!(target_os = "linux") {
+        assert_eq!(&object[..4], b"\x7fELF");
+    }
+}
+
+#[test]
+fn the_output_binary_is_executable() {
+    let dir = scratch_dir();
+    std::fs::create_dir_all(&dir).expect("scratch dir");
+    let binary = dir.join("prog");
+    lira_codegen::build_native("t.li", "println(\"hi\")", &binary).expect("builds");
+    assert!(Path::new(&binary).exists());
+    let output = Command::new(&binary).output().expect("runs");
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "hi\n");
+    let _ = std::fs::remove_dir_all(&dir);
+}

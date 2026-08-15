@@ -1,0 +1,29 @@
+[package]
+name = "lira-codegen"
+version = "0.1.0"
+edition = "2021"
+description = "Native code generation backend for Lira, built on Cranelift"
+license = "MIT"
+build = "build.rs"
+
+[lib]
+name = "lira_codegen"
+path = "src/lib.rs"
+
+[dependencies]
+lira-core = { path = "../lira-core" }
+lirac = { path = "../lirac", default-features = false }
+cranelift-codegen = "0.134"
+cranelift-frontend = "0.134"
+cranelift-module = "0.134"
+cranelift-jit = "0.134"
+cranelift-object = "0.134"
+cranelift-native = "0.134"
+target-lexicon = "0.13"
+
+[dev-dependencies]
+# The parity tests run each example on both backends and compare the output.
+liravm = { path = "../liravm" }
+
+[build-dependencies]
+cc = "1"

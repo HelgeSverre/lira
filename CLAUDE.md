@@ -9,11 +9,13 @@ Lira is a systems programming language with Go-like fiber concurrency, pattern m
 ## Build Commands
 
 ```bash
-just build          # Build compiler and VM (debug)
+just build          # Build compiler, VM and native backend (debug)
 just release        # Build in release mode
 just test           # Run all tests (unit + integration)
 just test-verbose   # Run tests with output
-just run <file.li>  # Compile and run a .li file
+just run <file.li>  # Compile and run a .li file on the bytecode VM
+just build-native <file.li> <out>  # Compile a .li file to a native executable
+just jit <file.li>  # Compile to native code and run it in-process
 just check          # Type check without building
 just clippy         # Run Rust linter
 just fmt            # Format Rust code
@@ -23,7 +25,7 @@ just lsp            # Run LSP server (for testing)
 **Manual build (without just):**
 
 ```bash
-cargo build --package lirac --package liravm
+cargo build --package lirac --package liravm --package lira-codegen
 cargo nextest run --workspace
 ```
 
@@ -36,7 +38,7 @@ cargo nextest run --package liravm -- <test_name>
 
 ## Architecture
 
-The project is organized as a Cargo workspace with five crates:
+The project is organized as a Cargo workspace with six main crates:
 
 ### `lira-core` - Shared types
 
@@ -70,6 +72,27 @@ Entry points:
 
 - `run_file()` / `run()` - Execute bytecode
 - `run_with_capture()` - Execute with output capture (for testing)
+
+### `lira-codegen` - Native backend (source → machine code)
+
+Lowers the same checked AST to native code via Cranelift, as an alternative to
+the bytecode VM.
+
+- `layout.rs` - Struct/enum memory layout (offsets, alignment)
+- `abi.rs` - Lira types → Cranelift machine types
+- `lower.rs` - AST → Cranelift IR
+- `jit.rs` / `aot.rs` - In-memory execution / standalone executables
+- `runtime/` - `liblira_rt`: allocator, strings, arrays, fiber scheduler,
+  channels, and the x86-64/AArch64 context switch
+
+Entry points:
+
+- `build_native()` - Compile to a standalone executable (`lira build`)
+- `jit_run()` - Compile in memory and run (`lira jit`)
+
+The backend is deliberately partial: constructs it cannot lower are reported as
+errors rather than mis-compiled, and those programs still run under `lira run`.
+See `docs/60-native-backend.md`.
 
 ### `lira-lsp` - Language Server Protocol
 

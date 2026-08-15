@@ -2,6 +2,8 @@
 //!
 //! Commands:
 //!   lira run <file.li>                 Compile and execute Lira source
+//!   lira build <file.li> [-o <out>]    Compile to a native executable
+//!   lira jit <file.li>                 Compile to native code and run in-process
 //!   lira compile <file.li> [-o <out>]  Compile to bytecode
 //!   lira check <file.li>               Type check without compiling
 //!   lira ast <file.li>                 Dump parsed AST as JSON
@@ -30,6 +32,23 @@ fn main() {
                 process::exit(1);
             }
             run_command(&args[2])
+        }
+        "build" => {
+            if args.len() < 3 {
+                eprintln!("Error: Missing input file");
+                eprintln!("Usage: lira build <file.li> [-o <output>]");
+                process::exit(1);
+            }
+            let output = parse_output_arg_with_default(&args, &native_output_name(&args[2]));
+            build_command(&args[2], &output).map(|_| 0)
+        }
+        "jit" => {
+            if args.len() < 3 {
+                eprintln!("Error: Missing input file");
+                eprintln!("Usage: lira jit <file.li>");
+                process::exit(1);
+            }
+            jit_command(&args[2])
         }
         "compile" => {
             if args.len() < 3 {
@@ -99,6 +118,21 @@ fn run_command(file: &str) -> Result<i32, String> {
 
     // Execute and return exit code
     liravm::run(&bytecode)
+}
+
+/// Compile a Lira source file to a standalone native executable
+fn build_command(input: &str, output: &str) -> Result<(), String> {
+    let source =
+        fs::read_to_string(input).map_err(|e| format!("Failed to read {}: {}", input, e))?;
+    lira_codegen::build_native(input, &source, std::path::Path::new(output))?;
+    println!("Compiled {} -> {}", input, output);
+    Ok(())
+}
+
+/// Compile a Lira source file to native code and run it in this process
+fn jit_command(file: &str) -> Result<i32, String> {
+    let source = fs::read_to_string(file).map_err(|e| format!("Failed to read {}: {}", file, e))?;
+    lira_codegen::jit_run(file, &source)
 }
 
 /// Compile a Lira source file to bytecode
@@ -412,16 +446,30 @@ fn disassemble(bytecode: &[u8]) -> Result<String, String> {
 
 /// Parse -o/--output argument, defaulting to input file with .lic extension
 fn parse_output_arg(args: &[String], input: &str) -> String {
+    // Default: replace .li with .lic
+    let default = if input.ends_with(".li") {
+        format!("{}c", input)
+    } else {
+        format!("{}.lic", input)
+    };
+    parse_output_arg_with_default(args, &default)
+}
+
+fn parse_output_arg_with_default(args: &[String], default: &str) -> String {
     for i in 3..args.len() {
         if (args[i] == "-o" || args[i] == "--output") && i + 1 < args.len() {
             return args[i + 1].clone();
         }
     }
-    // Default: replace .li with .lic
-    if input.ends_with(".li") {
-        format!("{}c", input)
-    } else {
-        format!("{}.lic", input)
+    default.to_string()
+}
+
+/// Default executable name for `lira build`: the source path without its
+/// extension, so `examples/hello.li` becomes `examples/hello`.
+fn native_output_name(input: &str) -> String {
+    match input.strip_suffix(".li") {
+        Some(stem) => stem.to_string(),
+        None => format!("{}.out", input),
     }
 }
 
@@ -433,7 +481,9 @@ USAGE:
     lira <COMMAND> [OPTIONS]
 
 COMMANDS:
-    run <file.li>              Compile and execute a Lira program
+    run <file.li>              Compile and execute a Lira program on the bytecode VM
+    build <file.li> [OPTS]     Compile to a standalone native executable
+    jit <file.li>              Compile to native code and run it in-process
     compile <file.li> [OPTS]   Compile source to bytecode
     check <file.li>            Type check source without compiling
     ast <file.li>              Dump parsed AST as JSON
@@ -442,10 +492,13 @@ COMMANDS:
     version                    Show version information
 
 COMPILE OPTIONS:
-    -o, --output <file.lic>    Output bytecode file (default: <input>.lic)
+    -o, --output <file>        Output file
+                               (compile: <input>.lic, build: <input> without .li)
 
 EXAMPLES:
     lira run examples/hello.li
+    lira build examples/hello.li -o hello && ./hello
+    lira jit examples/hello.li
     lira compile main.li -o app.lic
     lira check src/main.li
     lira ast examples/hello.li > hello.json

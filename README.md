@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.md)
 [![Build](https://img.shields.io/badge/build-passing-brightgreen.svg)]()
 
-A modern systems programming language with Go-like fiber concurrency, pattern matching, and a clean syntax. Compiles to bytecode and runs on a custom VM.
+A modern systems programming language with Go-like fiber concurrency, pattern matching, and a clean syntax. Runs on a custom bytecode VM, or compiles straight to a native executable.
 
 ## Features
 
@@ -13,6 +13,7 @@ A modern systems programming language with Go-like fiber concurrency, pattern ma
 - **Strong typing** — with type inference and generics
 - **Clean syntax** — inspired by Rust, Go, and Swift
 - **Fast iteration** — bytecode compilation for quick development cycles
+- **Native compilation** — a Cranelift backend that emits standalone executables
 
 ## Quick Start
 
@@ -32,6 +33,9 @@ just build
 
 # Run the hello world example
 just run examples/hello.li
+
+# ...or compile it to a native executable
+just build-native examples/hello.li hello && ./hello
 ```
 
 ### Hello World
@@ -43,21 +47,46 @@ fn main() {
 }
 ```
 
+### Two backends
+
+The same front end feeds two backends. The bytecode VM is the complete
+implementation and starts instantly; the Cranelift backend emits unboxed machine
+code and a standalone binary.
+
+```bash
+lira run hello.li              # bytecode VM
+lira build hello.li -o hello   # standalone native executable
+lira jit hello.li              # native code, compiled and run in-process
+```
+
+Because Lira is statically typed, native code carries no tags: an `int` is an
+`i64` register, `pt.x` is a load at a constant offset, and a `match` over an enum
+is a compare against the discriminant. Fibers keep working — each one gets its
+own guarded stack and switches through a hand-written context switch, so
+`spawn` and channels behave the same as on the VM.
+
+The native backend is deliberately partial: what it cannot lower yet (lambdas,
+tuples, maps, generics, inheritance) is reported as an error rather than
+mis-compiled, and those programs still run under `lira run`. See
+[docs/60-native-backend.md](docs/60-native-backend.md).
+
 ## Development
 
 ### Commands
 
-| Command             | Description                   |
-| ------------------- | ----------------------------- |
-| `just build`        | Build compiler and VM (debug) |
-| `just release`      | Build in release mode         |
-| `just test`         | Run all tests                 |
-| `just test-verbose` | Run tests with output         |
-| `just run <file>`   | Compile and run a `.li` file  |
-| `just check`        | Type check without building   |
-| `just clippy`       | Run Rust linter               |
-| `just fmt`          | Format Rust code              |
-| `just clean`        | Clean build artifacts         |
+| Command                            | Description                                  |
+| ---------------------------------- | -------------------------------------------- |
+| `just build`                       | Build compiler, VM and native backend (debug) |
+| `just release`                     | Build in release mode                        |
+| `just test`                        | Run all tests                                |
+| `just test-verbose`                | Run tests with output                        |
+| `just run <file>`                  | Compile and run a `.li` file on the VM       |
+| `just build-native <file> <out>`   | Compile a `.li` file to a native executable  |
+| `just jit <file>`                  | Compile to native code and run it in-process |
+| `just check`                       | Type check without building                  |
+| `just clippy`                      | Run Rust linter                              |
+| `just fmt`                         | Format Rust code                             |
+| `just clean`                       | Clean build artifacts                        |
 
 ### Manual Build (without just)
 
@@ -142,8 +171,9 @@ Install with `just <editor>-install` (e.g., `just nvim-install`).
 ```
 lira/
 ├── crates/
-│   ├── lirac/          # Compiler (lexer, parser, checker, codegen)
+│   ├── lirac/          # Compiler (lexer, parser, checker, bytecode codegen)
 │   ├── liravm/         # Virtual machine (interpreter, fibers, runtime)
+│   ├── lira-codegen/   # Native backend (Cranelift, fiber runtime, linker)
 │   ├── lira-core/      # Shared types & opcodes
 │   ├── lira-lsp/       # Language server (LSP)
 │   └── lira-doc/       # Documentation generator
