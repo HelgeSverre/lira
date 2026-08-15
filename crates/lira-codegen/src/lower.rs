@@ -16,7 +16,8 @@ use std::collections::{HashMap, HashSet};
 
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::{
-    types, AbiParam, Block, FuncRef, InstBuilder, MemFlagsData, Signature, Type as ClifType, Value,
+    types, AbiParam, Block, FuncRef, InstBuilder, MemFlagsData, Signature, StackSlotData,
+    StackSlotKind, Type as ClifType, Value,
 };
 use cranelift_codegen::isa::CallConv;
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
@@ -24,7 +25,8 @@ use cranelift_module::{DataDescription, DataId, FuncId, Linkage, Module};
 
 use lirac::ast::{
     Argument, BinaryOp, Block as AstBlock, Expression, ExpressionKind, MatchArm, Parameter,
-    Pattern, PatternKind, Program, Span, Statement, StatementKind, UnaryOp,
+    Pattern, PatternKind, Program, SelectArm, SelectArmKind, Span, Statement, StatementKind,
+    UnaryOp,
 };
 use lirac::checker::Type;
 use lirac::sema::SemanticTables;
@@ -1106,7 +1108,11 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
 
             StatementKind::Expression(expr) => {
                 self.lower_expr_discard(expr)?;
-                Ok(false)
+                // An expression statement can end the block: a `select` whose
+                // every arm returns, or a block expression containing a
+                // `return`. Reporting otherwise would keep emitting into a
+                // block that already has a terminator.
+                Ok(self.terminated)
             }
 
             StatementKind::Return(value) => {
@@ -1692,19 +1698,48 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
 
             ExpressionKind::Index { object, index } => {
                 let object_ty = self.ty_of(object)?;
-                let Type::Array(element_ty) = object_ty.clone() else {
-                    return Err(CodegenError::unsupported_at(
-                        format!(
-                            "cannot index a value of type `{}`",
-                            object_ty.display_name()
-                        ),
+                match object_ty.clone() {
+                    Type::Array(element_ty) => {
+                        let array = self.lower_expr_value(object, &object_ty)?;
+                        let index = self.lower_expr_value(index, &Type::Int)?;
+                        let slot = self.call_rt_value("lira_rt_array_get", &[array, index])?;
+                        Ok(Some(self.slot_to_value(slot, &element_ty)?))
+                    }
+                    Type::Map(_, value_ty) => {
+                        let value_ty = self.l.normalize(*value_ty);
+                        let map = self.lower_expr_value(object, &object_ty)?;
+                        let key = self.lower_expr_value(index, &Type::String)?;
+                        let slot = self.call_rt_value("lira_rt_map_get", &[map, key])?;
+                        Ok(Some(self.slot_to_value(slot, &value_ty)?))
+                    }
+                    Type::Tuple(element_types) => {
+                        // A tuple is an array underneath, so a constant index
+                        // reads the slot at that position's declared type.
+                        let ExpressionKind::IntLiteral(position) = index.kind else {
+                            return Err(CodegenError::unsupported_at(
+                                "a tuple can only be indexed by a literal position",
+                                &expr.span,
+                            ));
+                        };
+                        let element_ty = element_types
+                            .get(position as usize)
+                            .ok_or_else(|| {
+                                CodegenError::unsupported_at(
+                                    format!("this tuple has no position {}", position),
+                                    &expr.span,
+                                )
+                            })?
+                            .clone();
+                        let tuple = self.lower_expr_value(object, &object_ty)?;
+                        let at = self.builder.ins().iconst(types::I64, position);
+                        let slot = self.call_rt_value("lira_rt_array_get", &[tuple, at])?;
+                        Ok(Some(self.slot_to_value(slot, &element_ty)?))
+                    }
+                    other => Err(CodegenError::unsupported_at(
+                        format!("cannot index a value of type `{}`", other.display_name()),
                         &expr.span,
-                    ));
-                };
-                let array = self.lower_expr_value(object, &object_ty)?;
-                let index = self.lower_expr_value(index, &Type::Int)?;
-                let slot = self.call_rt_value("lira_rt_array_get", &[array, index])?;
-                Ok(Some(self.slot_to_value(slot, &element_ty)?))
+                    )),
+                }
             }
 
             ExpressionKind::Array(elements) => {
@@ -1805,10 +1840,33 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
                 self.lower_lambda(params, body, recorded.as_ref(), &expr.span)
                     .map(Some)
             }
-            ExpressionKind::Map(_) => Err(CodegenError::unsupported_at(
-                "map literals are not lowered by the native backend yet",
-                &expr.span,
-            )),
+            ExpressionKind::Map(pairs) => {
+                let ty = self.ty_of(expr)?;
+                let Type::Map(key_ty, value_ty) = ty else {
+                    return Err(CodegenError::unsupported_at(
+                        "map literal without a map type",
+                        &expr.span,
+                    ));
+                };
+                if !matches!(*key_ty, Type::String) {
+                    return Err(CodegenError::unsupported_at(
+                        format!(
+                            "the native backend keys maps by string, not by `{}`",
+                            key_ty.display_name()
+                        ),
+                        &expr.span,
+                    ));
+                }
+                let value_ty = self.l.normalize(*value_ty);
+                let map = self.call_rt_value("lira_rt_map_new", &[])?;
+                for (key, value) in pairs {
+                    let key = self.lower_expr_value(key, &Type::String)?;
+                    let value = self.lower_expr_value(value, &value_ty)?;
+                    let slot = self.value_to_slot(value, &value_ty)?;
+                    self.call_rt("lira_rt_map_set", &[map, key, slot])?;
+                }
+                Ok(Some(map))
+            }
             ExpressionKind::Tuple(elements) => {
                 let ty = self.ty_of(expr)?;
                 let Type::Tuple(element_types) = ty else {
@@ -1840,10 +1898,10 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
                 .lower_range_value(start.as_deref(), end.as_deref(), *inclusive, &expr.span)
                 .map(Some),
             ExpressionKind::Try(inner) => self.lower_try(inner, &expr.span).map(Some),
-            ExpressionKind::Select(_) => Err(CodegenError::unsupported_at(
-                "`select` is not lowered by the native backend yet",
-                &expr.span,
-            )),
+            ExpressionKind::Select(arms) => {
+                self.lower_select(arms, &expr.span)?;
+                Ok(None)
+            }
             ExpressionKind::OptionalAccess { object, field } => self
                 .lower_optional_access(object, field, &expr.span)
                 .map(Some),
@@ -2913,7 +2971,8 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
                 let value = self.lower_expr_value(arg, &ty)?;
                 let symbol = match ty {
                     Type::String => "lira_rt_str_len",
-                    Type::Array(_) => "lira_rt_array_len",
+                    Type::Array(_) | Type::Tuple(_) => "lira_rt_array_len",
+                    Type::Map(_, _) => "lira_rt_map_len",
                     other => {
                         return Err(CodegenError::unsupported_at(
                             format!("`len` is not defined on `{}`", other.display_name()),
@@ -3266,20 +3325,30 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
             }
             ExpressionKind::Index { object, index } => {
                 let object_ty = self.ty_of(object)?;
-                let Type::Array(element_ty) = object_ty.clone() else {
-                    return Err(CodegenError::unsupported_at(
+                match object_ty.clone() {
+                    Type::Array(element_ty) => {
+                        let array = self.lower_expr_value(object, &object_ty)?;
+                        let index = self.lower_expr_value(index, &Type::Int)?;
+                        let slot = self.value_to_slot(value, &element_ty)?;
+                        self.call_rt("lira_rt_array_set", &[array, index, slot])?;
+                        Ok(())
+                    }
+                    Type::Map(_, value_ty) => {
+                        let value_ty = self.l.normalize(*value_ty);
+                        let map = self.lower_expr_value(object, &object_ty)?;
+                        let key = self.lower_expr_value(index, &Type::String)?;
+                        let slot = self.value_to_slot(value, &value_ty)?;
+                        self.call_rt("lira_rt_map_set", &[map, key, slot])?;
+                        Ok(())
+                    }
+                    other => Err(CodegenError::unsupported_at(
                         format!(
                             "cannot assign through an index into a `{}`",
-                            object_ty.display_name()
+                            other.display_name()
                         ),
                         span,
-                    ));
-                };
-                let array = self.lower_expr_value(object, &object_ty)?;
-                let index = self.lower_expr_value(index, &Type::Int)?;
-                let slot = self.value_to_slot(value, &element_ty)?;
-                self.call_rt("lira_rt_array_set", &[array, index, slot])?;
-                Ok(())
+                    )),
+                }
             }
             _ => Err(CodegenError::unsupported_at(
                 "this is not something the native backend can assign to",
@@ -5320,5 +5389,130 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
             self.test_pattern(sub_pattern, value, &payload_ty, fail)?;
         }
         Ok(())
+    }
+}
+
+// ====================================================================== //
+// select                                                                  //
+// ====================================================================== //
+
+impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
+    /// Lower `select { ... }`.
+    ///
+    /// Each arm is tried in source order with the non-blocking channel
+    /// operations. With a `_` arm, a full pass that finds nothing ready falls
+    /// into it. Without one, the fiber yields and tries again; the runtime
+    /// reports a deadlock if a whole sweep of the run queue goes by with no
+    /// channel activity, so a select that can never become ready fails loudly
+    /// rather than spinning forever.
+    fn lower_select(&mut self, arms: &[SelectArm], span: &Span) -> CodegenResult<()> {
+        let default_arm = arms
+            .iter()
+            .find(|arm| matches!(arm.kind, SelectArmKind::Default));
+        let channel_arms: Vec<&SelectArm> = arms
+            .iter()
+            .filter(|arm| !matches!(arm.kind, SelectArmKind::Default))
+            .collect();
+
+        // `try_recv` writes through a pointer, so it needs somewhere to write.
+        let received = self.builder.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            SLOT_SIZE as u32,
+            3,
+        ));
+
+        let retry = self.builder.create_block();
+        let merge = self.builder.create_block();
+        self.jump_to(retry, &[]);
+        self.goto(retry);
+
+        let mut merge_reached = false;
+        for arm in &channel_arms {
+            let body_block = self.builder.create_block();
+            let next = self.builder.create_block();
+
+            match &arm.kind {
+                SelectArmKind::Recv { variable, channel } => {
+                    let channel_value = self.lower_expr_value(channel, &Type::Any)?;
+                    let ptr = self.pointer_ty();
+                    let out = self.builder.ins().stack_addr(ptr, received, 0);
+                    let ok = self.call_rt_value("lira_rt_chan_try_recv", &[channel_value, out])?;
+                    self.builder.ins().brif(ok, body_block, &[], next, &[]);
+                    self.terminated = true;
+
+                    self.goto(body_block);
+                    self.push_scope();
+                    if let Some(variable) = variable {
+                        // The received value's type is whatever the arm body
+                        // does with it; channels carry uniform slots.
+                        let ty = self.select_binding_type(&arm.body, variable);
+                        let ptr = self.pointer_ty();
+                        let slot = self.builder.ins().stack_load(ptr, types::I64, received, 0);
+                        let value = self.slot_to_value(slot, &ty)?;
+                        self.declare_local(variable, ty, Some(value))?;
+                    }
+                }
+                SelectArmKind::Send { value, channel } => {
+                    let channel_value = self.lower_expr_value(channel, &Type::Any)?;
+                    let value_ty = self.ty_of(value)?;
+                    let sent = self.lower_expr_value(value, &value_ty)?;
+                    let slot = self.value_to_slot(sent, &value_ty)?;
+                    let ok = self.call_rt_value("lira_rt_chan_try_send", &[channel_value, slot])?;
+                    self.builder.ins().brif(ok, body_block, &[], next, &[]);
+                    self.terminated = true;
+
+                    self.goto(body_block);
+                    self.push_scope();
+                }
+                SelectArmKind::Default => unreachable!("filtered out above"),
+            }
+
+            self.lower_expr_discard(&arm.body)?;
+            if !self.terminated {
+                merge_reached = true;
+                self.jump_to(merge, &[]);
+            }
+            self.pop_scope();
+            self.goto(next);
+        }
+
+        // Nothing was ready.
+        match default_arm {
+            Some(arm) => {
+                self.lower_expr_discard(&arm.body)?;
+                if !self.terminated {
+                    merge_reached = true;
+                    self.jump_to(merge, &[]);
+                }
+            }
+            None => {
+                if channel_arms.is_empty() {
+                    return Err(CodegenError::unsupported_at(
+                        "`select` needs at least one arm",
+                        span,
+                    ));
+                }
+                self.call_rt("lira_rt_select_block", &[])?;
+                self.jump_to(retry, &[]);
+            }
+        }
+
+        self.goto(merge);
+        if !merge_reached {
+            // Every arm returned or broke out.
+            self.builder.ins().trap(unreachable_trap());
+            self.terminated = true;
+        }
+        Ok(())
+    }
+
+    /// The type to bind a `select` receive to.
+    ///
+    /// Channels carry uniform slots, so the value's type is not recorded
+    /// anywhere; the checker types `recv` as `any`. An `int` is the only thing
+    /// the slot can be read back as without more information, which matches what
+    /// `recv(ch)` does.
+    fn select_binding_type(&self, _body: &Expression, _variable: &str) -> Type {
+        Type::Int
     }
 }

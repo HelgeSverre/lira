@@ -46,12 +46,19 @@ typedef struct LiraFiber {
     int64_t id;
     int64_t xfer;         /* value handed over by a channel rendezvous */
     int8_t xfer_closed;   /* set when the fiber was woken by close() */
+    int64_t select_progress; /* g_channel_progress when this select last spun */
+    int64_t select_spins;
     struct LiraFiber *next;
 } LiraFiber;
 
 /* ------------------------------------------------------------------ */
 /* Scheduler state                                                     */
 /* ------------------------------------------------------------------ */
+
+/* Bumped by anything that could make a blocked `select` ready. A select with no
+ * default spins through the run queue; if a full sweep goes by with no channel
+ * activity at all, nothing can ever make it ready and it is a deadlock. */
+static int64_t g_channel_progress = 0;
 
 static LiraFiber *g_run_head = NULL;
 static LiraFiber *g_run_tail = NULL;
@@ -94,6 +101,7 @@ void lira_fiber_start(LiraFiber *f) {
     f->entry(f->env);
     f->state = LIRA_FIBER_DONE;
     g_live--;
+    g_channel_progress++;
     /* Hand control back to the scheduler for the last time. The scheduler
      * reclaims the stack we are standing on, so this switch must not return. */
     lira_ctx_switch(&f->sp, g_sched_sp);
@@ -193,6 +201,30 @@ int64_t lira_rt_spawn(LiraFiberEntry entry, void *env) {
     LiraFiber *f = lira_fiber_new(entry, env);
     lira_runq_push(f);
     return f->id;
+}
+
+/* Park a `select` that found no ready arm. Returns after yielding, so the
+ * caller loops and tries its arms again. */
+void lira_rt_select_block(void) {
+    LiraFiber *f = g_current;
+    if (f == NULL) {
+        lira_rt_panic("`select` outside of a fiber");
+    }
+    if (f->select_progress != g_channel_progress) {
+        f->select_progress = g_channel_progress;
+        f->select_spins = 0;
+    } else {
+        f->select_spins++;
+    }
+    /* One sweep of the run queue plus slack: if every other fiber has had a
+     * turn and no channel moved, no arm can ever become ready. */
+    if (f->select_spins > g_live + 4) {
+        fflush(stdout);
+        fprintf(stderr, "lira: fatal error: deadlock - `select` has no arm that can become ready\n");
+        fflush(stderr);
+        exit(1);
+    }
+    lira_rt_yield();
 }
 
 void lira_rt_yield(void) {
@@ -312,6 +344,7 @@ void *lira_rt_chan_new(int64_t capacity) {
 }
 
 void lira_rt_chan_send(void *chan, int64_t value) {
+    g_channel_progress++;
     LiraChan *c = (LiraChan *)chan;
     if (c == NULL) {
         lira_rt_panic("send on null channel");
@@ -346,6 +379,7 @@ void lira_rt_chan_send(void *chan, int64_t value) {
 }
 
 int64_t lira_rt_chan_recv(void *chan) {
+    g_channel_progress++;
     LiraChan *c = (LiraChan *)chan;
     if (c == NULL) {
         lira_rt_panic("recv on null channel");
@@ -386,6 +420,9 @@ int64_t lira_rt_chan_recv(void *chan) {
 }
 
 int8_t lira_rt_chan_try_recv(void *chan, int64_t *out) {
+    /* Only a *successful* try counts as progress: a `select` that keeps polling
+     * an empty channel must not look like the program is getting somewhere, or
+     * the deadlock check below can never fire. */
     LiraChan *c = (LiraChan *)chan;
     if (c == NULL) {
         return 0;
@@ -397,12 +434,14 @@ int8_t lira_rt_chan_try_recv(void *chan, int64_t *out) {
             lira_buf_push(c, s->xfer);
             lira_wake(s);
         }
+        g_channel_progress++;
         return 1;
     }
     LiraFiber *s = lira_wait_pop(&c->send_head, &c->send_tail);
     if (s != NULL) {
         *out = s->xfer;
         lira_wake(s);
+        g_channel_progress++;
         return 1;
     }
     return 0;
@@ -418,16 +457,19 @@ int8_t lira_rt_chan_try_send(void *chan, int64_t value) {
         r->xfer = value;
         r->xfer_closed = 0;
         lira_wake(r);
+        g_channel_progress++;
         return 1;
     }
     if (c->len < c->cap) {
         lira_buf_push(c, value);
+        g_channel_progress++;
         return 1;
     }
     return 0;
 }
 
 void lira_rt_chan_close(void *chan) {
+    g_channel_progress++;
     LiraChan *c = (LiraChan *)chan;
     if (c == NULL || c->closed) {
         return;

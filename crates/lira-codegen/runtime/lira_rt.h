@@ -31,7 +31,8 @@ enum LiraKind {
     LIRA_KIND_ARRAY = 2,
     LIRA_KIND_STRUCT = 3,
     LIRA_KIND_ENUM = 4,
-    LIRA_KIND_CHANNEL = 5
+    LIRA_KIND_CHANNEL = 5,
+    LIRA_KIND_MAP = 6
 };
 
 /* 16 bytes, keeping every payload that follows 8-byte aligned. */
@@ -117,6 +118,17 @@ void lira_rt_array_set(LiraArray *a, int64_t index, int64_t value);
 int64_t lira_rt_array_len(const LiraArray *a);
 
 /* ------------------------------------------------------------------ */
+/* Maps                                                                */
+/* ------------------------------------------------------------------ */
+
+void *lira_rt_map_new(void);
+void lira_rt_map_set(void *map, LiraStr *key, int64_t value);
+int64_t lira_rt_map_get(void *map, const LiraStr *key);
+int8_t lira_rt_map_has(void *map, const LiraStr *key);
+int64_t lira_rt_map_len(void *map);
+LiraArray *lira_rt_map_keys(void *map);
+
+/* ------------------------------------------------------------------ */
 /* Arithmetic helpers                                                  */
 /* ------------------------------------------------------------------ */
 
@@ -139,6 +151,8 @@ void lira_rt_set_args(int argc, char **argv);
 
 int64_t lira_rt_spawn(LiraFiberEntry entry, void *env);
 void lira_rt_yield(void);
+/* Yield from a `select` with no ready arm; reports a deadlock if none can be. */
+void lira_rt_select_block(void);
 int64_t lira_rt_fiber_id(void);
 
 void *lira_rt_chan_new(int64_t capacity);

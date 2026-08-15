@@ -249,6 +249,13 @@ const RUNTIME: &[(&str, &[Ty], Option<Ty>)] = &[
     ("lira_rt_array_get", &[Ty::P, Ty::I64], Some(Ty::I64)),
     ("lira_rt_array_set", &[Ty::P, Ty::I64, Ty::I64], None),
     ("lira_rt_array_len", &[Ty::P], Some(Ty::I64)),
+    // Maps
+    ("lira_rt_map_new", &[], Some(Ty::P)),
+    ("lira_rt_map_set", &[Ty::P, Ty::P, Ty::I64], None),
+    ("lira_rt_map_get", &[Ty::P, Ty::P], Some(Ty::I64)),
+    ("lira_rt_map_has", &[Ty::P, Ty::P], Some(Ty::I8)),
+    ("lira_rt_map_len", &[Ty::P], Some(Ty::I64)),
+    ("lira_rt_map_keys", &[Ty::P], Some(Ty::P)),
     // Arithmetic that needs a trap check
     ("lira_rt_idiv", &[Ty::I64, Ty::I64], Some(Ty::I64)),
     ("lira_rt_imod", &[Ty::I64, Ty::I64], Some(Ty::I64)),
@@ -259,11 +266,15 @@ const RUNTIME: &[(&str, &[Ty], Option<Ty>)] = &[
     ("lira_rt_set_args", &[Ty::I32, Ty::P], None),
     ("lira_rt_spawn", &[Ty::P, Ty::P], Some(Ty::I64)),
     ("lira_rt_yield", &[], None),
+    ("lira_rt_select_block", &[], None),
     ("lira_rt_fiber_id", &[], Some(Ty::I64)),
     ("lira_rt_chan_new", &[Ty::I64], Some(Ty::P)),
     ("lira_rt_chan_send", &[Ty::P, Ty::I64], None),
     ("lira_rt_chan_recv", &[Ty::P], Some(Ty::I64)),
     ("lira_rt_chan_close", &[Ty::P], None),
+    // Non-blocking forms, used by `select`.
+    ("lira_rt_chan_try_recv", &[Ty::P, Ty::P], Some(Ty::I8)),
+    ("lira_rt_chan_try_send", &[Ty::P, Ty::I64], Some(Ty::I8)),
 ];
 
 /// Build the Cranelift signature of a runtime symbol.

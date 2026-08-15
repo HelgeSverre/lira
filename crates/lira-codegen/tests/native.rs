@@ -1006,6 +1006,119 @@ fn a_function_body_may_end_in_a_bare_expression() {
 }
 
 // ---------------------------------------------------------------------- //
+// Maps                                                                    //
+// ---------------------------------------------------------------------- //
+
+#[test]
+fn maps_are_keyed_by_string() {
+    assert_lines(
+        r#"
+        let m = { "name": "Alice", "city": "Oslo" }
+        println(m["name"])
+        println(m["city"])
+        println(len(m))
+        m["city"] = "Bergen"
+        println(m["city"])
+        println(len(m))
+        // A key that was never set reads as the zero value, which for a
+        // reference is null.
+        println(m["missing"])
+        "#,
+        &["Alice", "Oslo", "2", "Bergen", "2", "null"],
+    );
+}
+
+#[test]
+fn maps_grow_past_their_initial_capacity() {
+    assert_lines(
+        r#"
+        let m = { "k0": 0 }
+        var i = 1
+        while i < 50 {
+            m["k" + i] = i * i
+            i = i + 1
+        }
+        println(len(m))
+        println(m["k7"])
+        println(m["k49"])
+        "#,
+        &["50", "49", "2401"],
+    );
+}
+
+// ---------------------------------------------------------------------- //
+// select                                                                  //
+// ---------------------------------------------------------------------- //
+
+#[test]
+fn select_takes_the_default_arm_when_nothing_is_ready() {
+    assert_lines(
+        r#"
+        let ch = chan(1)
+        select {
+            _ => println("nothing ready")
+        }
+        "#,
+        &["nothing ready"],
+    );
+}
+
+#[test]
+fn select_prefers_a_ready_channel_over_the_default() {
+    assert_lines(
+        r#"
+        fn main() {
+            let ch = chan(1)
+            send(ch, 7)
+            select {
+                v = <-ch => println("got " + v)
+                _ => println("nothing ready")
+            }
+        }
+        "#,
+        &["got 7"],
+    );
+}
+
+#[test]
+fn a_select_without_a_default_waits_for_a_sender() {
+    assert_lines(
+        r#"
+        fn producer(ch) {
+            send(ch, 99)
+        }
+        fn main() {
+            let ch = chan(0)
+            spawn producer(ch)
+            select {
+                v = <-ch => println("received " + v)
+            }
+        }
+        "#,
+        &["received 99"],
+    );
+}
+
+#[test]
+fn a_select_that_can_never_be_ready_reports_a_deadlock() {
+    let output = run_native(
+        r#"
+        fn main() {
+            let ch = chan(0)
+            println("waiting")
+            select {
+                v = <-ch => println("never")
+            }
+        }
+        "#,
+    )
+    .expect("compiles");
+    assert!(output.contains("waiting"), "unexpected output: {}", output);
+    assert!(output.contains("deadlock"), "unexpected output: {}", output);
+    assert!(!output.contains("never"), "unexpected output: {}", output);
+}
+
+// ---------------------------------------------------------------------- //
 // Diagnostics                                                             //
 // ---------------------------------------------------------------------- //
 
@@ -1024,7 +1137,7 @@ fn a_type_error_stops_native_compilation() {
 
 #[test]
 fn the_error_points_at_the_bytecode_vm_as_the_fallback() {
-    match run_native("let m = { \"a\": 1 }") {
+    match run_native("fn identity<T>(x: T) -> T { return x }\nprintln(identity(1))") {
         Ok(_) => panic!("expected a compile error"),
         Err(error) => assert!(
             error.contains("lira run"),

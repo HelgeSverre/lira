@@ -8,6 +8,7 @@ const SOURCES: &[&str] = &[
     "lira_math.c",
     "lira_string.c",
     "lira_os.c",
+    "lira_map.c",
     "lira_encoding.c",
     "lira_net.c",
     "lira_ctx.S",

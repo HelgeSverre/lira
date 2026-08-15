@@ -163,6 +163,13 @@ returned into.
 `expr?` propagates both: an absent optional returns null from the enclosing
 function, and an `Err` is handed back to the caller unchanged.
 
+## Maps
+
+A map is a string-keyed open-addressing hash table in the runtime, with the same
+uniform 8-byte cells arrays use for values. String keys match the bytecode VM,
+which represents a map as an object with string field names. `len` works on one
+natively; the VM rejects it.
+
 ## Fibers: the interesting part
 
 The bytecode VM can suspend a fiber by saving an instruction pointer, because
@@ -201,6 +208,12 @@ and calls into C, which never comes back.
 `spawn f(a, b)` needs one more piece: the scheduler can only start a fiber from
 a `void(*)(void*)`. So the arguments are evaluated at the spawn site, boxed into
 a heap cell, and unpacked by a thunk Cranelift generates for that call site.
+
+`select` tries its arms in source order with the non-blocking channel
+operations. A `_` arm catches a pass that finds nothing ready. Without one, the
+fiber yields and tries again — and the runtime reports a deadlock if a whole
+sweep of the run queue goes by with no successful channel operation, so a select
+that can never become ready fails loudly instead of spinning forever.
 
 Channels are cooperative and lock-free by construction — everything runs on one
 OS thread and only moves state at an explicit switch point. `send` hands its
@@ -272,18 +285,18 @@ patterns, plus guards; structs with nested and narrow fields; enums with
 payloads and `__enum`/`__variant` reflection; tuples, tuple patterns and
 destructuring `let`; lambdas, closures with captures, and functions as values;
 optionals including boxed scalar optionals, `??`, `?.` and `?`; `Result<T, E>`
-with typed payloads;
+with typed payloads; string-keyed maps; `select` with and without a default arm;
 arrays with indexing, assignment, `push`, `pop` and `len`; strings with
 concatenation, interpolation, comparison and `len`; `spawn`, `chan`, `send`,
 `recv`, `close`, `fiber_yield`, `fiber_id`.
 
-Of the repository's 124 examples, 86 compile natively and produce byte-identical
+Of the repository's 124 examples, 88 compile natively and produce byte-identical
 output to the bytecode VM. Six more compile and run correctly but cannot be
 compared byte-for-byte: they print timestamps, random UUIDs, or `env_args`,
 which differ between an interpreted script and a compiled binary by nature. The
 rest use constructs listed below and are declined with a reason.
 
-46 examples are pinned as regression tests in `tests/parity.rs`, and every
+48 examples are pinned as regression tests in `tests/parity.rs`, and every
 example that type-checks is required to either compile or be declined cleanly —
 an internal error fails the suite.
 
@@ -291,10 +304,8 @@ an internal error fails the suite.
 
 | Not lowered | Notes |
 |---|---|
-| Maps | Needs a hashed representation in the runtime |
 | Class inheritance | Needs prefixed layouts and a vtable |
 | Generics | Type-erased in the VM; native wants monomorphisation |
-| `select` | Needs multi-channel parking |
 | `json_*`, `regex_*`, `http_*` | Need a dynamic value, a regex engine and an HTTP client |
 | String indexing | Needs a decision on byte vs. character indexing |
 
@@ -318,6 +329,7 @@ Two more limits worth knowing:
 - A function whose body ends in a bare expression returns it. The VM returns
   null instead, so `examples/null_and_optionals.li` differs — the native result
   is the one the example's own comments expect.
+- `len` works on a map; the VM reports "cannot get length of non-array/string".
 
 ## Platform support
 
