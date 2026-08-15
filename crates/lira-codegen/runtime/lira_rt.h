@@ -67,6 +67,10 @@ typedef struct LiraArray {
 #define LIRA_ENUM_TAG_OFFSET 16
 #define LIRA_ENUM_PAYLOAD_OFFSET 24
 
+/* A double in positional notation runs to about 310 integer digits before the
+ * point, plus a sign, a point and the fraction. */
+#define LIRA_FLOAT_BUFFER 400
+
 /* ------------------------------------------------------------------ */
 /* Allocation                                                          */
 /* ------------------------------------------------------------------ */
@@ -129,6 +133,9 @@ typedef void (*LiraFiberEntry)(void *env);
 /* Boot the scheduler with `entry` as fiber 0 and run until every fiber has
  * finished. Returns the process exit code. */
 int32_t lira_rt_boot(LiraFiberEntry entry, void *env);
+
+/* Record the process arguments so `env_args` can report them. */
+void lira_rt_set_args(int argc, char **argv);
 
 int64_t lira_rt_spawn(LiraFiberEntry entry, void *env);
 void lira_rt_yield(void);

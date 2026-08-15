@@ -42,6 +42,14 @@ const PARITY_EXAMPLES: &[&str] = &[
     "mutual_recursion.li",
     "main_entry_point.li",
     "integer_types.li",
+    "range_expressions.li",
+    "type_alias.li",
+    "test_core.li",
+    "test_math.li",
+    "test_collections.li",
+    "test_base64.li",
+    "test_hash.li",
+    "channel_basic.li",
 ];
 
 fn examples_dir() -> PathBuf {
@@ -170,7 +178,7 @@ fn every_example_either_compiles_or_is_declined_with_a_reason() {
         internal_errors.join("\n")
     );
     assert!(
-        accepted > 40,
+        accepted > 60,
         "expected the native backend to accept most examples, got {} accepted / {} declined",
         accepted,
         declined

@@ -78,11 +78,17 @@ impl EnumLayout {
     }
 }
 
+/// The built-in struct a `a..b` expression evaluates to, mirroring the object
+/// the bytecode backend builds. Iterating a range reads these fields back.
+pub const RANGE_TYPE: &str = "Range";
+
 /// All aggregate layouts in a program, keyed by type name.
 #[derive(Debug, Default, Clone)]
 pub struct LayoutMap {
     pub structs: HashMap<String, StructLayout>,
     pub enums: HashMap<String, EnumLayout>,
+    /// `type Name = ...` declarations, unresolved.
+    pub aliases: HashMap<String, Type>,
 }
 
 impl LayoutMap {
@@ -93,8 +99,55 @@ impl LayoutMap {
     /// for free and declaration order does not matter.
     pub fn build(program: &Program) -> CodegenResult<Self> {
         let mut map = LayoutMap::default();
+        // Seeded first so a user declaration of the same name replaces it and
+        // `range_layout_is_usable` can then report the clash.
+        map.structs.insert(
+            RANGE_TYPE.to_string(),
+            layout_fields(
+                RANGE_TYPE.to_string(),
+                &[
+                    ("start".to_string(), Type::Int),
+                    ("end".to_string(), Type::Int),
+                    ("inclusive".to_string(), Type::Bool),
+                ],
+            ),
+        );
         collect(&program.statements, &mut map)?;
         Ok(map)
+    }
+
+    /// Whether the `Range` layout is still the built-in one. A program that
+    /// declares its own `struct Range` shadows it, and `a..b` can no longer be
+    /// lowered against it.
+    pub fn range_layout_is_usable(&self) -> bool {
+        self.structs.get(RANGE_TYPE).is_some_and(|layout| {
+            layout
+                .field("start")
+                .is_some_and(|f| matches!(f.ty, Type::Int))
+                && layout
+                    .field("end")
+                    .is_some_and(|f| matches!(f.ty, Type::Int))
+                && layout
+                    .field("inclusive")
+                    .is_some_and(|f| matches!(f.ty, Type::Bool))
+        })
+    }
+
+    /// Follow `type A = B` chains to the type they finally name.
+    pub fn resolve_alias(&self, name: &str) -> Option<Type> {
+        let mut current = self.aliases.get(name)?.clone();
+        // Bounded so a cyclic alias reports nothing instead of hanging; the
+        // checker rejects those anyway.
+        for _ in 0..16 {
+            let Type::Struct(next) = &current else {
+                return Some(current);
+            };
+            match self.aliases.get(next) {
+                Some(target) => current = target.clone(),
+                None => return Some(current),
+            }
+        }
+        None
     }
 
     pub fn is_aggregate(&self, name: &str) -> bool {
@@ -156,6 +209,9 @@ fn collect(statements: &[Statement], map: &mut LayoutMap) -> CodegenResult<()> {
                         size: ENUM_PAYLOAD_OFFSET + SLOT_SIZE * widest as i32,
                     },
                 );
+            }
+            StatementKind::TypeAlias { name, type_expr } => {
+                map.aliases.insert(name.clone(), type_of_ann(type_expr));
             }
             StatementKind::Block(block) => collect(&block.statements, map)?,
             _ => {}
@@ -330,6 +386,22 @@ mod tests {
         assert_eq!(shape.variant("Rect").unwrap().tag, 2);
         // header + tag + two payload slots
         assert_eq!(shape.size, 40);
+    }
+
+    #[test]
+    fn type_aliases_resolve_through_chains() {
+        let map = LayoutMap::build(&program("type A = B\ntype B = int")).unwrap();
+        assert_eq!(map.resolve_alias("A"), Some(Type::Int));
+        assert_eq!(map.resolve_alias("B"), Some(Type::Int));
+        assert_eq!(map.resolve_alias("Missing"), None);
+    }
+
+    #[test]
+    fn range_is_a_builtin_layout_a_user_struct_can_shadow() {
+        let map = LayoutMap::build(&program("let x = 1")).unwrap();
+        assert!(map.range_layout_is_usable());
+        let shadowed = LayoutMap::build(&program("struct Range { lo: string }")).unwrap();
+        assert!(!shadowed.range_layout_is_usable());
     }
 
     #[test]

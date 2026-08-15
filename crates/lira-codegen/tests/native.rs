@@ -534,6 +534,214 @@ fn fibers_get_their_own_stacks() {
 }
 
 // ---------------------------------------------------------------------- //
+// Built-ins                                                               //
+// ---------------------------------------------------------------------- //
+
+#[test]
+fn math_builtins_lower_to_instructions_and_libm() {
+    assert_lines(
+        r#"
+        println(sqrt(16.0))
+        println(floor(2.7))
+        println(ceil(2.1))
+        println(trunc(-2.7))
+        println(round(2.5))
+        println(pow(2.0, 10.0))
+        println(is_nan(0.0))
+        println(is_finite(1.0))
+        println(abs(-3.5))
+        "#,
+        &["4", "2", "3", "-2", "3", "1024", "false", "true", "3.5"],
+    );
+}
+
+#[test]
+fn string_builtins_index_by_character_not_byte() {
+    assert_lines(
+        r#"
+        println(str_to_upper("hello"))
+        println(str_to_lower("HELLO"))
+        println(str_substring("hello world", 0, 5))
+        println(str_index_of("hello world", "world"))
+        println(str_trim("  padded  "))
+        println(len(str_split("a,b,c", ",")))
+        println(str_split("a,b,c", ",")[1])
+        println(str_char_code("abc", 1))
+        println(str_from_char_code(65))
+        "#,
+        &[
+            "HELLO", "hello", "hello", "6", "padded", "3", "b", "98", "A",
+        ],
+    );
+}
+
+#[test]
+fn hash_and_encoding_builtins_match_the_reference_digests() {
+    // Known-answer tests: these are the published digests for "hello" and the
+    // RFC 4648 vectors, so they pin the C implementations rather than merely
+    // comparing them against themselves.
+    assert_lines(
+        r#"
+        println(md5("hello"))
+        println(sha1("hello"))
+        println(sha256("hello"))
+        println(base64_encode("Lira"))
+        println(base64_decode("TGlyYQ=="))
+        println(base64_encode(""))
+        println(url_encode("a b&c"))
+        println(url_decode("a+b%26c"))
+        "#,
+        &[
+            "5d41402abc4b2a76b9719d911017c592",
+            "aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d",
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+            "TGlyYQ==",
+            "Lira",
+            "",
+            "a+b%26c",
+            "a b&c",
+        ],
+    );
+}
+
+#[test]
+fn sha512_matches_the_reference_digest() {
+    assert_lines(
+        r#"println(sha512("hello"))"#,
+        &["9b71d224bd62f3785d96d46ad3ea3d73319bfbc2890caadae2dff72519673ca72323c3d99ba5c11d7c7acc6e14b8c5da0c4663475c2e5c3adef46f73bcdec043"],
+    );
+}
+
+#[test]
+fn uuids_are_well_formed_and_versioned() {
+    assert_lines(
+        r#"
+        println(uuid_is_valid(uuid_v4()))
+        println(uuid_is_valid(uuid_v7()))
+        println(uuid_is_valid("not-a-uuid"))
+        println(uuid_nil())
+        println(len(uuid_v4()))
+        "#,
+        &[
+            "true",
+            "true",
+            "false",
+            "00000000-0000-0000-0000-000000000000",
+            "36",
+        ],
+    );
+}
+
+#[test]
+fn file_and_filesystem_builtins_round_trip() {
+    assert_lines(
+        r#"
+        let dir = env_temp_dir() + "/lira-native-file-test"
+        mkdir_all(dir)
+        let path = dir + "/note.txt"
+        let handle = file_open(path, 1)
+        file_write(handle, "written natively")
+        file_close(handle)
+        println(file_exists(path))
+        println(is_file(path))
+        println(is_dir(dir))
+        let reader = file_open(path, 0)
+        println(file_read(reader, 100))
+        file_close(reader)
+        println(file_size(path))
+        remove_all(dir)
+        println(file_exists(path))
+        "#,
+        &["true", "true", "true", "written natively", "16", "false"],
+    );
+}
+
+#[test]
+fn environment_and_time_builtins_report_live_values() {
+    assert_lines(
+        r#"
+        env_set("LIRA_NATIVE_TEST", "present")
+        println(env_has("LIRA_NATIVE_TEST"))
+        println(env_get("LIRA_NATIVE_TEST"))
+        env_remove("LIRA_NATIVE_TEST")
+        println(env_has("LIRA_NATIVE_TEST"))
+        println(time_ms() > 0)
+        println(time_secs() > 0)
+        println(random() < 1.0)
+        let n = random_int(5, 10)
+        println(n >= 5 && n < 10)
+        "#,
+        &["true", "present", "false", "true", "true", "true", "true"],
+    );
+}
+
+#[test]
+fn a_user_function_shadows_a_built_in_of_the_same_name() {
+    assert_lines(
+        r#"
+        fn random() -> int { return 4 }
+        println(random())
+        "#,
+        &["4"],
+    );
+}
+
+// ---------------------------------------------------------------------- //
+// Type resolution                                                         //
+// ---------------------------------------------------------------------- //
+
+#[test]
+fn type_aliases_are_transparent() {
+    assert_lines(
+        r#"
+        type Integer = int
+        type Text = string
+        fn twice(n: Integer) -> Integer { return n * 2 }
+        let label: Text = "answer"
+        println(label + ": " + twice(21))
+        "#,
+        &["answer: 42"],
+    );
+}
+
+#[test]
+fn ranges_are_values_as_well_as_loop_subjects() {
+    assert_lines(
+        r#"
+        let r = 1..4
+        println(r.start)
+        println(r.end)
+        println(r.inclusive)
+        var total = 0
+        for i in r { total = total + i }
+        println(total)
+        let inclusive = 1..=4
+        var sum = 0
+        for i in inclusive { sum = sum + i }
+        println(sum)
+        "#,
+        &["1", "4", "false", "6", "10"],
+    );
+}
+
+#[test]
+fn impl_blocks_on_built_in_types_dispatch() {
+    assert_lines(
+        r#"
+        impl int {
+            fn doubled(self) -> int { return self * 2 }
+        }
+        impl string {
+            fn shout(self) -> string { return self + "!" }
+        }
+        println(21.doubled())
+        println("hey".shout())
+        "#,
+        &["42", "hey!"],
+    );
+}
+
+// ---------------------------------------------------------------------- //
 // Diagnostics                                                             //
 // ---------------------------------------------------------------------- //
 

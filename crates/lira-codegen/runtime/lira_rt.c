@@ -113,8 +113,13 @@ LiraStr *lira_rt_int_to_str(int64_t v) {
 }
 
 /* Matches the bytecode VM, which formats floats with Rust's `{}`: the shortest
- * decimal form that round-trips, with no forced ".0" on integral values, and
- * "inf" / "-inf" / "NaN" for the specials. */
+ * decimal form that round-trips, always in positional notation — Rust's Display
+ * never switches to an exponent — with "inf" / "-inf" / "NaN" for the specials
+ * and no forced ".0" on an integral value.
+ *
+ * `%g` alone will not do: it prints 10.0 as "1e+01". So the shortest
+ * round-tripping digit string is found with `%e`, then re-rendered positionally.
+ */
 static int lira_format_float(char *buf, size_t cap, double v) {
     if (isnan(v)) {
         return snprintf(buf, cap, "NaN");
@@ -122,20 +127,85 @@ static int lira_format_float(char *buf, size_t cap, double v) {
     if (isinf(v)) {
         return snprintf(buf, cap, v < 0 ? "-inf" : "inf");
     }
-    for (int precision = 1; precision <= 17; precision++) {
-        int n = snprintf(buf, cap, "%.*g", precision, v);
-        if (n > 0 && (size_t)n < cap && strtod(buf, NULL) == v) {
+    if (v == 0.0) {
+        return snprintf(buf, cap, signbit(v) ? "-0" : "0");
+    }
+
+    char scientific[64];
+    int significant = 17;
+    for (int digits = 1; digits <= 17; digits++) {
+        snprintf(scientific, sizeof(scientific), "%.*e", digits - 1, v);
+        if (strtod(scientific, NULL) == v) {
+            significant = digits;
             break;
         }
-        if (precision == 17) {
-            snprintf(buf, cap, "%.17g", v);
+    }
+
+    /* Split "-d.dddde+XX" into its sign, digit string and exponent. */
+    const char *cursor = scientific;
+    int negative = 0;
+    if (*cursor == '-') {
+        negative = 1;
+        cursor++;
+    }
+    char digits[24];
+    int count = 0;
+    while (*cursor != 'e' && *cursor != 'E' && *cursor != '\0' && count < (int)sizeof(digits) - 1) {
+        if (*cursor != '.') {
+            digits[count++] = *cursor;
+        }
+        cursor++;
+    }
+    digits[count] = '\0';
+    int exponent = (*cursor == 'e' || *cursor == 'E') ? atoi(cursor + 1) : 0;
+    (void)significant;
+
+    /* Trailing zeros carry no information in positional form. */
+    while (count > 1 && digits[count - 1] == '0') {
+        digits[--count] = '\0';
+    }
+
+    size_t written = 0;
+    if (negative && written + 1 < cap) {
+        buf[written++] = '-';
+    }
+    if (exponent >= count - 1) {
+        /* An integer: every digit, then the remaining magnitude as zeros. */
+        for (int i = 0; i < count && written + 1 < cap; i++) {
+            buf[written++] = digits[i];
+        }
+        for (int i = 0; i < exponent - (count - 1) && written + 1 < cap; i++) {
+            buf[written++] = '0';
+        }
+    } else if (exponent >= 0) {
+        /* The point falls inside the digits. */
+        for (int i = 0; i < count && written + 1 < cap; i++) {
+            if (i == exponent + 1) {
+                buf[written++] = '.';
+            }
+            if (written + 1 < cap) {
+                buf[written++] = digits[i];
+            }
+        }
+    } else {
+        /* Smaller than one: "0." then the leading zeros the exponent implies. */
+        if (written + 2 < cap) {
+            buf[written++] = '0';
+            buf[written++] = '.';
+        }
+        for (int i = 0; i < -exponent - 1 && written + 1 < cap; i++) {
+            buf[written++] = '0';
+        }
+        for (int i = 0; i < count && written + 1 < cap; i++) {
+            buf[written++] = digits[i];
         }
     }
-    return (int)strlen(buf);
+    buf[written] = '\0';
+    return (int)written;
 }
 
 LiraStr *lira_rt_float_to_str(double v) {
-    char buf[64];
+    char buf[LIRA_FLOAT_BUFFER];
     int n = lira_format_float(buf, sizeof(buf), v);
     return lira_rt_str_new(buf, n);
 }
@@ -165,7 +235,7 @@ void lira_rt_print_int(int64_t v) { printf("%" PRId64, v); }
 void lira_rt_println_int(int64_t v) { printf("%" PRId64 "\n", v); }
 
 void lira_rt_print_float(double v) {
-    char buf[64];
+    char buf[LIRA_FLOAT_BUFFER];
     lira_format_float(buf, sizeof(buf), v);
     fputs(buf, stdout);
 }

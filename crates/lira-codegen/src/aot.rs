@@ -91,7 +91,11 @@ fn emit_c_main(module: &mut ObjectModule, entry_id: FuncId) -> CodegenResult<()>
     let pointer_ty = module.target_config().pointer_type();
     let call_conv = module.isa().default_call_conv();
 
+    // `int main(int argc, char **argv)` — the arguments are forwarded to the
+    // runtime so `env_args` has something to report.
     let mut main_sig = Signature::new(call_conv);
+    main_sig.params.push(AbiParam::new(types::I32));
+    main_sig.params.push(AbiParam::new(pointer_ty));
     main_sig.returns.push(AbiParam::new(types::I32));
     let main_id = module
         .declare_function("main", Linkage::Export, &main_sig)
@@ -102,6 +106,11 @@ fn emit_c_main(module: &mut ObjectModule, entry_id: FuncId) -> CodegenResult<()>
         .declare_function("lira_rt_boot", Linkage::Import, &boot_sig)
         .map_err(|e| CodegenError::internal(e.to_string()))?;
 
+    let set_args_sig = runtime::signature("lira_rt_set_args", call_conv, pointer_ty)?;
+    let set_args_id = module
+        .declare_function("lira_rt_set_args", Linkage::Import, &set_args_sig)
+        .map_err(|e| CodegenError::internal(e.to_string()))?;
+
     let frontend_config = module.target_config();
     let mut ctx = module.make_context();
     ctx.func.signature = main_sig;
@@ -109,7 +118,13 @@ fn emit_c_main(module: &mut ObjectModule, entry_id: FuncId) -> CodegenResult<()>
     {
         let mut builder = FunctionBuilder::new(&mut ctx.func, &mut builder_ctx);
         let block = builder.create_block();
+        builder.append_block_params_for_function_params(block);
         builder.switch_to_block(block);
+        let argc = builder.block_params(block)[0];
+        let argv = builder.block_params(block)[1];
+
+        let set_args_ref = module.declare_func_in_func(set_args_id, builder.func);
+        builder.ins().call(set_args_ref, &[argc, argv]);
 
         let entry_ref = module.declare_func_in_func(entry_id, builder.func);
         let boot_ref = module.declare_func_in_func(boot_id, builder.func);

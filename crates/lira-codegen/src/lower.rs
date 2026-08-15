@@ -346,6 +346,16 @@ impl<'a> Lowerer<'a> {
                     .and_then(|init| infer_or_checked_with(self, &resolve, init))
                     .and_then(concrete)
             })
+            .or_else(|| {
+                // `let ch = chan(5)` has no better answer than `any`. That is
+                // still pointer-shaped and storable; an operation that needs a
+                // sharper type fails later, at the use, with a clearer message.
+                let resolve = |name: &str| known.get(name).cloned();
+                match initializer.and_then(|init| infer_or_checked_with(self, &resolve, init)) {
+                    Some(Type::Any) => Some(Type::Any),
+                    _ => None,
+                }
+            })
     }
 
     fn signature_for(&self, params: &[ParamInfo], ret: &Type) -> CodegenResult<Signature> {
@@ -378,6 +388,11 @@ impl<'a> Lowerer<'a> {
     fn user_type(&self, name: &str) -> Type {
         if let Some(primitive) = layout::primitive_type(name) {
             return primitive;
+        }
+        // `type Integer = int` makes `Integer` a spelling of `int`, not a type
+        // of its own; resolve it before anything asks for a layout.
+        if let Some(target) = self.layouts.resolve_alias(name) {
+            return self.normalize(target);
         }
         if self.layouts.enums.contains_key(name) {
             Type::Enum(name.to_string())
@@ -414,6 +429,27 @@ impl<'a> Lowerer<'a> {
             ExpressionKind::StringLiteral(_) => Type::String,
             ExpressionKind::CharLiteral(_) => Type::Char,
             ExpressionKind::BoolLiteral(_) => Type::Bool,
+            // A call whose callee the backend does not know is the usual cause
+            // here — normally a built-in the native runtime has not grown yet.
+            // Naming it beats reporting a missing type.
+            ExpressionKind::Call { callee, .. } => {
+                if let ExpressionKind::Identifier(name) = &callee.kind {
+                    return Err(CodegenError::unsupported_at(
+                        format!("unknown function `{}`", name),
+                        &expr.span,
+                    ));
+                }
+                return Err(CodegenError::unsupported_at(
+                    "the type checker did not record a type for this call",
+                    &expr.span,
+                ));
+            }
+            ExpressionKind::MethodCall { method, .. } => {
+                return Err(CodegenError::unsupported_at(
+                    format!("`.{}()` is not lowered by the native backend yet", method),
+                    &expr.span,
+                ))
+            }
             _ => {
                 return Err(CodegenError::unsupported_at(
                     "the type checker did not record a type for this expression",
@@ -934,10 +970,10 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
                 };
                 let (ty, value) = match initializer {
                     Some(init) => {
-                        let ty = declared
-                            .clone()
-                            .filter(|t| !matches!(t, Type::Any))
-                            .unwrap_or(self.ty_of(init)?);
+                        let ty = match declared.clone().filter(|t| !matches!(t, Type::Any)) {
+                            Some(annotated) => annotated,
+                            None => self.ty_of(init)?,
+                        };
                         let value = self.lower_expr_typed(init, &ty)?.ok_or_else(|| {
                             CodegenError::unsupported_at(
                                 format!("`{}` is initialised with a value of type `void`", name),
@@ -1192,6 +1228,18 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
         }
 
         let iter_ty = self.ty_of(iterable)?;
+
+        // A range that reached here through a variable rather than written
+        // inline still iterates; read its bounds back out of the object.
+        if matches!(&iter_ty, Type::Struct(name) if name == layout::RANGE_TYPE) {
+            let range = self.lower_expr_value(iterable, &iter_ty)?;
+            let layout = self.range_layout(span)?;
+            let start = self.load_at(range, layout.0, &Type::Int)?;
+            let end = self.load_at(range, layout.1, &Type::Int)?;
+            let inclusive = self.load_at(range, layout.2, &Type::Bool)?;
+            return self.lower_dynamic_range_loop(variable, start, end, inclusive, body);
+        }
+
         let Type::Array(element_ty) = iter_ty.clone() else {
             return Err(CodegenError::unsupported_at(
                 format!(
@@ -1372,7 +1420,34 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
         let Some(value) = self.lower_expr(expr)? else {
             return Ok(None);
         };
+        self.check_value_type(value, &actual, &expr.span)?;
         Ok(Some(self.coerce(value, &actual, expected, &expr.span)?))
+    }
+
+    /// Assert that a lowered value really has the machine type its Lira type
+    /// implies.
+    ///
+    /// `coerce` and every store downstream trust this correspondence. When a
+    /// built-in and the checker disagree about a call's result type, the
+    /// mismatch would otherwise reinterpret the bits — an `i64` read as an
+    /// `f64` — and produce a wrong answer with no diagnostic anywhere. Catching
+    /// it here turns that into a loud internal error instead.
+    fn check_value_type(&self, value: Value, ty: &Type, span: &Span) -> CodegenResult<()> {
+        let Some(expected) = repr_of(ty)?.clif(self.pointer_ty()) else {
+            return Ok(());
+        };
+        let actual = self.builder.func.dfg.value_type(value);
+        if actual != expected {
+            return Err(CodegenError::internal(format!(
+                "{}:{}: lowered a `{}` as {} but the program expects {}",
+                span.line,
+                span.column,
+                ty.display_name(),
+                actual,
+                expected
+            )));
+        }
+        Ok(())
     }
 
     /// Lower an expression for its effects, discarding any value.
@@ -1615,10 +1690,13 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
                 "tuples are not lowered by the native backend yet",
                 &expr.span,
             )),
-            ExpressionKind::Range { .. } => Err(CodegenError::unsupported_at(
-                "ranges are only lowered as the subject of a `for` loop",
-                &expr.span,
-            )),
+            ExpressionKind::Range {
+                start,
+                end,
+                inclusive,
+            } => self
+                .lower_range_value(start.as_deref(), end.as_deref(), *inclusive, &expr.span)
+                .map(Some),
             ExpressionKind::Try(_) => Err(CodegenError::unsupported_at(
                 "the `?` operator is not lowered by the native backend yet",
                 &expr.span,
@@ -2182,6 +2260,9 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
     }
 
     fn value_to_string(&mut self, value: Value, ty: &Type, span: &Span) -> CodegenResult<Value> {
+        // `string?` is the same pointer as `string`; the runtime renders a null
+        // one as "null".
+        let ty = strip_optional(ty);
         Ok(match repr_of(ty)? {
             _ if matches!(ty, Type::String) => value,
             Repr::Int => self.call_rt_value("lira_rt_int_to_str", &[value])?,
@@ -2249,6 +2330,16 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
                 }
                 if self.l.funcs.contains_key(name.as_str()) {
                     return self.lower_user_call(&name.clone(), None, args, span);
+                }
+                // The checker lets `impl int { fn abs(self) }` be called as
+                // `abs(-5)`, with the receiver as the first argument. The
+                // standard library leans on this throughout.
+                if let Some(first) = args.first() {
+                    let receiver_ty = self.ty_of(&first.value)?;
+                    if let Some(key) = self.impl_key_for(&receiver_ty, name) {
+                        let self_value = self.lower_expr_value(&first.value, &receiver_ty)?;
+                        return self.lower_user_call(&key, Some(self_value), &args[1..], span);
+                    }
                 }
                 Err(CodegenError::unsupported_at(
                     format!("unknown function `{}`", name),
@@ -2385,6 +2476,16 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
             }
         }
         None
+    }
+
+    /// The key of an instance method callable on `receiver_ty`, whether the
+    /// receiver is a built-in type or a user aggregate.
+    fn impl_key_for(&self, receiver_ty: &Type, method: &str) -> Option<String> {
+        let key = match receiver_ty {
+            Type::Struct(name) | Type::Enum(name) | Type::Class(name) => fn_key(Some(name), method),
+            other => return self.builtin_impl_key(other, method),
+        };
+        self.l.funcs.contains_key(&key).then_some(key)
     }
 
     fn lower_array_method(
@@ -2527,6 +2628,15 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
         args: &[Argument],
         span: &Span,
     ) -> CodegenResult<Option<BuiltinResult>> {
+        // A program may define a function whose name matches a built-in —
+        // `examples/stdlib_demo.li` writes its own `abs` — and the checker
+        // resolves the call to that one. The backend has to agree, or it would
+        // produce a value of the built-in's type where the rest of the program
+        // expects the user function's.
+        if self.l.funcs.contains_key(name) {
+            return Ok(None);
+        }
+
         let arity_error = |expected: usize| {
             CodegenError::unsupported_at(format!("`{}` takes {} argument(s)", name, expected), span)
         };
@@ -2537,8 +2647,10 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
                     return Err(arity_error(1));
                 }
                 let arg = &args[0].value;
-                let ty = self.ty_of(arg)?;
-                let value = self.lower_expr_value(arg, &ty)?;
+                let arg_ty = self.ty_of(arg)?;
+                let value = self.lower_expr_value(arg, &arg_ty)?;
+                // A nullable reference prints like the reference it wraps.
+                let ty = strip_optional(&arg_ty).clone();
                 // The argument's static type picks the runtime entry point, so
                 // there is no dispatch at run time.
                 //
@@ -2652,9 +2764,82 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
             // has nothing to do. Accepting it keeps portable programs building.
             "collect" => BuiltinResult::Void,
 
-            _ => return Ok(None),
+            _ => {
+                if let Some(value) = self.lower_math_builtin(name, args, span)? {
+                    return Ok(Some(BuiltinResult::Value(value)));
+                }
+                let Some(builtin) = runtime::builtin(name) else {
+                    return Ok(None);
+                };
+                if args.len() != builtin.params.len() {
+                    return Err(arity_error(builtin.params.len()));
+                }
+                let mut values = Vec::with_capacity(args.len());
+                for (arg, param) in args.iter().zip(builtin.params) {
+                    values.push(self.lower_expr_value(&arg.value, &param.lira_type())?);
+                }
+                match self.call_rt(builtin.symbol, &values)? {
+                    Some(value) => BuiltinResult::Value(value),
+                    None => BuiltinResult::Void,
+                }
+            }
         };
         Ok(Some(result))
+    }
+
+    /// Math built-ins that lower to a single machine instruction rather than a
+    /// runtime call.
+    ///
+    /// Returns `Ok(None)` when `name` is not one of them.
+    fn lower_math_builtin(
+        &mut self,
+        name: &str,
+        args: &[Argument],
+        span: &Span,
+    ) -> CodegenResult<Option<Value>> {
+        if !matches!(
+            name,
+            "sqrt" | "abs" | "floor" | "ceil" | "trunc" | "is_nan" | "is_infinite" | "is_finite"
+        ) {
+            return Ok(None);
+        }
+        let Some(arg) = args.first() else {
+            return Ok(None);
+        };
+        if args.len() != 1 {
+            return Ok(None);
+        }
+        let arg_ty = self.ty_of(&arg.value)?;
+
+        // Every one of these is `(float) -> float` or `(float) -> bool` in the
+        // checker, `abs` included. The standard library also declares
+        // `impl int { fn abs(self) -> int }`, but a bare `abs(-5)` resolves to
+        // the built-in, so an integer argument widens rather than taking an
+        // integer path: the value produced here must have the type the rest of
+        // the program was told to expect.
+        let _ = arg_ty;
+        let value = self.lower_expr_value(&arg.value, &Type::Float)?;
+        let _ = span;
+        Ok(Some(match name {
+            "sqrt" => self.builder.ins().sqrt(value),
+            "abs" => self.builder.ins().fabs(value),
+            "floor" => self.builder.ins().floor(value),
+            "ceil" => self.builder.ins().ceil(value),
+            "trunc" => self.builder.ins().trunc(value),
+            // NaN is the only value that compares unordered with itself.
+            "is_nan" => self.builder.ins().fcmp(FloatCC::NotEqual, value, value),
+            "is_infinite" | "is_finite" => {
+                let magnitude = self.builder.ins().fabs(value);
+                let infinity = self.builder.ins().f64const(f64::INFINITY);
+                let cc = if name == "is_infinite" {
+                    FloatCC::Equal
+                } else {
+                    FloatCC::LessThan
+                };
+                self.builder.ins().fcmp(cc, magnitude, infinity)
+            }
+            _ => unreachable!("guarded by the match above"),
+        }))
     }
 }
 
@@ -3240,6 +3425,53 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
     }
 }
 
+/// Result type of `receiver.method(...)`.
+fn method_call_type(
+    l: &Lowerer<'_>,
+    resolve: &dyn Fn(&str) -> Option<Type>,
+    receiver: &Expression,
+    method: &str,
+) -> Option<Type> {
+    // `Counter.new()` — a call on a bare type name.
+    if let ExpressionKind::Identifier(name) = &receiver.kind {
+        if resolve(name).is_none() && l.layouts.is_aggregate(name) {
+            if l.layouts.enums.contains_key(name) {
+                return Some(l.user_type(name));
+            }
+            return Some(l.funcs.get(&fn_key(Some(name), method))?.ret.clone());
+        }
+    }
+    let receiver_ty = infer_or_checked_with(l, resolve, receiver)?;
+    // A user `impl` block wins wherever one exists — including `impl int` and
+    // `impl string`, which is how the standard library defines most of its
+    // methods on primitive types.
+    if let Some(ret) = impl_method_return(l, &receiver_ty, method) {
+        return Some(ret);
+    }
+    Some(match receiver_ty {
+        Type::Array(inner) => match method {
+            "len" => Type::Int,
+            "pop" => *inner,
+            "push" => Type::Void,
+            _ => return None,
+        },
+        Type::String if method == "len" => Type::Int,
+        _ => return None,
+    })
+}
+
+/// Return type of an instance method declared on `receiver_ty`, if one exists.
+fn impl_method_return(l: &Lowerer<'_>, receiver_ty: &Type, method: &str) -> Option<Type> {
+    let names = match receiver_ty {
+        Type::Struct(name) | Type::Enum(name) | Type::Class(name) => vec![name.clone()],
+        other => builtin_impl_names(other),
+    };
+    names
+        .iter()
+        .find_map(|type_name| l.funcs.get(&fn_key(Some(type_name), method)))
+        .map(|info| info.ret.clone())
+}
+
 /// Type names an `impl` block can use for a built-in receiver, most specific
 /// first.
 fn builtin_impl_names(ty: &Type) -> Vec<String> {
@@ -3250,9 +3482,24 @@ fn builtin_impl_names(ty: &Type) -> Vec<String> {
 }
 
 /// The element type of an array `impl` name such as `[int]`.
+///
+/// Nests, so `impl [[int]]` — which the standard library uses — resolves to an
+/// array of arrays rather than to a struct named `[int]`.
 fn array_impl_element(name: &str) -> Option<Type> {
     let inner = name.strip_prefix('[')?.strip_suffix(']')?;
+    if let Some(element) = array_impl_element(inner) {
+        return Some(Type::Array(Box::new(element)));
+    }
     layout::primitive_type(inner).or_else(|| Some(Type::Struct(inner.to_string())))
+}
+
+/// See through `T?` when `T` is already pointer-shaped, which is the only form
+/// of optional the backend represents.
+fn strip_optional(ty: &Type) -> &Type {
+    match ty {
+        Type::Optional(inner) if repr_of(inner).is_ok_and(|r| r.is_ref()) => inner,
+        other => other,
+    }
 }
 
 /// Drop the types that carry no information for code generation.
@@ -3422,6 +3669,11 @@ fn infer_with(
         }
 
         ExpressionKind::Call { callee, args, .. } => match &callee.kind {
+            // A user function of the same name wins over a built-in, so look for
+            // one before matching the built-in names.
+            ExpressionKind::Identifier(name) if l.funcs.contains_key(name.as_str()) => {
+                l.funcs[name.as_str()].ret.clone()
+            }
             ExpressionKind::Identifier(name) => match name.as_str() {
                 "print" | "println" | "send" | "close" | "fiber_yield" | "collect" => Type::Void,
                 "len" | "fiber_id" | "recv" => Type::Int,
@@ -3433,7 +3685,19 @@ fn infer_with(
                     _ => return None,
                 },
                 "chan" => Type::Any,
-                _ => l.funcs.get(name.as_str())?.ret.clone(),
+                _ => match l.funcs.get(name.as_str()) {
+                    Some(info) => info.ret.clone(),
+                    // `abs(-5)` invokes `impl int { fn abs(self) }` with the
+                    // receiver passed positionally; the checker allows it and
+                    // the standard library leans on it.
+                    None => match runtime::builtin(name) {
+                        Some(builtin) => builtin.ret.lira_type(),
+                        None => {
+                            let receiver = infer_or_checked_with(l, resolve, &args.first()?.value)?;
+                            impl_method_return(l, &receiver, name)?
+                        }
+                    },
+                },
             },
             ExpressionKind::EnumVariant { enum_name, .. } => l.user_type(enum_name),
             ExpressionKind::Path { segments } => {
@@ -3446,34 +3710,17 @@ fn infer_with(
                     l.funcs.get(&fn_key(Some(type_name), member))?.ret.clone()
                 }
             }
+            // `self.sum()` parses as a call on a field access rather than as a
+            // method call; the lowering treats them the same way.
+            ExpressionKind::FieldAccess { object, field } => {
+                method_call_type(l, resolve, object, field)?
+            }
             _ => return None,
         },
 
         ExpressionKind::MethodCall {
             receiver, method, ..
-        } => {
-            // `Counter.new()` — a call on a bare type name.
-            if let ExpressionKind::Identifier(name) = &receiver.kind {
-                if resolve(name).is_none() && l.layouts.is_aggregate(name) {
-                    if l.layouts.enums.contains_key(name) {
-                        return Some(l.user_type(name));
-                    }
-                    return Some(l.funcs.get(&fn_key(Some(name), method))?.ret.clone());
-                }
-            }
-            match infer_or_checked_with(l, resolve, receiver)? {
-                Type::Array(inner) => match method.as_str() {
-                    "len" => Type::Int,
-                    "pop" => *inner,
-                    _ => Type::Void,
-                },
-                Type::String if method == "len" => Type::Int,
-                Type::Struct(name) | Type::Enum(name) | Type::Class(name) => {
-                    l.funcs.get(&fn_key(Some(&name), method))?.ret.clone()
-                }
-                _ => return None,
-            }
-        }
+        } => method_call_type(l, resolve, receiver, method)?,
 
         ExpressionKind::Binary { left, op, right } => {
             if is_comparison(*op) || matches!(op, BinaryOp::And | BinaryOp::Or) {
@@ -3515,6 +3762,8 @@ fn infer_with(
         })?,
 
         ExpressionKind::Cast { type_expr, .. } => l.normalize(layout::type_of_ann(type_expr)),
+
+        ExpressionKind::Range { .. } => l.user_type(layout::RANGE_TYPE),
 
         // A spawn yields the new fiber's id.
         ExpressionKind::Spawn(_) => Type::Int,
@@ -3638,5 +3887,120 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
 
         self.goto(merge);
         Ok(Some(self.builder.block_params(merge)[0]))
+    }
+}
+
+// ====================================================================== //
+// Ranges                                                                  //
+// ====================================================================== //
+
+impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
+    /// Byte offsets of `Range`'s `start`, `end` and `inclusive` fields.
+    fn range_layout(&self, span: &Span) -> CodegenResult<(i32, i32, i32)> {
+        if !self.l.layouts.range_layout_is_usable() {
+            return Err(CodegenError::unsupported_at(
+                "this program declares its own `Range`, so `a..b` cannot be lowered",
+                span,
+            ));
+        }
+        let layout = self
+            .l
+            .layouts
+            .structs
+            .get(layout::RANGE_TYPE)
+            .ok_or_else(|| CodegenError::internal("the built-in `Range` layout is missing"))?;
+        Ok((
+            layout.field("start").expect("checked above").offset,
+            layout.field("end").expect("checked above").offset,
+            layout.field("inclusive").expect("checked above").offset,
+        ))
+    }
+
+    /// Lower `a..b` to the built-in `Range` object, matching what the bytecode
+    /// backend builds so `r.start` / `r.end` / `r.inclusive` read the same.
+    ///
+    /// A range written directly as a `for` subject never reaches here — that
+    /// case lowers to a counted loop with no object at all.
+    fn lower_range_value(
+        &mut self,
+        start: Option<&Expression>,
+        end: Option<&Expression>,
+        inclusive: bool,
+        span: &Span,
+    ) -> CodegenResult<Value> {
+        let (start_offset, end_offset, inclusive_offset) = self.range_layout(span)?;
+        let size = self
+            .l
+            .layouts
+            .structs
+            .get(layout::RANGE_TYPE)
+            .expect("checked by range_layout")
+            .size;
+
+        let object = self.alloc_object(size, runtime::KIND_STRUCT)?;
+        // An omitted bound stays at the zero `lira_rt_alloc` already wrote.
+        if let Some(start) = start {
+            let value = self.lower_expr_value(start, &Type::Int)?;
+            self.store_at(object, start_offset, &Type::Int, value)?;
+        }
+        if let Some(end) = end {
+            let value = self.lower_expr_value(end, &Type::Int)?;
+            self.store_at(object, end_offset, &Type::Int, value)?;
+        }
+        let flag = self.builder.ins().iconst(types::I8, i64::from(inclusive));
+        self.store_at(object, inclusive_offset, &Type::Bool, flag)?;
+        Ok(object)
+    }
+
+    /// A counted loop whose inclusivity is only known at run time, which is the
+    /// case when the range arrived as a value rather than as literal syntax.
+    fn lower_dynamic_range_loop(
+        &mut self,
+        variable: &str,
+        start: Value,
+        end: Value,
+        inclusive: Value,
+        body: &AstBlock,
+    ) -> CodegenResult<bool> {
+        self.push_scope();
+        let counter = self.declare_local(variable, Type::Int, Some(start))?;
+
+        let header = self.builder.create_block();
+        let body_block = self.builder.create_block();
+        let step = self.builder.create_block();
+        let exit = self.builder.create_block();
+
+        self.jump_to(header, &[]);
+        self.goto(header);
+        let current = self.builder.use_var(counter);
+        let below = self.builder.ins().icmp(IntCC::SignedLessThan, current, end);
+        let at_end = self.builder.ins().icmp(IntCC::Equal, current, end);
+        // `i < end || (inclusive && i == end)`
+        let at_end_counts = self.builder.ins().band(at_end, inclusive);
+        let more = self.builder.ins().bor(below, at_end_counts);
+        self.builder.ins().brif(more, body_block, &[], exit, &[]);
+        self.terminated = true;
+
+        self.goto(body_block);
+        self.loops.push(LoopFrame {
+            continue_to: step,
+            exit,
+            exit_used: true,
+        });
+        let terminated = self.lower_block(body)?;
+        self.loops.pop();
+        if !terminated {
+            self.jump_to(step, &[]);
+        }
+
+        self.goto(step);
+        let current = self.builder.use_var(counter);
+        let next = self.builder.ins().iadd_imm_s(current, 1);
+        self.builder.def_var(counter, next);
+        self.jump_to(header, &[]);
+
+        self.goto(exit);
+        self.pop_scope();
+        Ok(false)
     }
 }

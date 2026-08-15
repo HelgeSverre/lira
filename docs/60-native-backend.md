@@ -174,23 +174,54 @@ scope, the struct and enum layouts, and the declared signatures. The same pass
 recovers types the checker erases to `any`, such as an enum payload bound by
 `Option::Some(x)`.
 
+## Built-ins
+
+Around 80 of the language's built-in functions are implemented natively in
+`liblira_rt`: the math library, character-indexed string operations, time,
+randomness, the environment, files and the filesystem, base64 and URL encoding,
+MD5/SHA-1/SHA-256/SHA-512, UUIDs, and TCP/DNS.
+
+`sqrt`, `abs`, `floor`, `ceil`, `trunc`, `is_nan`, `is_infinite` and `is_finite`
+never reach the runtime at all — they lower to single Cranelift instructions.
+
+Two invariants keep this honest:
+
+- A unit test builds the checker's own environment and compares every built-in's
+  parameter and return types against the table in `src/runtime.rs`. A signature
+  that drifts is a failing test, not a wrong answer at run time.
+- Every lowered value is checked against the machine type its Lira type implies
+  before it is used. This is what catches a built-in and the checker disagreeing
+  about a result type — the failure mode is an `i64` read as an `f64`, which no
+  other check would notice. It found two real mis-compiles when it was added.
+
+A user function shadows a built-in of the same name, because the checker
+resolves the call that way: `examples/stdlib_demo.li` defines its own `abs`.
+
+Still missing: `json_*` (needs a dynamic value representation), `regex_*` (needs
+an engine) and `http_*`.
+
 ## What is supported
 
-Functions, methods, `impl` blocks (including `impl int` and friends, so the
-standard library's primitive methods work), static methods, recursion and mutual
-recursion, named arguments and defaults, top-level globals; `if`/`else`, `while`,
-`loop`, `for` over arrays and ranges, `break`/`continue`, blocks as expressions;
+Functions, methods, `impl` blocks (including `impl int`, `impl string` and
+`impl [int]`, so the standard library's methods on built-in types work), static
+methods, recursion and mutual recursion, named arguments and defaults, type
+aliases, top-level globals; `if`/`else`, `while`, `loop`, `for` over arrays and
+ranges, ranges as values, `break`/`continue`, blocks as expressions;
 `match` with literal, range, wildcard, binding, or, struct and enum-constructor
 patterns, plus guards; structs with nested and narrow fields; enums with
 payloads and `__enum`/`__variant` reflection; arrays with indexing, assignment,
 `push`, `pop` and `len`; strings with concatenation, interpolation, comparison
 and `len`; `spawn`, `chan`, `send`, `recv`, `close`, `fiber_yield`, `fiber_id`.
 
-Of the repository's 124 examples, 55 compile natively and produce byte-identical
-output to the bytecode VM; the rest use constructs listed below and are declined
-with a reason. 28 of them are pinned as regression tests in `tests/parity.rs`,
-and every example that type-checks is required to either compile or be declined
-cleanly — an internal error fails the suite.
+Of the repository's 124 examples, 74 compile natively and produce byte-identical
+output to the bytecode VM. Six more compile and run correctly but cannot be
+compared byte-for-byte: they print timestamps, random UUIDs, or `env_args`,
+which differ between an interpreted script and a compiled binary by nature. The
+rest use constructs listed below and are declined with a reason.
+
+36 examples are pinned as regression tests in `tests/parity.rs`, and every
+example that type-checks is required to either compile or be declined cleanly —
+an internal error fails the suite.
 
 ## What is not supported yet
 
@@ -203,7 +234,7 @@ cleanly — an internal error fails the suite.
 | Class inheritance | Needs prefixed layouts and a vtable |
 | Generics | Type-erased in the VM; native wants monomorphisation |
 | `select` | Needs multi-channel parking |
-| File I/O and the rest of the syscall builtins | Runtime work, not codegen work |
+| `json_*`, `regex_*`, `http_*` | Need a dynamic value, a regex engine and an HTTP client |
 | String indexing | Needs a decision on byte vs. character indexing |
 
 Two more limits worth knowing:

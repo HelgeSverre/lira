@@ -1,9 +1,22 @@
 use std::path::PathBuf;
 
+/// Every translation unit in `liblira_rt`, in one place so the rerun triggers
+/// and the build itself cannot drift apart.
+const SOURCES: &[&str] = &[
+    "lira_rt.c",
+    "lira_fiber.c",
+    "lira_math.c",
+    "lira_string.c",
+    "lira_os.c",
+    "lira_encoding.c",
+    "lira_net.c",
+    "lira_ctx.S",
+];
+
 fn main() {
     let runtime = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime");
 
-    for file in ["lira_rt.c", "lira_fiber.c", "lira_ctx.S", "lira_rt.h"] {
+    for file in SOURCES.iter().chain(["lira_rt.h"].iter()) {
         println!("cargo:rerun-if-changed={}", runtime.join(file).display());
     }
     println!("cargo:rerun-if-changed=build.rs");
@@ -11,10 +24,11 @@ fn main() {
     // The resulting archive is linked into this crate (so the JIT can resolve
     // runtime symbols in-process) and embedded verbatim in the binary (so
     // `lira build` can hand it to the system linker without a sysroot).
-    cc::Build::new()
-        .file(runtime.join("lira_rt.c"))
-        .file(runtime.join("lira_fiber.c"))
-        .file(runtime.join("lira_ctx.S"))
+    let mut build = cc::Build::new();
+    for file in SOURCES {
+        build.file(runtime.join(file));
+    }
+    build
         .include(&runtime)
         .opt_level(2)
         .warnings(true)
