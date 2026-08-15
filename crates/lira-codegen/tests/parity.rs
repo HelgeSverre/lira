@@ -50,6 +50,11 @@ const PARITY_EXAMPLES: &[&str] = &[
     "test_base64.li",
     "test_hash.li",
     "channel_basic.li",
+    "lambda.li",
+    "function_types.li",
+    "pattern_tuple.li",
+    "pattern_tuple_simple.li",
+    "pattern_tuple_literals.li",
 ];
 
 fn examples_dir() -> PathBuf {

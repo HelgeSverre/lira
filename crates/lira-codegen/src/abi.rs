@@ -82,21 +82,17 @@ pub fn repr_of(ty: &Type) -> CodegenResult<Repr> {
             }
             Repr::Ref
         }
-        Type::Tuple(_) => {
-            return Err(CodegenError::unsupported(
-                "tuples are not lowered by the native backend yet",
-            ))
-        }
+        // A tuple is an array of uniform slots, as in the bytecode VM. The
+        // element types differ per position, but `Type::Tuple` carries them, so
+        // each slot is still read back at its declared type.
+        Type::Tuple(_) => Repr::Ref,
         Type::Result { .. } => {
             return Err(CodegenError::unsupported(
                 "`Result` values are not lowered by the native backend yet",
             ))
         }
-        Type::Function { .. } => {
-            return Err(CodegenError::unsupported(
-                "first-class functions and lambdas are not lowered by the native backend yet",
-            ))
-        }
+        // A function value is a closure object: code pointer plus captures.
+        Type::Function { .. } => Repr::Ref,
         // An unconstrained type variable is what an empty literal such as
         // `let xs = []` leaves behind: the bytecode VM can defer the decision to
         // run time, native code cannot.
@@ -149,6 +145,23 @@ mod tests {
         assert!(repr_of(&Type::Array(Box::new(Type::Int))).unwrap().is_ref());
         assert!(repr_of(&Type::Struct("P".into())).unwrap().is_ref());
         assert!(repr_of(&Type::Enum("E".into())).unwrap().is_ref());
+    }
+
+    #[test]
+    fn function_values_are_pointers() {
+        let ty = Type::Function {
+            params: vec![Type::Int],
+            return_type: Box::new(Type::Int),
+            required_params: 1,
+        };
+        assert!(repr_of(&ty).unwrap().is_ref());
+    }
+
+    #[test]
+    fn tuples_are_pointers() {
+        assert!(repr_of(&Type::Tuple(vec![Type::Int, Type::String]))
+            .unwrap()
+            .is_ref());
     }
 
     #[test]

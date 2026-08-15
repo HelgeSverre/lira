@@ -32,7 +32,8 @@ use lirac::sema::SemanticTables;
 use crate::abi::{is_unsigned, repr_of, Repr};
 use crate::error::{CodegenError, CodegenResult};
 use crate::layout::{
-    self, storage_size, LayoutMap, ENUM_PAYLOAD_OFFSET, ENUM_TAG_OFFSET, HEADER_SIZE, SLOT_SIZE,
+    self, storage_size, LayoutMap, CLOSURE_CAPTURES_OFFSET, CLOSURE_CODE_OFFSET,
+    CLOSURE_COUNT_OFFSET, ENUM_PAYLOAD_OFFSET, ENUM_TAG_OFFSET, HEADER_SIZE, SLOT_SIZE,
 };
 use crate::runtime;
 
@@ -61,6 +62,29 @@ struct ParamInfo {
 struct GlobalInfo {
     data_id: DataId,
     ty: Type,
+}
+
+/// A lambda, queued while lowering the function it appears in and emitted
+/// afterwards as a standalone function taking its closure as the first
+/// argument.
+struct PendingLambda {
+    symbol: String,
+    func_id: FuncId,
+    params: Vec<ParamInfo>,
+    ret: Type,
+    /// Names copied into the closure object, with the types they had at the
+    /// point of capture.
+    captures: Vec<(String, Type)>,
+    body: Expression,
+}
+
+/// A named function used as a value, which needs an `(env, args...)` wrapper to
+/// be callable through the same path as a lambda.
+struct PendingFnWrapper {
+    symbol: String,
+    func_id: FuncId,
+    /// Key of the function the wrapper forwards to.
+    target: String,
 }
 
 /// A `spawn f(...)` site, queued while lowering the enclosing function and
@@ -100,8 +124,13 @@ pub struct Lowerer<'a> {
     runtime_ids: HashMap<String, FuncId>,
     strings: HashMap<String, DataId>,
     spawns: Vec<PendingSpawn>,
+    lambdas: Vec<PendingLambda>,
+    fn_wrappers: Vec<PendingFnWrapper>,
+    /// Closure objects standing in for named functions, one per function.
+    fn_values: HashMap<String, DataId>,
     next_spawn: usize,
     next_string: usize,
+    next_lambda: usize,
 }
 
 impl<'a> Lowerer<'a> {
@@ -137,8 +166,12 @@ impl<'a> Lowerer<'a> {
             runtime_ids: HashMap::new(),
             strings: HashMap::new(),
             spawns: Vec::new(),
+            lambdas: Vec::new(),
+            fn_wrappers: Vec::new(),
+            fn_values: HashMap::new(),
             next_spawn: 0,
             next_string: 0,
+            next_lambda: 0,
         })
     }
 
@@ -157,10 +190,22 @@ impl<'a> Lowerer<'a> {
 
         let entry_id = self.lower_entry(program)?;
 
-        // Thunks can only be discovered while lowering, and lowering a thunk
-        // never creates another one (its body is a single direct call).
-        while let Some(pending) = self.spawns.pop() {
-            self.lower_spawn_thunk(&pending)?;
+        // These are discovered while lowering, and lowering one can discover
+        // more: a lambda body may itself contain a lambda or a spawn.
+        loop {
+            if let Some(pending) = self.lambdas.pop() {
+                self.lower_lambda_body(&pending)?;
+                continue;
+            }
+            if let Some(pending) = self.spawns.pop() {
+                self.lower_spawn_thunk(&pending)?;
+                continue;
+            }
+            if let Some(pending) = self.fn_wrappers.pop() {
+                self.lower_fn_wrapper(&pending)?;
+                continue;
+            }
+            break;
         }
         Ok(entry_id)
     }
@@ -242,12 +287,11 @@ impl<'a> Lowerer<'a> {
                     ..
                 } => {
                     let PatternKind::Variable(name) = &pattern.kind else {
-                        // Destructuring at the top level would need one cell per
-                        // bound name plus a temporary for the scrutinee.
-                        return Err(CodegenError::unsupported_at(
-                            "destructuring in a top-level declaration",
-                            &stmt.span,
-                        ));
+                        // A destructuring declaration binds several names at
+                        // once. Rather than mint a global cell for each, they
+                        // become locals of the entry function — visible to the
+                        // rest of the top level, but not to other functions.
+                        continue;
                     };
                     let ty = self.declared_type(
                         type_ann.as_ref(),
@@ -958,10 +1002,21 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
                 ..
             } => {
                 let PatternKind::Variable(name) = &pattern.kind else {
-                    return Err(CodegenError::unsupported_at(
-                        "destructuring declarations are not lowered by the native backend yet",
-                        &stmt.span,
-                    ));
+                    // `let (a, b) = pair` — the pattern always matches, so bind
+                    // it directly rather than routing through a `match`.
+                    let Some(init) = initializer else {
+                        return Err(CodegenError::unsupported_at(
+                            "a destructuring declaration needs an initialiser",
+                            &stmt.span,
+                        ));
+                    };
+                    let ty = match type_ann {
+                        Some(ann) => self.l.normalize(layout::type_of_ann(ann)),
+                        None => self.ty_of(init)?,
+                    };
+                    let value = self.lower_expr_value(init, &ty)?;
+                    self.bind_irrefutable(pattern, value, &ty)?;
+                    return Ok(false);
                 };
 
                 let declared = match type_ann {
@@ -1523,10 +1578,18 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
             }
 
             ExpressionKind::Identifier(name) => {
-                let binding = self.lookup(name).ok_or_else(|| {
-                    CodegenError::unsupported_at(format!("unknown name `{}`", name), &expr.span)
-                })?;
-                Ok(Some(self.load_binding(&binding)))
+                if let Some(binding) = self.lookup(name) {
+                    return Ok(Some(self.load_binding(&binding)));
+                }
+                // A bare function name in value position — `apply(double, 3)` —
+                // becomes a closure object wrapping it.
+                if self.l.funcs.contains_key(name.as_str()) {
+                    return self.function_value(&name.clone()).map(Some);
+                }
+                Err(CodegenError::unsupported_at(
+                    format!("unknown name `{}`", name),
+                    &expr.span,
+                ))
             }
 
             ExpressionKind::Binary { left, op, right } => {
@@ -1678,18 +1741,41 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
                     .map(Some)
             }
 
-            ExpressionKind::Lambda { .. } => Err(CodegenError::unsupported_at(
-                "lambdas are not lowered by the native backend yet",
-                &expr.span,
-            )),
+            ExpressionKind::Lambda { params, body } => {
+                // The lambda's own recorded type settles the signature. Both the
+                // lifted function and every indirect call site have to agree on
+                // it, and an indirect call has no way to catch a mismatch.
+                let recorded = self.ty_of(expr).ok();
+                self.lower_lambda(params, body, recorded.as_ref(), &expr.span)
+                    .map(Some)
+            }
             ExpressionKind::Map(_) => Err(CodegenError::unsupported_at(
                 "map literals are not lowered by the native backend yet",
                 &expr.span,
             )),
-            ExpressionKind::Tuple(_) => Err(CodegenError::unsupported_at(
-                "tuples are not lowered by the native backend yet",
-                &expr.span,
-            )),
+            ExpressionKind::Tuple(elements) => {
+                let ty = self.ty_of(expr)?;
+                let Type::Tuple(element_types) = ty else {
+                    return Err(CodegenError::unsupported_at(
+                        "tuple literal without a tuple type",
+                        &expr.span,
+                    ));
+                };
+                if element_types.len() != elements.len() {
+                    return Err(CodegenError::internal(
+                        "tuple literal arity does not match its type",
+                    ));
+                }
+                let capacity = self.builder.ins().iconst(types::I64, elements.len() as i64);
+                let tuple = self.call_rt_value("lira_rt_array_new", &[capacity])?;
+                for (element, element_ty) in elements.iter().zip(element_types.iter()) {
+                    let element_ty = self.l.normalize(element_ty.clone());
+                    let value = self.lower_expr_value(element, &element_ty)?;
+                    let slot = self.value_to_slot(value, &element_ty)?;
+                    self.call_rt("lira_rt_array_push", &[tuple, slot])?;
+                }
+                Ok(Some(tuple))
+            }
             ExpressionKind::Range {
                 start,
                 end,
@@ -2325,6 +2411,17 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
     ) -> CodegenResult<Option<Value>> {
         match &callee.kind {
             ExpressionKind::Identifier(name) => {
+                // A local or parameter holding a function value shadows
+                // everything else and is called through its code pointer.
+                if let Some(binding) = self.lookup(name) {
+                    let ty = match &binding {
+                        Binding::Local { ty, .. } => ty.clone(),
+                        Binding::Global(global) => global.ty.clone(),
+                    };
+                    if matches!(ty, Type::Function { .. }) {
+                        return self.lower_indirect_call(callee, &ty, args, span);
+                    }
+                }
                 if let Some(result) = self.lower_builtin(name, args, span)? {
                     return Ok(result.into_value());
                 }
@@ -2370,10 +2467,18 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
             ExpressionKind::FieldAccess { object, field } => {
                 self.lower_method_call(object, field, args, span)
             }
-            _ => Err(CodegenError::unsupported_at(
-                "calling a computed function value is not lowered by the native backend yet",
-                span,
-            )),
+            // `(|x: int| x * x)(4)` and any other expression that evaluates to
+            // a function value.
+            _ => {
+                let ty = self.ty_of(callee)?;
+                if matches!(ty, Type::Function { .. }) {
+                    return self.lower_indirect_call(callee, &ty, args, span);
+                }
+                Err(CodegenError::unsupported_at(
+                    format!("`{}` is not callable", ty.display_name()),
+                    span,
+                ))
+            }
         }
     }
 
@@ -3287,14 +3392,34 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
                 fields,
                 rest: _,
             } => {
+                // `let { x, y } = point` leaves the name empty: the type comes
+                // from the subject rather than from the pattern.
+                let type_name = if name.is_empty() {
+                    match subject_ty {
+                        Type::Struct(subject_name) | Type::Class(subject_name) => {
+                            subject_name.as_str()
+                        }
+                        other => {
+                            return Err(CodegenError::unsupported_at(
+                                format!(
+                                    "a struct pattern cannot match a `{}`",
+                                    other.display_name()
+                                ),
+                                &pattern.span,
+                            ))
+                        }
+                    }
+                } else {
+                    name.as_str()
+                };
                 let layout = self
                     .l
                     .layouts
                     .structs
-                    .get(name)
+                    .get(type_name)
                     .ok_or_else(|| {
                         CodegenError::unsupported_at(
-                            format!("unknown struct `{}` in pattern", name),
+                            format!("unknown struct `{}` in pattern", type_name),
                             &pattern.span,
                         )
                     })?
@@ -3302,7 +3427,7 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
                 for (field_name, sub_pattern) in fields {
                     let field = layout.field(field_name).ok_or_else(|| {
                         CodegenError::unsupported_at(
-                            format!("`{}` has no field `{}`", name, field_name),
+                            format!("`{}` has no field `{}`", type_name, field_name),
                             &pattern.span,
                         )
                     })?;
@@ -3314,10 +3439,37 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
                 Ok(())
             }
 
-            PatternKind::Tuple(_) => Err(CodegenError::unsupported_at(
-                "tuple patterns are not lowered by the native backend yet",
-                &pattern.span,
-            )),
+            PatternKind::Tuple(elements) => {
+                let Type::Tuple(element_types) = subject_ty else {
+                    return Err(CodegenError::unsupported_at(
+                        format!(
+                            "a tuple pattern cannot match a `{}`",
+                            subject_ty.display_name()
+                        ),
+                        &pattern.span,
+                    ));
+                };
+                if elements.len() != element_types.len() {
+                    return Err(CodegenError::unsupported_at(
+                        format!(
+                            "this pattern binds {} element(s), but the tuple has {}",
+                            elements.len(),
+                            element_types.len()
+                        ),
+                        &pattern.span,
+                    ));
+                }
+                for (index, (sub_pattern, element_ty)) in
+                    elements.iter().zip(element_types.iter()).enumerate()
+                {
+                    let element_ty = self.l.normalize(element_ty.clone());
+                    let position = self.builder.ins().iconst(types::I64, index as i64);
+                    let slot = self.call_rt_value("lira_rt_array_get", &[subject, position])?;
+                    let value = self.slot_to_value(slot, &element_ty)?;
+                    self.test_pattern(sub_pattern, value, &element_ty, fail)?;
+                }
+                Ok(())
+            }
         }
     }
 
@@ -3394,6 +3546,32 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
             let value = self.slot_to_value(slot, ty)?;
             self.test_pattern(sub_pattern, value, ty, fail)?;
         }
+        Ok(())
+    }
+
+    /// Bind a pattern that is guaranteed to match, as in `let (a, b) = pair`.
+    ///
+    /// The checker has already established that the shapes line up, so the
+    /// mismatch path is unreachable; it still needs a block, and reporting the
+    /// failure beats leaving the bindings undefined.
+    fn bind_irrefutable(
+        &mut self,
+        pattern: &Pattern,
+        value: Value,
+        ty: &Type,
+    ) -> CodegenResult<()> {
+        let fail = self.builder.create_block();
+        self.test_pattern(pattern, value, ty, fail)?;
+        let matched = self.builder.create_block();
+        self.jump_to(matched, &[]);
+
+        self.goto(fail);
+        let message = self.string_constant("destructuring pattern did not match")?;
+        self.call_rt("lira_rt_abort", &[message])?;
+        self.builder.ins().trap(unreachable_trap());
+        self.terminated = true;
+
+        self.goto(matched);
         Ok(())
     }
 
@@ -3765,10 +3943,34 @@ fn infer_with(
 
         ExpressionKind::Range { .. } => l.user_type(layout::RANGE_TYPE),
 
+        ExpressionKind::Lambda { params, body } => Type::Function {
+            params: params
+                .iter()
+                .map(|param| l.normalize(layout::type_of_ann(&param.type_ann)))
+                .collect(),
+            return_type: Box::new(
+                infer_or_checked_with(l, resolve, body)
+                    .and_then(concrete)
+                    .unwrap_or(Type::Void),
+            ),
+            required_params: params.len(),
+        },
+
+        ExpressionKind::Tuple(elements) => Type::Tuple(
+            elements
+                .iter()
+                .map(|element| infer_or_checked_with(l, resolve, element))
+                .collect::<Option<Vec<_>>>()?,
+        ),
+
         // A spawn yields the new fiber's id.
         ExpressionKind::Spawn(_) => Type::Int,
+        // A block's value is its trailing expression, or what it returns — the
+        // second shape is how a lambda with a body block gives back a value.
         ExpressionKind::Block(block) => match block.statements.last().map(|s| &s.kind) {
-            Some(StatementKind::Expression(expr)) => infer_or_checked_with(l, resolve, expr)?,
+            Some(StatementKind::Expression(expr)) | Some(StatementKind::Return(Some(expr))) => {
+                infer_or_checked_with(l, resolve, expr)?
+            }
             _ => Type::Void,
         },
 
@@ -4002,5 +4204,621 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
         self.goto(exit);
         self.pop_scope();
         Ok(false)
+    }
+}
+
+// ====================================================================== //
+// Lambdas and closures                                                    //
+// ====================================================================== //
+
+/// The names an expression reads that it does not itself bind.
+///
+/// A lambda captures exactly these. Scopes are tracked properly rather than
+/// collecting every identifier and subtracting: a name declared partway through
+/// the body shadows an outer one only from its declaration onward.
+fn free_variables(expr: &Expression, bound: &[String]) -> Vec<String> {
+    let mut collector = FreeVars {
+        scopes: vec![bound.to_vec()],
+        found: Vec::new(),
+    };
+    collector.visit_expr(expr);
+    collector.found
+}
+
+struct FreeVars {
+    scopes: Vec<Vec<String>>,
+    found: Vec<String>,
+}
+
+impl FreeVars {
+    fn is_bound(&self, name: &str) -> bool {
+        self.scopes
+            .iter()
+            .any(|scope| scope.iter().any(|bound| bound == name))
+    }
+
+    fn bind(&mut self, name: &str) {
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.push(name.to_string());
+        }
+    }
+
+    fn use_name(&mut self, name: &str) {
+        if !self.is_bound(name) && !self.found.iter().any(|seen| seen == name) {
+            self.found.push(name.to_string());
+        }
+    }
+
+    fn bind_pattern(&mut self, pattern: &Pattern) {
+        match &pattern.kind {
+            PatternKind::Variable(name) => self.bind(name),
+            PatternKind::Binding { name, pattern } => {
+                self.bind(name);
+                self.bind_pattern(pattern);
+            }
+            PatternKind::Tuple(items) | PatternKind::Or(items) => {
+                for item in items {
+                    self.bind_pattern(item);
+                }
+            }
+            PatternKind::Constructor { fields, .. } => {
+                for field in fields {
+                    self.bind_pattern(field);
+                }
+            }
+            PatternKind::Struct { fields, .. } => {
+                for (_, field) in fields {
+                    self.bind_pattern(field);
+                }
+            }
+            PatternKind::Wildcard | PatternKind::Literal(_) | PatternKind::Range { .. } => {}
+        }
+    }
+
+    fn visit_block(&mut self, block: &AstBlock) {
+        self.scopes.push(Vec::new());
+        for stmt in &block.statements {
+            self.visit_stmt(stmt);
+        }
+        self.scopes.pop();
+    }
+
+    fn visit_stmt(&mut self, stmt: &Statement) {
+        match &stmt.kind {
+            StatementKind::VarDecl {
+                pattern,
+                initializer,
+                ..
+            } => {
+                // The initialiser is evaluated before the name comes into scope.
+                if let Some(init) = initializer {
+                    self.visit_expr(init);
+                }
+                self.bind_pattern(pattern);
+            }
+            StatementKind::ConstDecl {
+                name, initializer, ..
+            } => {
+                self.visit_expr(initializer);
+                self.bind(name);
+            }
+            StatementKind::Expression(expr) | StatementKind::Return(Some(expr)) => {
+                self.visit_expr(expr)
+            }
+            StatementKind::Break(Some(expr)) => self.visit_expr(expr),
+            StatementKind::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                self.visit_expr(condition);
+                self.visit_block(then_branch);
+                if let Some(block) = else_branch {
+                    self.visit_block(block);
+                }
+            }
+            StatementKind::While { condition, body } => {
+                self.visit_expr(condition);
+                self.visit_block(body);
+            }
+            StatementKind::Loop { body } => self.visit_block(body),
+            StatementKind::For {
+                variable,
+                iterable,
+                body,
+            } => {
+                self.visit_expr(iterable);
+                self.scopes.push(vec![variable.clone()]);
+                for stmt in &body.statements {
+                    self.visit_stmt(stmt);
+                }
+                self.scopes.pop();
+            }
+            StatementKind::Block(block) => self.visit_block(block),
+            _ => {}
+        }
+    }
+
+    fn visit_expr(&mut self, expr: &Expression) {
+        match &expr.kind {
+            ExpressionKind::Identifier(name) => self.use_name(name),
+
+            ExpressionKind::Lambda { params, body } => {
+                // A nested lambda's own parameters are bound inside it; anything
+                // else it reads is free here too, and is captured twice — once
+                // into this closure, once into the inner one.
+                self.scopes
+                    .push(params.iter().map(|p| p.name.clone()).collect());
+                self.visit_expr(body);
+                self.scopes.pop();
+            }
+
+            ExpressionKind::Match { subject, arms } => {
+                self.visit_expr(subject);
+                for arm in arms {
+                    self.scopes.push(Vec::new());
+                    self.bind_pattern(&arm.pattern);
+                    if let Some(guard) = &arm.guard {
+                        self.visit_expr(guard);
+                    }
+                    self.visit_expr(&arm.body);
+                    self.scopes.pop();
+                }
+            }
+
+            ExpressionKind::Binary { left, right, .. } => {
+                self.visit_expr(left);
+                self.visit_expr(right);
+            }
+            ExpressionKind::Unary { operand, .. } => self.visit_expr(operand),
+            ExpressionKind::Call { callee, args, .. } => {
+                self.visit_expr(callee);
+                for arg in args {
+                    self.visit_expr(&arg.value);
+                }
+            }
+            ExpressionKind::MethodCall { receiver, args, .. } => {
+                self.visit_expr(receiver);
+                for arg in args {
+                    self.visit_expr(&arg.value);
+                }
+            }
+            ExpressionKind::FieldAccess { object, .. }
+            | ExpressionKind::OptionalAccess { object, .. } => self.visit_expr(object),
+            ExpressionKind::Index { object, index } => {
+                self.visit_expr(object);
+                self.visit_expr(index);
+            }
+            ExpressionKind::Array(items) | ExpressionKind::Tuple(items) => {
+                for item in items {
+                    self.visit_expr(item);
+                }
+            }
+            ExpressionKind::Map(pairs) => {
+                for (key, value) in pairs {
+                    self.visit_expr(key);
+                    self.visit_expr(value);
+                }
+            }
+            ExpressionKind::StructLiteral { fields, .. } => {
+                for (_, value) in fields {
+                    self.visit_expr(value);
+                }
+            }
+            ExpressionKind::IfExpr {
+                condition,
+                then_expr,
+                else_expr,
+            } => {
+                self.visit_expr(condition);
+                self.visit_expr(then_expr);
+                self.visit_expr(else_expr);
+            }
+            ExpressionKind::Range { start, end, .. } => {
+                if let Some(start) = start {
+                    self.visit_expr(start);
+                }
+                if let Some(end) = end {
+                    self.visit_expr(end);
+                }
+            }
+            ExpressionKind::Cast { expr, .. } | ExpressionKind::TypeCheck { expr, .. } => {
+                self.visit_expr(expr)
+            }
+            ExpressionKind::Assign { target, value } => {
+                self.visit_expr(target);
+                self.visit_expr(value);
+            }
+            ExpressionKind::CompoundAssign { target, value, .. } => {
+                self.visit_expr(target);
+                self.visit_expr(value);
+            }
+            ExpressionKind::Block(block) => self.visit_block(block),
+            ExpressionKind::Spawn(inner) | ExpressionKind::Try(inner) => self.visit_expr(inner),
+            ExpressionKind::Select(arms) => {
+                for arm in arms {
+                    match &arm.kind {
+                        lirac::ast::SelectArmKind::Recv { channel, .. } => self.visit_expr(channel),
+                        lirac::ast::SelectArmKind::Send { value, channel } => {
+                            self.visit_expr(value);
+                            self.visit_expr(channel);
+                        }
+                        lirac::ast::SelectArmKind::Default => {}
+                    }
+                    self.visit_expr(&arm.body);
+                }
+            }
+            ExpressionKind::IntLiteral(_)
+            | ExpressionKind::FloatLiteral(_)
+            | ExpressionKind::StringLiteral(_)
+            | ExpressionKind::CharLiteral(_)
+            | ExpressionKind::BoolLiteral(_)
+            | ExpressionKind::Null
+            | ExpressionKind::EnumVariant { .. }
+            | ExpressionKind::Path { .. } => {}
+        }
+    }
+}
+
+impl<'a> Lowerer<'a> {
+    /// The Cranelift signature of a callable function value.
+    ///
+    /// Every one takes its own closure object as the first argument, so a
+    /// lambda that captures and one that does not are called identically.
+    fn closure_signature(&self, params: &[Type], ret: &Type) -> CodegenResult<Signature> {
+        let mut sig = Signature::new(self.call_conv);
+        sig.params.push(AbiParam::new(self.pointer_ty));
+        for param in params {
+            let clif = repr_of(param)?.clif(self.pointer_ty).ok_or_else(|| {
+                CodegenError::unsupported("a function parameter cannot be `void`")
+            })?;
+            sig.params.push(AbiParam::new(clif));
+        }
+        if let Some(clif) = repr_of(ret)?.clif(self.pointer_ty) {
+            sig.returns.push(AbiParam::new(clif));
+        }
+        Ok(sig)
+    }
+
+    /// Emit the lifted body of one lambda.
+    fn lower_lambda_body(&mut self, pending: &PendingLambda) -> CodegenResult<()> {
+        let sig = self.closure_signature(
+            &pending
+                .params
+                .iter()
+                .map(|p| p.ty.clone())
+                .collect::<Vec<_>>(),
+            &pending.ret,
+        )?;
+
+        let frontend_config = self.module.target_config();
+        let mut ctx = self.module.make_context();
+        ctx.func.signature = sig;
+        let mut builder_ctx = FunctionBuilderContext::new();
+        {
+            let mut builder = FunctionBuilder::new(&mut ctx.func, &mut builder_ctx);
+            let entry = builder.create_block();
+            builder.append_block_params_for_function_params(entry);
+            builder.switch_to_block(entry);
+            let env = builder.block_params(entry)[0];
+
+            let ret_ty = pending.ret.clone();
+            let mut gen = FuncGen::new(self, builder, ret_ty.clone());
+            gen.push_scope();
+
+            // Captures were copied into the object when the closure was built;
+            // read them back into ordinary locals.
+            for (index, (name, ty)) in pending.captures.iter().enumerate() {
+                let offset = CLOSURE_CAPTURES_OFFSET + SLOT_SIZE * index as i32;
+                let slot = gen
+                    .builder
+                    .ins()
+                    .load(types::I64, MemFlagsData::trusted(), env, offset);
+                let value = gen.slot_to_value(slot, ty)?;
+                gen.declare_local(name, ty.clone(), Some(value))?;
+            }
+            for (index, param) in pending.params.iter().enumerate() {
+                let value = gen.builder.block_params(entry)[index + 1];
+                gen.declare_local(&param.name, param.ty.clone(), Some(value))?;
+            }
+
+            let value = gen.lower_expr_typed(&pending.body, &ret_ty)?;
+            if !gen.terminated {
+                match value {
+                    Some(value) if !matches!(ret_ty, Type::Void) => {
+                        gen.builder.ins().return_(&[value]);
+                    }
+                    _ => {
+                        gen.builder.ins().return_(&[]);
+                    }
+                }
+            }
+            gen.pop_scope();
+            gen.builder.seal_all_blocks();
+            gen.builder.finalize(frontend_config);
+        }
+
+        self.module
+            .define_function(pending.func_id, &mut ctx)
+            .map_err(|e| CodegenError::internal(format!("{}: {}", pending.symbol, e)))?;
+        self.module.clear_context(&mut ctx);
+        Ok(())
+    }
+
+    /// Emit the `(env, args...)` wrapper that lets a named function be used as
+    /// a function value. The environment is ignored.
+    fn lower_fn_wrapper(&mut self, pending: &PendingFnWrapper) -> CodegenResult<()> {
+        let info = self
+            .funcs
+            .get(&pending.target)
+            .ok_or_else(|| CodegenError::internal(format!("`{}` is missing", pending.target)))?;
+        let target_id = info.func_id;
+        let param_types: Vec<Type> = info.params.iter().map(|p| p.ty.clone()).collect();
+        let ret = info.ret.clone();
+        let sig = self.closure_signature(&param_types, &ret)?;
+
+        let frontend_config = self.module.target_config();
+        let mut ctx = self.module.make_context();
+        ctx.func.signature = sig;
+        let mut builder_ctx = FunctionBuilderContext::new();
+        {
+            let mut builder = FunctionBuilder::new(&mut ctx.func, &mut builder_ctx);
+            let entry = builder.create_block();
+            builder.append_block_params_for_function_params(entry);
+            builder.switch_to_block(entry);
+            let args: Vec<Value> = builder.block_params(entry)[1..].to_vec();
+
+            let target_ref = self.module.declare_func_in_func(target_id, builder.func);
+            let call = builder.ins().call(target_ref, &args);
+            let results = builder.inst_results(call).to_vec();
+            builder.ins().return_(&results);
+
+            builder.seal_all_blocks();
+            builder.finalize(frontend_config);
+        }
+
+        self.module
+            .define_function(pending.func_id, &mut ctx)
+            .map_err(|e| CodegenError::internal(format!("{}: {}", pending.symbol, e)))?;
+        self.module.clear_context(&mut ctx);
+        Ok(())
+    }
+}
+
+impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
+    /// Build a closure object for a lambda.
+    ///
+    /// Captures are copied by value at this point, matching the bytecode VM's
+    /// `MakeClosure`, so a closure that outlives the frame it was built in keeps
+    /// working — which is the whole point of `make_adder(5)`.
+    fn lower_lambda(
+        &mut self,
+        params: &[Parameter],
+        body: &Expression,
+        recorded: Option<&Type>,
+        span: &Span,
+    ) -> CodegenResult<Value> {
+        let (param_types, ret) = self.lambda_signature(params, body, recorded, span)?;
+        let param_infos: Vec<ParamInfo> = params
+            .iter()
+            .zip(param_types.iter())
+            .map(|(param, ty)| ParamInfo {
+                name: param.name.clone(),
+                ty: ty.clone(),
+                default: None,
+            })
+            .collect();
+
+        // Anything the body reads that it does not bind itself, and that names a
+        // local here, travels with the closure.
+        let bound: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
+        let mut captures = Vec::new();
+        for name in free_variables(body, &bound) {
+            if let Some(Binding::Local { ty, .. }) = self.lookup(&name) {
+                captures.push((name, ty));
+            }
+        }
+
+        let symbol = format!("lira__lambda__{}", self.l.next_lambda);
+        self.l.next_lambda += 1;
+        let sig = self.l.closure_signature(&param_types, &ret)?;
+        let func_id = self
+            .l
+            .module
+            .declare_function(&symbol, Linkage::Local, &sig)
+            .map_err(|e| CodegenError::internal(e.to_string()))?;
+        self.l.lambdas.push(PendingLambda {
+            symbol,
+            func_id,
+            params: param_infos,
+            ret,
+            captures: captures.clone(),
+            body: body.clone(),
+        });
+
+        let size = CLOSURE_CAPTURES_OFFSET + SLOT_SIZE * captures.len() as i32;
+        let closure = self.alloc_object(size, runtime::KIND_STRUCT)?;
+        let code_ref = self.func_ref_by_id(func_id);
+        let ptr = self.pointer_ty();
+        let code = self.builder.ins().func_addr(ptr, code_ref);
+        self.builder
+            .ins()
+            .store(MemFlagsData::trusted(), code, closure, CLOSURE_CODE_OFFSET);
+        let count = self.builder.ins().iconst(types::I64, captures.len() as i64);
+        self.builder.ins().store(
+            MemFlagsData::trusted(),
+            count,
+            closure,
+            CLOSURE_COUNT_OFFSET,
+        );
+        for (index, (name, ty)) in captures.iter().enumerate() {
+            let binding = self
+                .lookup(name)
+                .ok_or_else(|| CodegenError::internal(format!("captured `{}` vanished", name)))?;
+            let value = self.load_binding(&binding);
+            let slot = self.value_to_slot(value, ty)?;
+            let offset = CLOSURE_CAPTURES_OFFSET + SLOT_SIZE * index as i32;
+            self.builder
+                .ins()
+                .store(MemFlagsData::trusted(), slot, closure, offset);
+        }
+        Ok(closure)
+    }
+
+    /// Parameter and return types of a lambda, from the checker where it
+    /// recorded them and from the annotations otherwise.
+    fn lambda_signature(
+        &self,
+        params: &[Parameter],
+        body: &Expression,
+        recorded: Option<&Type>,
+        span: &Span,
+    ) -> CodegenResult<(Vec<Type>, Type)> {
+        let annotated: Vec<Type> = params
+            .iter()
+            .map(|param| self.l.normalize(layout::type_of_ann(&param.type_ann)))
+            .collect();
+
+        // Prefer the checker's type for the lambda as a whole. Inferring the
+        // return from the body alone is wrong for a block body: the block
+        // expression itself is recorded as `void`, while the lambda returns
+        // whatever its `return` produces.
+        let ret = match recorded {
+            Some(Type::Function { return_type, .. }) => self.l.normalize((**return_type).clone()),
+            _ => self
+                .infer_or_checked(body)
+                .and_then(concrete)
+                .unwrap_or(Type::Void),
+        };
+
+        for (param, ty) in params.iter().zip(annotated.iter()) {
+            if matches!(ty, Type::Any | Type::Unknown) {
+                return Err(CodegenError::unsupported_at(
+                    format!(
+                        "the native backend needs a type annotation on lambda parameter `{}`",
+                        param.name
+                    ),
+                    span,
+                ));
+            }
+        }
+        Ok((annotated, ret))
+    }
+
+    /// A named function used as a value: a closure object with no captures,
+    /// pointing at a wrapper that ignores the environment.
+    ///
+    /// The object is emitted into read-only data with a relocation, so taking a
+    /// function's value costs nothing at run time.
+    fn function_value(&mut self, key: &str) -> CodegenResult<Value> {
+        let data_id = match self.l.fn_values.get(key) {
+            Some(id) => *id,
+            None => {
+                let symbol = format!("lira__fnval__{}", self.l.next_lambda);
+                self.l.next_lambda += 1;
+                let info =
+                    self.l.funcs.get(key).ok_or_else(|| {
+                        CodegenError::internal(format!("unknown function `{}`", key))
+                    })?;
+                let param_types: Vec<Type> = info.params.iter().map(|p| p.ty.clone()).collect();
+                let ret = info.ret.clone();
+                let sig = self.l.closure_signature(&param_types, &ret)?;
+                let wrapper_id = self
+                    .l
+                    .module
+                    .declare_function(&symbol, Linkage::Local, &sig)
+                    .map_err(|e| CodegenError::internal(e.to_string()))?;
+                self.l.fn_wrappers.push(PendingFnWrapper {
+                    symbol: symbol.clone(),
+                    func_id: wrapper_id,
+                    target: key.to_string(),
+                });
+
+                // header, code pointer (relocated), capture count
+                let mut image = Vec::with_capacity(CLOSURE_CAPTURES_OFFSET as usize);
+                image.extend_from_slice(&(runtime::KIND_STRUCT as u32).to_le_bytes());
+                image.extend_from_slice(&0u32.to_le_bytes());
+                image.extend_from_slice(&(-1i64).to_le_bytes()); // static, never freed
+                image.extend_from_slice(&0i64.to_le_bytes()); // code, filled by the reloc
+                image.extend_from_slice(&0i64.to_le_bytes()); // no captures
+
+                let mut description = DataDescription::new();
+                description.define(image.into_boxed_slice());
+                description.set_align(8);
+                let code_ref = self
+                    .l
+                    .module
+                    .declare_func_in_data(wrapper_id, &mut description);
+                description.write_function_addr(CLOSURE_CODE_OFFSET as u32, code_ref);
+
+                let data_symbol = format!("{}__value", symbol);
+                let id = self
+                    .l
+                    .module
+                    .declare_data(&data_symbol, Linkage::Local, false, false)
+                    .map_err(|e| CodegenError::internal(e.to_string()))?;
+                self.l
+                    .module
+                    .define_data(id, &description)
+                    .map_err(|e| CodegenError::internal(e.to_string()))?;
+                self.l.fn_values.insert(key.to_string(), id);
+                id
+            }
+        };
+        let gv = self.global_value(data_id);
+        let ptr = self.pointer_ty();
+        Ok(self.builder.ins().symbol_value(ptr, gv))
+    }
+
+    /// Call a function value: load its code pointer and call through it.
+    fn lower_indirect_call(
+        &mut self,
+        callee: &Expression,
+        fn_ty: &Type,
+        args: &[Argument],
+        span: &Span,
+    ) -> CodegenResult<Option<Value>> {
+        let Type::Function {
+            params,
+            return_type,
+            ..
+        } = fn_ty
+        else {
+            return Err(CodegenError::unsupported_at(
+                format!("`{}` is not callable", fn_ty.display_name()),
+                span,
+            ));
+        };
+        let params: Vec<Type> = params.iter().map(|t| self.l.normalize(t.clone())).collect();
+        let ret = self.l.normalize((**return_type).clone());
+        if args.len() != params.len() {
+            return Err(CodegenError::unsupported_at(
+                format!("this function takes {} argument(s)", params.len()),
+                span,
+            ));
+        }
+
+        let closure = self.lower_expr_value(callee, fn_ty)?;
+        let sig = self.l.closure_signature(&params, &ret)?;
+        let sig_ref = self.builder.import_signature(sig);
+        let ptr = self.pointer_ty();
+        let code =
+            self.builder
+                .ins()
+                .load(ptr, MemFlagsData::trusted(), closure, CLOSURE_CODE_OFFSET);
+
+        let mut call_args = Vec::with_capacity(args.len() + 1);
+        call_args.push(closure);
+        for (arg, ty) in args.iter().zip(params.iter()) {
+            call_args.push(self.lower_expr_value(&arg.value, ty)?);
+        }
+        let call = self.builder.ins().call_indirect(sig_ref, code, &call_args);
+        let results = self.builder.inst_results(call);
+        let result = results.first().copied();
+        Ok(if matches!(ret, Type::Void) {
+            None
+        } else {
+            result
+        })
     }
 }

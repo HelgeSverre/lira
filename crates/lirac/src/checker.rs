@@ -1921,6 +1921,41 @@ impl TypeChecker {
         }
     }
 
+    /// The type a block gives back through `return`, if it has one.
+    ///
+    /// Used for a lambda whose body is a block: the block itself has no value,
+    /// but the lambda's type is whatever its `return` produces. Only the
+    /// straight-line and branching shapes are followed; a `return` buried in a
+    /// loop or a match arm leaves the type alone rather than guessing.
+    fn block_return_type(&self, block: &Block) -> Option<Type> {
+        for stmt in &block.statements {
+            match &stmt.kind {
+                StatementKind::Return(Some(expr)) => {
+                    return self.sema.expr_types.get(&expr.id).cloned();
+                }
+                StatementKind::If {
+                    then_branch,
+                    else_branch,
+                    ..
+                } => {
+                    if let Some(ty) = self.block_return_type(then_branch) {
+                        return Some(ty);
+                    }
+                    if let Some(ty) = else_branch.as_ref().and_then(|b| self.block_return_type(b)) {
+                        return Some(ty);
+                    }
+                }
+                StatementKind::Block(inner) => {
+                    if let Some(ty) = self.block_return_type(inner) {
+                        return Some(ty);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
     fn check_statement(&mut self, stmt: &Statement) {
         match &stmt.kind {
             StatementKind::VarDecl {
@@ -3177,7 +3212,19 @@ impl TypeChecker {
                     })
                     .collect();
 
-                let return_type = self.check_expression(body);
+                let mut return_type = self.check_expression(body);
+                // A block body is checked as a statement sequence, which has no
+                // value, so `check_expression` reports `void`. What the lambda
+                // actually yields is what its `return` gives back — without this
+                // `|| { return 1 }` would be typed `fn() -> void`, and calling it
+                // for a value would look like a type error.
+                if matches!(return_type, Type::Void) {
+                    if let ExpressionKind::Block(block) = &body.kind {
+                        if let Some(ty) = self.block_return_type(block) {
+                            return_type = ty;
+                        }
+                    }
+                }
                 self.env.pop_scope();
 
                 Type::Function {
@@ -4261,10 +4308,15 @@ mod tests {
 
     /// Helper function to check source code and return the result
     fn check_source(source: &str) -> Result<(), String> {
+        check_source_checked(source).map(|_| ())
+    }
+
+    /// Like [`check_source`], but hands back the checked program so a test can
+    /// inspect the recorded types.
+    fn check_source_checked(source: &str) -> Result<CheckedProgram, String> {
         let tokens = tokenize(source)?;
         let ast = parse(&tokens)?;
-        check(&ast)?;
-        Ok(())
+        check(&ast)
     }
 
     // ========================================================================
@@ -5000,6 +5052,42 @@ mod tests {
     fn test_empty_lambda() {
         // Empty parameter lambda
         assert!(check_source("let noop = || 42").is_ok());
+    }
+
+    #[test]
+    fn lambda_with_a_block_body_returns_the_type_it_returns() {
+        // A block has no value of its own, so checking the body as an
+        // expression yields `void`. The lambda's type is what its `return`
+        // gives back — without that, calling it for a value looks like a type
+        // error to anything that trusts the recorded type.
+        let checked = check_source_checked("let f = || { return 42 }").expect("checks");
+        let lambda_type = checked
+            .sema
+            .expr_types
+            .values()
+            .find(|ty| matches!(ty, Type::Function { .. }))
+            .expect("the lambda has a recorded type");
+        let Type::Function { return_type, .. } = lambda_type else {
+            unreachable!("filtered above");
+        };
+        assert_eq!(**return_type, Type::Int);
+    }
+
+    #[test]
+    fn lambda_block_return_type_follows_branches() {
+        let checked =
+            check_source_checked("let f = |n: int| { if n > 0 { return \"yes\" } return \"no\" }")
+                .expect("checks");
+        let lambda_type = checked
+            .sema
+            .expr_types
+            .values()
+            .find(|ty| matches!(ty, Type::Function { .. }))
+            .expect("the lambda has a recorded type");
+        let Type::Function { return_type, .. } = lambda_type else {
+            unreachable!("filtered above");
+        };
+        assert_eq!(**return_type, Type::String);
     }
 
     // ========================================================================

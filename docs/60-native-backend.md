@@ -103,6 +103,40 @@ String literals need no runtime construction at all: the complete object, header
 included, is emitted into read-only data with a negative refcount marking it
 immortal.
 
+## Closures
+
+A function value is a heap object: a code pointer, a capture count, then one
+8-byte cell per captured value.
+
+```
+let add5 = make_adder(5)
+
+  0 │ LiraHeader  │
+ 16 │ code        │──► lira__lambda__0(env, x)  { return x + env.captures[0] }
+ 24 │ count = 1   │
+ 32 │ capture: 5  │
+```
+
+Every function value's code takes its own closure as the first argument, whether
+or not it captures anything, so a lambda and a named function are called through
+one path. A named function used as a value — `apply_twice(double, 3)` — gets a
+wrapper that ignores the environment, and its closure object is emitted into
+read-only data with a relocation, so taking a function's value costs nothing at
+run time.
+
+Captures are copied by value when the closure is built, matching the bytecode
+VM's `MakeClosure`. That is what makes `make_adder(5)` work: the frame it was
+built in is gone by the time `add5` runs.
+
+Free variables are found with a proper scope walk rather than by collecting every
+identifier and subtracting the bound ones, so a name shadowed partway through the
+body is not captured.
+
+One sharp edge worth knowing about: an indirect call's signature and the lifted
+function's signature are derived from the same recorded `Type::Function`. They
+have to be — Cranelift cannot check an indirect call, so a mismatch returns
+whatever happened to be in the return register rather than failing to compile.
+
 ## Fibers: the interesting part
 
 The bytecode VM can suspend a fiber by saving an instruction pointer, because
@@ -209,17 +243,19 @@ aliases, top-level globals; `if`/`else`, `while`, `loop`, `for` over arrays and
 ranges, ranges as values, `break`/`continue`, blocks as expressions;
 `match` with literal, range, wildcard, binding, or, struct and enum-constructor
 patterns, plus guards; structs with nested and narrow fields; enums with
-payloads and `__enum`/`__variant` reflection; arrays with indexing, assignment,
-`push`, `pop` and `len`; strings with concatenation, interpolation, comparison
-and `len`; `spawn`, `chan`, `send`, `recv`, `close`, `fiber_yield`, `fiber_id`.
+payloads and `__enum`/`__variant` reflection; tuples, tuple patterns and
+destructuring `let`; lambdas, closures with captures, and functions as values;
+arrays with indexing, assignment, `push`, `pop` and `len`; strings with
+concatenation, interpolation, comparison and `len`; `spawn`, `chan`, `send`,
+`recv`, `close`, `fiber_yield`, `fiber_id`.
 
-Of the repository's 124 examples, 74 compile natively and produce byte-identical
+Of the repository's 124 examples, 81 compile natively and produce byte-identical
 output to the bytecode VM. Six more compile and run correctly but cannot be
 compared byte-for-byte: they print timestamps, random UUIDs, or `env_args`,
 which differ between an interpreted script and a compiled binary by nature. The
 rest use constructs listed below and are declined with a reason.
 
-36 examples are pinned as regression tests in `tests/parity.rs`, and every
+42 examples are pinned as regression tests in `tests/parity.rs`, and every
 example that type-checks is required to either compile or be declined cleanly —
 an internal error fails the suite.
 
@@ -227,8 +263,7 @@ an internal error fails the suite.
 
 | Not lowered | Notes |
 |---|---|
-| Lambdas and first-class functions | Needs closure conversion |
-| Tuples, maps, `Result` | Needs a multi-value and a hashed representation |
+| Maps, `Result` | Needs a hashed representation and a built-in enum |
 | `T?` where `T` is not a reference | No spare bit pattern for a null `int` |
 | Optional chaining, `?` | Follows from optionals |
 | Class inheritance | Needs prefixed layouts and a vtable |

@@ -742,13 +742,153 @@ fn impl_blocks_on_built_in_types_dispatch() {
 }
 
 // ---------------------------------------------------------------------- //
+// Tuples                                                                  //
+// ---------------------------------------------------------------------- //
+
+#[test]
+fn tuples_carry_a_type_per_position() {
+    assert_lines(
+        r#"
+        let pair = (1, "two")
+        let (n, s) = pair
+        println(n)
+        println(s)
+        fn swap(p: (int, int)) -> (int, int) {
+            let (a, b) = p
+            return (b, a)
+        }
+        let (x, y) = swap((3, 4))
+        println(x)
+        println(y)
+        "#,
+        &["1", "two", "4", "3"],
+    );
+}
+
+#[test]
+fn tuple_patterns_nest_and_test_literals() {
+    assert_lines(
+        r#"
+        fn quadrant(p: (int, int)) -> string {
+            return match p {
+                (0, 0) => "origin",
+                (0, y) => "yaxis",
+                (x, 0) => "xaxis",
+                (x, y) => "other"
+            }
+        }
+        println(quadrant((0, 0)))
+        println(quadrant((0, 5)))
+        println(quadrant((5, 0)))
+        println(quadrant((5, 5)))
+        let nested = ((1, 2), 3)
+        match nested {
+            ((a, b), c) => println(a + b + c)
+        }
+        "#,
+        &["origin", "yaxis", "xaxis", "other", "6"],
+    );
+}
+
+#[test]
+fn struct_patterns_destructure_in_a_let() {
+    assert_lines(
+        r#"
+        struct Point { x: int, y: int }
+        let p = Point { x: 7, y: 8 }
+        let { x, y } = p
+        println(x + y)
+        "#,
+        &["15"],
+    );
+}
+
+// ---------------------------------------------------------------------- //
+// Lambdas and closures                                                    //
+// ---------------------------------------------------------------------- //
+
+#[test]
+fn lambdas_are_callable_values() {
+    assert_lines(
+        r#"
+        let double = |x: int| x * 2
+        println(double(5))
+        let add = |a: int, b: int| a + b
+        println(add(3, 4))
+        let get_ten = || 10
+        println(get_ten())
+        println((|x: int| x * x)(4))
+        "#,
+        &["10", "7", "10", "16"],
+    );
+}
+
+#[test]
+fn closures_capture_by_value_and_outlive_their_frame() {
+    // `make_adder`'s frame is gone by the time `add5` runs, so `n` has to have
+    // been copied into the closure rather than referenced on the stack.
+    assert_lines(
+        r#"
+        fn make_adder(n: int) -> fn(int) -> int {
+            return |x: int| x + n
+        }
+        let add5 = make_adder(5)
+        let add10 = make_adder(10)
+        println(add5(3))
+        println(add10(3))
+        println(add5(7))
+
+        fn make_linear(a: int, b: int) -> fn(int) -> int {
+            return |x: int| a * x + b
+        }
+        let f = make_linear(2, 3)
+        println(f(0))
+        println(f(10))
+        "#,
+        &["8", "13", "12", "3", "23"],
+    );
+}
+
+#[test]
+fn a_named_function_can_be_passed_as_a_value() {
+    assert_lines(
+        r#"
+        fn double(x: int) -> int { return x * 2 }
+        fn square(x: int) -> int { return x * x }
+        fn apply_twice(f: fn(int) -> int, x: int) -> int { return f(f(x)) }
+        fn compose(f: fn(int) -> int, g: fn(int) -> int, x: int) -> int { return f(g(x)) }
+        println(apply_twice(double, 3))
+        println(apply_twice(square, 2))
+        println(compose(double, square, 3))
+        // A lambda and a named function are the same kind of value.
+        println(apply_twice(|x: int| x + 10, 0))
+        "#,
+        &["12", "16", "18", "20"],
+    );
+}
+
+#[test]
+fn a_captured_name_shadowed_inside_the_body_is_not_captured() {
+    assert_lines(
+        r#"
+        let n = 1
+        let f = || {
+            let n = 99
+            return n
+        }
+        println(f())
+        println(n)
+        "#,
+        &["99", "1"],
+    );
+}
+
+// ---------------------------------------------------------------------- //
 // Diagnostics                                                             //
 // ---------------------------------------------------------------------- //
 
 #[test]
 fn unsupported_constructs_are_refused_rather_than_mis_compiled() {
-    assert_rejected("let double = |x: int| x * 2\nprintln(double(5))", "lambdas");
-    assert_rejected("let t = (1, 2)\nprintln(t)", "tuples");
     assert_rejected(
         "class Animal { name: string }\nclass Dog extends Animal { breed: string }",
         "inheritance",
@@ -762,7 +902,7 @@ fn a_type_error_stops_native_compilation() {
 
 #[test]
 fn the_error_points_at_the_bytecode_vm_as_the_fallback() {
-    match run_native("let t = (1, 2)") {
+    match run_native("let m = { \"a\": 1 }") {
         Ok(_) => panic!("expected a compile error"),
         Err(error) => assert!(
             error.contains("lira run"),

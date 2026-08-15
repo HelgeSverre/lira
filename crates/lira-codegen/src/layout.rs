@@ -26,6 +26,15 @@ pub const ARRAY_LEN_OFFSET: i32 = 16;
 pub const ENUM_TAG_OFFSET: i32 = 16;
 pub const ENUM_PAYLOAD_OFFSET: i32 = 24;
 
+/// A closure object: header, the code pointer, the capture count, then one
+/// 8-byte cell per captured value.
+///
+/// The code it points at always takes the closure itself as its first argument,
+/// whether or not it captures anything, so every call site is identical.
+pub const CLOSURE_CODE_OFFSET: i32 = 16;
+pub const CLOSURE_COUNT_OFFSET: i32 = 24;
+pub const CLOSURE_CAPTURES_OFFSET: i32 = 32;
+
 /// Every enum payload slot and every array element is a uniform 8-byte cell:
 /// floats are bit-cast into it and references are stored directly.
 pub const SLOT_SIZE: i32 = 8;
