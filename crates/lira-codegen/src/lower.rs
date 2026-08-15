@@ -3613,8 +3613,7 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
                 variant_name,
                 fields,
                 subject,
-                &ok_type,
-                &err_type,
+                (&ok_type, &err_type),
                 fail,
                 span,
             );
@@ -5286,11 +5285,11 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
         variant: &str,
         fields: &[Pattern],
         subject: Value,
-        ok_type: &Type,
-        err_type: &Type,
+        payloads: (&Type, &Type),
         fail: Block,
         span: &Span,
     ) -> CodegenResult<()> {
+        let (ok_type, err_type) = payloads;
         let (tag, payload_ty) = match variant {
             "Ok" => (RESULT_OK_TAG, ok_type.clone()),
             "Err" => (RESULT_ERR_TAG, err_type.clone()),
