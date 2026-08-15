@@ -34,9 +34,9 @@ use lirac::sema::SemanticTables;
 use crate::abi::{is_unsigned, optional_is_boxed, repr_of, Repr};
 use crate::error::{CodegenError, CodegenResult};
 use crate::layout::{
-    self, storage_size, LayoutMap, CLASS_VTABLE_OFFSET, CLOSURE_CAPTURES_OFFSET,
-    CLOSURE_CODE_OFFSET, CLOSURE_COUNT_OFFSET, ENUM_PAYLOAD_OFFSET, ENUM_TAG_OFFSET, HEADER_SIZE,
-    OPTIONAL_SLOT_OFFSET, SLOT_SIZE,
+    self, mangle, sanitise_symbol, storage_size, substitute, LayoutMap, CLASS_VTABLE_OFFSET,
+    CLOSURE_CAPTURES_OFFSET, CLOSURE_CODE_OFFSET, CLOSURE_COUNT_OFFSET, ENUM_PAYLOAD_OFFSET,
+    ENUM_TAG_OFFSET, HEADER_SIZE, OPTIONAL_SLOT_OFFSET, SLOT_SIZE,
 };
 use crate::runtime;
 
@@ -65,6 +65,29 @@ struct ParamInfo {
 struct GlobalInfo {
     data_id: DataId,
     ty: Type,
+}
+
+/// A generic function or method, kept as a template until a call site fixes its
+/// type arguments.
+struct GenericFn {
+    /// The type that owns it, for a method.
+    owner: Option<String>,
+    name: String,
+    /// The method's own parameters first, then the owner's.
+    type_params: Vec<String>,
+    /// How many of `type_params` came from the surrounding `impl<T>`.
+    owner_param_count: usize,
+    params: Vec<Parameter>,
+    return_type: Option<lirac::ast::TypeExpr>,
+    body: AstBlock,
+    span: Span,
+}
+
+/// An instantiation waiting to be lowered.
+struct PendingInstance {
+    key: String,
+    template: usize,
+    bindings: HashMap<String, Type>,
 }
 
 /// A lambda, queued while lowering the function it appears in and emitted
@@ -133,6 +156,17 @@ pub struct Lowerer<'a> {
     fn_values: HashMap<String, DataId>,
     /// Virtual method tables, one per class.
     vtables: HashMap<String, DataId>,
+    /// Generic function and method templates, indexed by `generic_index`.
+    generic_fns: Vec<GenericFn>,
+    /// Template lookup by `owner::name`, or `name` for a free function.
+    generic_index: HashMap<String, usize>,
+    /// Instantiations already declared, and those still to lower.
+    instances: HashMap<String, usize>,
+    pending_instances: Vec<PendingInstance>,
+    /// Generic aggregates whose methods have already been instantiated.
+    instantiated_types: HashSet<String>,
+    /// Type parameter bindings in force while lowering an instantiation.
+    bindings: HashMap<String, Type>,
     next_spawn: usize,
     next_string: usize,
     next_lambda: usize,
@@ -175,6 +209,12 @@ impl<'a> Lowerer<'a> {
             fn_wrappers: Vec::new(),
             fn_values: HashMap::new(),
             vtables: HashMap::new(),
+            generic_fns: Vec::new(),
+            generic_index: HashMap::new(),
+            instances: HashMap::new(),
+            pending_instances: Vec::new(),
+            instantiated_types: HashSet::new(),
+            bindings: HashMap::new(),
             next_spawn: 0,
             next_string: 0,
             next_lambda: 0,
@@ -191,6 +231,9 @@ impl<'a> Lowerer<'a> {
         self.declare_globals(program)?;
 
         for (owner, decl) in collect_function_decls(program) {
+            if !decl.type_params.is_empty() || decl.owner_type_params.is_some() {
+                continue;
+            }
             self.lower_function(owner.as_deref(), decl)?;
         }
 
@@ -199,6 +242,10 @@ impl<'a> Lowerer<'a> {
         // These are discovered while lowering, and lowering one can discover
         // more: a lambda body may itself contain a lambda or a spawn.
         loop {
+            if let Some(pending) = self.pending_instances.pop() {
+                self.lower_instance(&pending)?;
+                continue;
+            }
             if let Some(pending) = self.lambdas.pop() {
                 self.lower_lambda_body(&pending)?;
                 continue;
@@ -222,6 +269,34 @@ impl<'a> Lowerer<'a> {
 
     fn declare_functions(&mut self, program: &Program) -> CodegenResult<()> {
         for (owner, decl) in collect_function_decls(program) {
+            // A generic declaration has no single body to emit: it becomes a
+            // template, and each concrete use adds an instantiation.
+            if !decl.type_params.is_empty() || decl.owner_type_params.is_some() {
+                let mut type_params = decl.type_params.to_vec();
+                if let Some(owner_params) = decl.owner_type_params {
+                    for param in owner_params {
+                        if !type_params.iter().any(|p| p.name == param.name) {
+                            type_params.push(param.clone());
+                        }
+                    }
+                }
+                let owner_param_count = type_params.len() - decl.type_params.len();
+                let index = self.generic_fns.len();
+                self.generic_fns.push(GenericFn {
+                    owner: owner.clone(),
+                    name: decl.name.to_string(),
+                    type_params: type_params.iter().map(|p| p.name.clone()).collect(),
+                    owner_param_count,
+                    params: decl.params.to_vec(),
+                    return_type: decl.return_type.cloned(),
+                    body: decl.body.clone(),
+                    span: decl.span.clone(),
+                });
+                self.generic_index
+                    .insert(fn_key(owner.as_deref(), decl.name), index);
+                continue;
+            }
+
             let symbol = match &owner {
                 Some(type_name) => format!("lira__{}__{}", type_name, decl.name),
                 None => format!("lira__{}", decl.name),
@@ -247,7 +322,7 @@ impl<'a> Lowerer<'a> {
                         }
                     }
                 } else {
-                    self.normalize(layout::type_of_ann(&param.type_ann))
+                    self.resolve_ann(&param.type_ann, &HashSet::new())?
                 };
                 params.push(ParamInfo {
                     name: param.name.clone(),
@@ -255,10 +330,10 @@ impl<'a> Lowerer<'a> {
                     default: param.default.clone(),
                 });
             }
-            let ret = decl
-                .return_type
-                .map(|t| self.normalize(layout::type_of_ann(t)))
-                .unwrap_or(Type::Void);
+            let ret = match decl.return_type {
+                Some(t) => self.resolve_ann(t, &HashSet::new())?,
+                None => Type::Void,
+            };
 
             let sig = self.signature_for(&params, &ret)?;
             let func_id = self
@@ -464,6 +539,12 @@ impl<'a> Lowerer<'a> {
     /// The checker and the AST both spell a user type as `Struct(name)` when
     /// they have not distinguished it from an enum; settle that here.
     fn normalize(&self, ty: Type) -> Type {
+        // Inside an instantiation, a type parameter stands for a concrete type.
+        let ty = if self.bindings.is_empty() {
+            ty
+        } else {
+            substitute(&ty, &self.bindings)
+        };
         match ty {
             Type::Result { ok_type, err_type } => Type::Result {
                 ok_type: Box::new(self.normalize(*ok_type)),
@@ -539,6 +620,9 @@ fn fn_key(owner: Option<&str>, name: &str) -> String {
 /// A function declaration paired with the type that owns it, if any.
 struct FnDeclRef<'p> {
     name: &'p str,
+    type_params: &'p [lirac::ast::TypeParam],
+    /// Type parameters of the surrounding `impl<T> ...`, if any.
+    owner_type_params: Option<&'p [lirac::ast::TypeParam]>,
     params: &'p [Parameter],
     return_type: Option<&'p lirac::ast::TypeExpr>,
     body: &'p AstBlock,
@@ -549,19 +633,21 @@ struct FnDeclRef<'p> {
 /// nested inside `struct`, `class` and `impl` bodies.
 fn collect_function_decls(program: &Program) -> Vec<(Option<String>, FnDeclRef<'_>)> {
     let mut out = Vec::new();
-    collect_decls_in(&program.statements, None, &mut out);
+    collect_decls_in(&program.statements, None, None, &mut out);
     out
 }
 
 fn collect_decls_in<'p>(
     statements: &'p [Statement],
     owner: Option<&str>,
+    owner_type_params: Option<&'p [lirac::ast::TypeParam]>,
     out: &mut Vec<(Option<String>, FnDeclRef<'p>)>,
 ) {
     for stmt in statements {
         match &stmt.kind {
             StatementKind::FnDecl {
                 name,
+                type_params,
                 params,
                 return_type,
                 body,
@@ -570,20 +656,42 @@ fn collect_decls_in<'p>(
                 owner.map(|o| o.to_string()),
                 FnDeclRef {
                     name,
+                    type_params,
+                    owner_type_params: owner_type_params.filter(|p| !p.is_empty()),
                     params,
                     return_type: return_type.as_ref(),
                     body,
                     span: &stmt.span,
                 },
             )),
-            StatementKind::StructDecl { name, methods, .. }
-            | StatementKind::ClassDecl { name, methods, .. } => {
-                collect_decls_in(methods, Some(name), out)
+            StatementKind::StructDecl {
+                name,
+                type_params,
+                methods,
+                ..
+            } => collect_decls_in(
+                methods,
+                Some(name),
+                (!type_params.is_empty()).then_some(type_params.as_slice()),
+                out,
+            ),
+            StatementKind::ClassDecl { name, methods, .. } => {
+                collect_decls_in(methods, Some(name), None, out)
             }
             StatementKind::ImplDecl {
-                type_name, methods, ..
-            } => collect_decls_in(methods, Some(type_name), out),
-            StatementKind::Block(block) => collect_decls_in(&block.statements, owner, out),
+                type_name,
+                type_params,
+                methods,
+                ..
+            } => collect_decls_in(
+                methods,
+                Some(type_name),
+                (!type_params.is_empty()).then_some(type_params.as_slice()),
+                out,
+            ),
+            StatementKind::Block(block) => {
+                collect_decls_in(&block.statements, owner, owner_type_params, out)
+            }
             _ => {}
         }
     }
@@ -614,9 +722,15 @@ fn is_declaration(stmt: &Statement) -> bool {
 impl<'a> Lowerer<'a> {
     fn lower_function(&mut self, owner: Option<&str>, decl: FnDeclRef<'_>) -> CodegenResult<()> {
         let key = fn_key(owner, decl.name);
+        self.lower_function_as(&key, decl)
+    }
+
+    /// Lower a function body under an explicit registration key, which is how an
+    /// instantiation reuses the template's AST.
+    fn lower_function_as(&mut self, key: &str, decl: FnDeclRef<'_>) -> CodegenResult<()> {
         let info = self
             .funcs
-            .get(&key)
+            .get(key)
             .ok_or_else(|| CodegenError::internal(format!("`{}` was never declared", key)))?;
         let func_id = info.func_id;
         let symbol = info.symbol.clone();
@@ -1689,10 +1803,25 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
                 type_args,
             } => {
                 if !type_args.is_empty() {
-                    return Err(CodegenError::unsupported_at(
-                        "explicit type arguments are not lowered by the native backend yet",
-                        &expr.span,
-                    ));
+                    // `foo::<int>(...)` names its instantiation directly.
+                    let ExpressionKind::Identifier(name) = &callee.kind else {
+                        return Err(CodegenError::unsupported_at(
+                            "explicit type arguments are only lowered on a named function",
+                            &expr.span,
+                        ));
+                    };
+                    let explicit: Vec<Type> = type_args
+                        .iter()
+                        .map(|t| self.l.normalize(layout::type_of_ann(t)))
+                        .collect();
+                    let name = name.clone();
+                    if let Some(result) =
+                        self.lower_generic_call(&name, None, args, &explicit, &expr.span)?
+                    {
+                        return Ok(result);
+                    }
+                    // Not generic after all: the arguments were redundant.
+                    return self.lower_call(callee, args, &expr.span);
                 }
                 self.lower_call(callee, args, &expr.span)
             }
@@ -2638,6 +2767,11 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
                 if self.l.funcs.contains_key(name.as_str()) {
                     return self.lower_user_call(&name.clone(), None, args, span);
                 }
+                if let Some(result) =
+                    self.lower_generic_call(&name.clone(), None, args, &[], span)?
+                {
+                    return Ok(result);
+                }
                 // The checker lets `impl int { fn abs(self) }` be called as
                 // `abs(-5)`, with the receiver as the first argument. The
                 // standard library leans on this throughout.
@@ -3216,6 +3350,9 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
         fields: &[(String, Expression)],
         span: &Span,
     ) -> CodegenResult<Value> {
+        // `Box { value: 42 }` names no type arguments; they come from the
+        // values the fields are given.
+        let name = &self.instantiate_from_literal(name, fields, span)?;
         let layout = self
             .l
             .layouts
@@ -3252,6 +3389,55 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
         // `lira_rt_alloc` zeroes, so an omitted field reads as 0/false/null
         // rather than as garbage; the checker is what rejects real omissions.
         Ok(object)
+    }
+
+    /// If `name` is a generic type, work out its arguments from the field values
+    /// and instantiate it, returning the concrete name.
+    fn instantiate_from_literal(
+        &mut self,
+        name: &str,
+        fields: &[(String, Expression)],
+        span: &Span,
+    ) -> CodegenResult<String> {
+        let Some(template) = self.l.layouts.generics.get(name).cloned() else {
+            return Ok(name.to_string());
+        };
+        let in_scope: HashSet<String> = template.type_params.iter().cloned().collect();
+        let mut bindings = HashMap::new();
+        for (field_name, declared) in &template.fields {
+            let Some((_, value)) = fields.iter().find(|(given, _)| given == field_name) else {
+                continue;
+            };
+            let actual = self.ty_of(value)?;
+            unify(
+                &layout::type_of_ann_in(declared, &in_scope),
+                &actual,
+                &mut bindings,
+            );
+        }
+        let args: Option<Vec<Type>> = template
+            .type_params
+            .iter()
+            .map(|param| bindings.get(param).cloned())
+            .collect();
+        let args = args.ok_or_else(|| {
+            CodegenError::unsupported_at(
+                format!(
+                    "cannot work out the type arguments for `{}` from these fields",
+                    name
+                ),
+                span,
+            )
+        })?;
+        let ty = self.l.instantiate_type(name, &args, span)?;
+        match ty {
+            Type::Struct(mangled) | Type::Enum(mangled) | Type::Class(mangled) => Ok(mangled),
+            other => Err(CodegenError::internal(format!(
+                "instantiating `{}` gave a `{}`",
+                name,
+                other.display_name()
+            ))),
+        }
     }
 
     /// Resolve `object.field` to a base pointer, a byte offset and the field's
@@ -3296,6 +3482,8 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
         args: &[Argument],
         span: &Span,
     ) -> CodegenResult<Value> {
+        // `Opt::Some(42)` names no type arguments; the payload supplies them.
+        let enum_name = &self.instantiate_enum_from_args(enum_name, variant_name, args, span)?;
         let layout = self
             .l
             .layouts
@@ -3343,6 +3531,60 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
                 .store(MemFlagsData::trusted(), slot, object, offset);
         }
         Ok(object)
+    }
+
+    /// Instantiate a generic enum from the payload a variant was given.
+    ///
+    /// A payload-free variant such as `Opt::None` cannot say what `T` is on its
+    /// own; the type it is assigned to has to, which is why the expected type is
+    /// pushed down to enum construction.
+    fn instantiate_enum_from_args(
+        &mut self,
+        enum_name: &str,
+        variant_name: &str,
+        args: &[Argument],
+        span: &Span,
+    ) -> CodegenResult<String> {
+        let Some(template) = self.l.layouts.generics.get(enum_name).cloned() else {
+            return Ok(enum_name.to_string());
+        };
+        let in_scope: HashSet<String> = template.type_params.iter().cloned().collect();
+        let mut bindings = HashMap::new();
+        if let Some((_, payloads)) = template
+            .variants
+            .iter()
+            .find(|(name, _)| name == variant_name)
+        {
+            for (declared, arg) in payloads.iter().zip(args) {
+                let actual = self.ty_of(&arg.value)?;
+                unify(
+                    &layout::type_of_ann_in(declared, &in_scope),
+                    &actual,
+                    &mut bindings,
+                );
+            }
+        }
+        let arguments: Vec<Type> = template
+            .type_params
+            .iter()
+            .map(|param| {
+                bindings
+                    .get(param)
+                    .cloned()
+                    // A variant that carries nothing of this parameter leaves it
+                    // free; an integer slot is as good as any and never read.
+                    .unwrap_or(Type::Int)
+            })
+            .collect();
+        let ty = self.l.instantiate_type(enum_name, &arguments, span)?;
+        match ty {
+            Type::Struct(mangled) | Type::Enum(mangled) | Type::Class(mangled) => Ok(mangled),
+            other => Err(CodegenError::internal(format!(
+                "instantiating `{}` gave a `{}`",
+                enum_name,
+                other.display_name()
+            ))),
+        }
     }
 
     fn lower_path(&mut self, segments: &[String], span: &Span) -> CodegenResult<Value> {
@@ -3750,16 +3992,23 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
                 span,
             );
         }
-        let Type::Enum(enum_name) = subject_ty else {
-            return Err(CodegenError::unsupported_at(
-                format!(
-                    "`{}` is a variant pattern, but the subject is a `{}`",
-                    name,
-                    subject_ty.display_name()
-                ),
-                span,
-            ));
+        // An instantiated generic enum is named before its layout exists, so it
+        // can arrive labelled as a struct; the layout settles which it is.
+        let enum_name = match subject_ty {
+            Type::Enum(name) => name.clone(),
+            Type::Struct(name) if self.l.layouts.enums.contains_key(name) => name.clone(),
+            other => {
+                return Err(CodegenError::unsupported_at(
+                    format!(
+                        "`{}` is a variant pattern, but the subject is a `{}`",
+                        name,
+                        other.display_name()
+                    ),
+                    span,
+                ))
+            }
         };
+        let enum_name = &enum_name;
         let layout = self
             .l
             .layouts
@@ -4152,10 +4401,15 @@ fn infer_with(
         }
 
         ExpressionKind::StructLiteral {
-            name: Some(name), ..
-        } => l.user_type(name),
+            name: Some(name),
+            fields,
+        } => generic_literal_type(l, resolve, name, fields).unwrap_or_else(|| l.user_type(name)),
 
-        ExpressionKind::EnumVariant { enum_name, .. } => l.user_type(enum_name),
+        ExpressionKind::EnumVariant {
+            enum_name,
+            variant_name,
+        } => generic_variant_type(l, resolve, enum_name, variant_name, &[])
+            .unwrap_or_else(|| l.user_type(enum_name)),
 
         ExpressionKind::Path { segments } => {
             let [type_name, _] = segments.as_slice() else {
@@ -4172,6 +4426,24 @@ fn infer_with(
             // one before matching the built-in names.
             ExpressionKind::Identifier(name) if l.funcs.contains_key(name.as_str()) => {
                 l.funcs[name.as_str()].ret.clone()
+            }
+            // A call through a local or parameter holding a function value
+            // yields that function's return type.
+            ExpressionKind::Identifier(name)
+                if matches!(resolve(name), Some(Type::Function { .. })) =>
+            {
+                let Some(Type::Function { return_type, .. }) = resolve(name) else {
+                    return None;
+                };
+                l.normalize(*return_type)
+            }
+            // A generic call's result depends on the arguments it was given.
+            ExpressionKind::Identifier(name) if l.generic_index.contains_key(name.as_str()) => {
+                let arg_types: Vec<Type> = args
+                    .iter()
+                    .map(|arg| infer_or_checked_with(l, resolve, &arg.value))
+                    .collect::<Option<_>>()?;
+                l.generic_call_type(name, &arg_types, &[])?
             }
             ExpressionKind::Identifier(name) => match name.as_str() {
                 "print" | "println" | "send" | "close" | "fiber_yield" | "collect" => Type::Void,
@@ -4198,7 +4470,11 @@ fn infer_with(
                     },
                 },
             },
-            ExpressionKind::EnumVariant { enum_name, .. } => l.user_type(enum_name),
+            ExpressionKind::EnumVariant {
+                enum_name,
+                variant_name,
+            } => generic_variant_type(l, resolve, enum_name, variant_name, args)
+                .unwrap_or_else(|| l.user_type(enum_name)),
             ExpressionKind::Path { segments } => {
                 let [type_name, member] = segments.as_slice() else {
                     return None;
@@ -4318,7 +4594,7 @@ fn infer_or_checked_with(
     match l.sema.expr_types.get(&expr.id) {
         Some(ty) if !matches!(ty, Type::Unknown | Type::TypeVar(_)) => {
             let recorded = l.normalize(ty.clone());
-            if is_uninformative(&recorded) {
+            if is_uninformative(l, &recorded) {
                 infer_with(l, resolve, expr).or(Some(recorded))
             } else {
                 Some(recorded)
@@ -4333,10 +4609,20 @@ fn infer_or_checked_with(
 /// `any` is the obvious one. `any?` is the same story one level in: the checker
 /// records `Optional(Any)` for every `?.`, so taking it at face value would lose
 /// the field's real type.
-fn is_uninformative(ty: &Type) -> bool {
+fn is_uninformative(l: &Lowerer<'_>, ty: &Type) -> bool {
     match ty {
         Type::Any => true,
-        Type::Optional(inner) => is_uninformative(inner),
+        // A bare `Box` names a template, not a type: it has no size until its
+        // arguments are known, so the instantiated name has to come from
+        // structural inference instead.
+        Type::Struct(name) | Type::Enum(name) | Type::Class(name) => {
+            l.layouts.generics.contains_key(name)
+        }
+        // The checker erases generics, so a call to `identity(42)` is recorded
+        // as returning `T`. Native code needs the `int`, which only structural
+        // inference over the call site can supply.
+        Type::TypeParam(_) => true,
+        Type::Optional(inner) => is_uninformative(l, inner),
         _ => false,
     }
 }
@@ -5610,11 +5896,25 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
 
     /// The type to bind a `select` receive to.
     ///
-    /// Channels carry uniform slots, so the value's type is not recorded
-    /// anywhere; the checker types `recv` as `any`. An `int` is the only thing
-    /// the slot can be read back as without more information, which matches what
-    /// `recv(ch)` does.
-    fn select_binding_type(&self, _body: &Expression, _variable: &str) -> Type {
+    /// Channels carry uniform slots and `chan()` is typed `any`, so nothing
+    /// records what a channel holds. The one place the answer is available is an
+    /// arm that hands the value straight back — `select { v = <-ch => return v }`
+    /// in a function returning `string` can only be receiving strings. That is
+    /// the shape the standard library's mutexes use. Anything else reads the
+    /// slot as an `int`, matching `recv(ch)`.
+    fn select_binding_type(&self, body: &Expression, variable: &str) -> Type {
+        let returns_binding = match &body.kind {
+            ExpressionKind::Identifier(name) => name == variable,
+            ExpressionKind::Block(block) => matches!(
+                block.statements.last().map(|s| &s.kind),
+                Some(StatementKind::Return(Some(expr)))
+                    if matches!(&expr.kind, ExpressionKind::Identifier(name) if name == variable)
+            ),
+            _ => false,
+        };
+        if returns_binding && !matches!(self.return_ty, Type::Void) {
+            return self.return_ty.clone();
+        }
         Type::Int
     }
 }
@@ -5874,5 +6174,468 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
             call_args.push(value);
         }
         Ok(call_args)
+    }
+}
+
+// ====================================================================== //
+// Generics                                                                //
+// ====================================================================== //
+
+impl<'a> Lowerer<'a> {
+    /// Declare an instantiation of a generic function or method, queueing its
+    /// body, and return the key it is registered under.
+    ///
+    /// Instantiating the same bindings twice is a no-op, which is what makes a
+    /// generic that calls itself terminate.
+    fn instantiate_fn(
+        &mut self,
+        template_key: &str,
+        args: &[Type],
+        span: &Span,
+    ) -> CodegenResult<String> {
+        let index = *self.generic_index.get(template_key).ok_or_else(|| {
+            CodegenError::unsupported_at(format!("`{}` is not generic", template_key), span)
+        })?;
+        let template = &self.generic_fns[index];
+        if template.type_params.len() != args.len() {
+            return Err(CodegenError::unsupported_at(
+                format!(
+                    "`{}` takes {} type argument(s), not {}",
+                    template_key,
+                    template.type_params.len(),
+                    args.len()
+                ),
+                span,
+            ));
+        }
+        let key = mangle(template_key, args);
+        if self.instances.contains_key(&key) {
+            return Ok(key);
+        }
+
+        let bindings: HashMap<String, Type> = template
+            .type_params
+            .iter()
+            .cloned()
+            .zip(args.iter().cloned())
+            .collect();
+        let in_scope: HashSet<String> = template.type_params.iter().cloned().collect();
+        let owner = template.owner.clone();
+        let owner_param_count = template.owner_param_count;
+        let params = template.params.clone();
+        let return_type = template.return_type.clone();
+        // The owner's arguments are the trailing ones; a method with type
+        // parameters of its own puts those first.
+        let owner_args: Vec<Type> = args[args.len() - owner_param_count..].to_vec();
+
+        // Resolve the signature under the bindings, exactly as the body will be.
+        let previous = std::mem::replace(&mut self.bindings, bindings.clone());
+        let mut param_infos = Vec::with_capacity(params.len());
+        let mut failure = None;
+        for param in &params {
+            let ty = if is_receiver(&param.name) {
+                match &owner {
+                    Some(type_name) if owner_param_count > 0 => {
+                        Type::Struct(mangle(type_name, &owner_args))
+                    }
+                    Some(type_name) => self.user_type(type_name),
+                    None => {
+                        failure = Some(CodegenError::unsupported_at(
+                            "`self` outside of a method",
+                            &param.span,
+                        ));
+                        break;
+                    }
+                }
+            } else {
+                match self.resolve_ann(&param.type_ann, &in_scope) {
+                    Ok(ty) => ty,
+                    Err(error) => {
+                        failure = Some(error);
+                        break;
+                    }
+                }
+            };
+            param_infos.push(ParamInfo {
+                name: param.name.clone(),
+                ty,
+                default: param.default.clone(),
+            });
+        }
+        let ret = match return_type.as_ref() {
+            Some(t) => match self.resolve_ann(t, &in_scope) {
+                Ok(ty) => ty,
+                Err(error) => {
+                    self.bindings = previous;
+                    return Err(error);
+                }
+            },
+            None => Type::Void,
+        };
+        self.bindings = previous;
+        if let Some(error) = failure {
+            return Err(error);
+        }
+
+        let sig = self.signature_for(&param_infos, &ret)?;
+        let symbol = format!("lira__{}", sanitise_symbol(&key));
+        let func_id = self
+            .module
+            .declare_function(&symbol, Linkage::Local, &sig)
+            .map_err(|e| CodegenError::internal(e.to_string()))?;
+
+        self.funcs.insert(
+            key.clone(),
+            FnInfo {
+                symbol,
+                func_id,
+                params: param_infos,
+                ret,
+                owner: owner.clone(),
+            },
+        );
+        self.instances.insert(key.clone(), index);
+        self.pending_instances.push(PendingInstance {
+            key: key.clone(),
+            template: index,
+            bindings,
+        });
+        Ok(key)
+    }
+
+    /// Lower one queued instantiation, with its bindings in force.
+    fn lower_instance(&mut self, pending: &PendingInstance) -> CodegenResult<()> {
+        // Copy the template out first: lowering borrows `self` mutably, and the
+        // body is shared by every instantiation.
+        let template = &self.generic_fns[pending.template];
+        let name = template.name.clone();
+        let params = template.params.clone();
+        let return_type = template.return_type.clone();
+        let body = template.body.clone();
+        let span = template.span.clone();
+
+        let decl = FnDeclRef {
+            name: &name,
+            type_params: &[],
+            owner_type_params: None,
+            params: &params,
+            return_type: return_type.as_ref(),
+            body: &body,
+            span: &span,
+        };
+        // `lower_function` looks the signature up by key, so hand it the
+        // instantiated one rather than the template's name.
+        let previous = std::mem::replace(&mut self.bindings, pending.bindings.clone());
+        let result = self.lower_function_as(&pending.key, decl);
+        self.bindings = previous;
+        result
+    }
+
+    /// Resolve a type annotation, instantiating any generic type it names.
+    ///
+    /// This is what makes `fn describe(o: Opt<int>)` build the `Opt$int` layout
+    /// at declaration time, rather than waiting for something to construct one.
+    fn resolve_ann(
+        &mut self,
+        ann: &lirac::ast::TypeExpr,
+        in_scope: &HashSet<String>,
+    ) -> CodegenResult<Type> {
+        use lirac::ast::TypeExprKind;
+        match &ann.kind {
+            TypeExprKind::Generic { name, args } if self.layouts.generics.contains_key(name) => {
+                let mut resolved = Vec::with_capacity(args.len());
+                for arg in args {
+                    resolved.push(self.resolve_ann(arg, in_scope)?);
+                }
+                let resolved: Vec<Type> = resolved
+                    .iter()
+                    .map(|ty| substitute(ty, &self.bindings))
+                    .collect();
+                // Still generic — this is a template's own signature, not a use.
+                if resolved.iter().any(|ty| matches!(ty, Type::TypeParam(_))) {
+                    return Ok(Type::Struct(mangle(name, &resolved)));
+                }
+                let name = name.clone();
+                let span = ann.span.clone();
+                self.instantiate_type(&name, &resolved, &span)
+            }
+            TypeExprKind::Optional(inner) => {
+                Ok(Type::Optional(Box::new(self.resolve_ann(inner, in_scope)?)))
+            }
+            TypeExprKind::Array(inner) => {
+                Ok(Type::Array(Box::new(self.resolve_ann(inner, in_scope)?)))
+            }
+            _ => Ok(self.normalize(layout::type_of_ann_in(ann, in_scope))),
+        }
+    }
+
+    /// Instantiate a generic aggregate and its methods, returning the concrete
+    /// type. `Box<int>` becomes `Struct("Box$int")`.
+    fn instantiate_type(&mut self, name: &str, args: &[Type], span: &Span) -> CodegenResult<Type> {
+        let mangled = self.layouts.instantiate(name, args)?;
+        // Guard against re-entry: resolving a method's signature can name the
+        // very type being instantiated.
+        if !self.instantiated_types.insert(mangled.clone()) {
+            return Ok(self.user_type(&mangled));
+        }
+        // The methods are registered under the mangled owner so an ordinary
+        // method call finds them.
+        let templates: Vec<(String, usize)> = self
+            .generic_index
+            .iter()
+            .filter(|(key, _)| key.starts_with(&format!("{}::", name)))
+            .map(|(key, index)| (key.clone(), *index))
+            .collect();
+        for (key, index) in templates {
+            let template = &self.generic_fns[index];
+            if template.type_params.len() != args.len() {
+                continue;
+            }
+            let method = template.name.clone();
+            let instance = self.instantiate_fn(&key, args, span)?;
+            // Re-register under `Box$int::get` so method dispatch resolves it.
+            if let Some(info) = self.funcs.get(&instance) {
+                let cloned = FnInfo {
+                    symbol: info.symbol.clone(),
+                    func_id: info.func_id,
+                    params: info.params.clone(),
+                    ret: info.ret.clone(),
+                    owner: Some(mangled.clone()),
+                };
+                self.funcs.insert(fn_key(Some(&mangled), &method), cloned);
+            }
+        }
+        Ok(self.user_type(&mangled))
+    }
+}
+
+impl ParamInfo {
+    fn clone_info(&self) -> ParamInfo {
+        ParamInfo {
+            name: self.name.clone(),
+            ty: self.ty.clone(),
+            default: self.default.clone(),
+        }
+    }
+}
+
+impl Clone for ParamInfo {
+    fn clone(&self) -> Self {
+        self.clone_info()
+    }
+}
+
+/// The instantiated name of a generic struct literal, from the values its
+/// fields were given. `None` when the type is not generic.
+fn generic_literal_type(
+    l: &Lowerer<'_>,
+    resolve: &dyn Fn(&str) -> Option<Type>,
+    name: &str,
+    fields: &[(String, Expression)],
+) -> Option<Type> {
+    let template = l.layouts.generics.get(name)?;
+    let in_scope: HashSet<String> = template.type_params.iter().cloned().collect();
+    let mut bindings = HashMap::new();
+    for (field_name, declared) in &template.fields {
+        let Some((_, value)) = fields.iter().find(|(given, _)| given == field_name) else {
+            continue;
+        };
+        let actual = infer_or_checked_with(l, resolve, value)?;
+        unify(
+            &layout::type_of_ann_in(declared, &in_scope),
+            &actual,
+            &mut bindings,
+        );
+    }
+    let args: Vec<Type> = template
+        .type_params
+        .iter()
+        .map(|param| bindings.get(param).cloned())
+        .collect::<Option<_>>()?;
+    // The template says which kind it is; the layout may not exist yet, and
+    // `user_type` would guess "struct" for a name it has not seen.
+    Some(Type::Struct(mangle(name, &args)))
+}
+
+/// The instantiated name of a generic enum variant, from the payload it was
+/// given. `None` when the enum is not generic.
+fn generic_variant_type(
+    l: &Lowerer<'_>,
+    resolve: &dyn Fn(&str) -> Option<Type>,
+    enum_name: &str,
+    variant_name: &str,
+    args: &[Argument],
+) -> Option<Type> {
+    let template = l.layouts.generics.get(enum_name)?;
+    let in_scope: HashSet<String> = template.type_params.iter().cloned().collect();
+    let mut bindings = HashMap::new();
+    if let Some((_, payloads)) = template
+        .variants
+        .iter()
+        .find(|(name, _)| name == variant_name)
+    {
+        for (declared, arg) in payloads.iter().zip(args) {
+            let actual = infer_or_checked_with(l, resolve, &arg.value)?;
+            unify(
+                &layout::type_of_ann_in(declared, &in_scope),
+                &actual,
+                &mut bindings,
+            );
+        }
+    }
+    let arguments: Vec<Type> = template
+        .type_params
+        .iter()
+        .map(|param| bindings.get(param).cloned().unwrap_or(Type::Int))
+        .collect();
+    Some(Type::Enum(mangle(enum_name, &arguments)))
+}
+
+/// Match a declared type against an actual one, recording what each type
+/// parameter must be.
+///
+/// This is the whole of type-argument inference: the checker erases generics
+/// and records no instantiations, so `identity(42)` only says `T = int` by
+/// lining the declaration up against the argument.
+fn unify(declared: &Type, actual: &Type, bindings: &mut HashMap<String, Type>) {
+    match (declared, actual) {
+        (Type::TypeParam(name), concrete) => {
+            // First binding wins; a later conflict is the checker's business.
+            bindings
+                .entry(name.clone())
+                .or_insert_with(|| concrete.clone());
+        }
+        (Type::Array(want), Type::Array(got)) => unify(want, got, bindings),
+        (Type::Optional(want), Type::Optional(got)) => unify(want, got, bindings),
+        (Type::Map(wk, wv), Type::Map(gk, gv)) => {
+            unify(wk, gk, bindings);
+            unify(wv, gv, bindings);
+        }
+        (Type::Tuple(want), Type::Tuple(got)) if want.len() == got.len() => {
+            for (w, g) in want.iter().zip(got) {
+                unify(w, g, bindings);
+            }
+        }
+        (
+            Type::Function {
+                params: wp,
+                return_type: wr,
+                ..
+            },
+            Type::Function {
+                params: gp,
+                return_type: gr,
+                ..
+            },
+        ) => {
+            for (w, g) in wp.iter().zip(gp) {
+                unify(w, g, bindings);
+            }
+            unify(wr, gr, bindings);
+        }
+        (
+            Type::Result {
+                ok_type: wo,
+                err_type: we,
+            },
+            Type::Result {
+                ok_type: go,
+                err_type: ge,
+            },
+        ) => {
+            unify(wo, go, bindings);
+            unify(we, ge, bindings);
+        }
+        _ => {}
+    }
+}
+
+impl<'a> Lowerer<'a> {
+    /// The declared parameter and return types of a generic template, still
+    /// carrying their type parameters.
+    fn template_signature(&self, key: &str) -> Option<(Vec<Type>, Type, Vec<String>)> {
+        let index = *self.generic_index.get(key)?;
+        let template = &self.generic_fns[index];
+        let in_scope: HashSet<String> = template.type_params.iter().cloned().collect();
+        let params = template
+            .params
+            .iter()
+            .filter(|p| !is_receiver(&p.name))
+            .map(|p| layout::type_of_ann_in(&p.type_ann, &in_scope))
+            .collect();
+        let ret = template
+            .return_type
+            .as_ref()
+            .map(|t| layout::type_of_ann_in(t, &in_scope))
+            .unwrap_or(Type::Void);
+        Some((params, ret, template.type_params.clone()))
+    }
+
+    /// Work out a generic call's type arguments from the types it is given.
+    fn infer_type_args(
+        &self,
+        key: &str,
+        arg_types: &[Type],
+        explicit: &[Type],
+    ) -> Option<Vec<Type>> {
+        let (params, _, type_params) = self.template_signature(key)?;
+        if !explicit.is_empty() {
+            return (explicit.len() == type_params.len()).then(|| explicit.to_vec());
+        }
+        let mut bindings = HashMap::new();
+        for (declared, actual) in params.iter().zip(arg_types) {
+            unify(declared, actual, &mut bindings);
+        }
+        type_params
+            .iter()
+            .map(|name| bindings.get(name).cloned())
+            .collect()
+    }
+
+    /// The result type of a generic call, once its arguments are known.
+    fn generic_call_type(&self, key: &str, arg_types: &[Type], explicit: &[Type]) -> Option<Type> {
+        let args = self.infer_type_args(key, arg_types, explicit)?;
+        let (_, ret, type_params) = self.template_signature(key)?;
+        let bindings: HashMap<String, Type> = type_params.into_iter().zip(args).collect();
+        Some(self.normalize(substitute(&ret, &bindings)))
+    }
+}
+
+impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
+    /// Lower a call to a generic function or method, instantiating it first.
+    ///
+    /// Returns `Ok(None)` when `key` names no template, so the caller can carry
+    /// on with ordinary dispatch.
+    fn lower_generic_call(
+        &mut self,
+        key: &str,
+        self_value: Option<Value>,
+        args: &[Argument],
+        type_args: &[Type],
+        span: &Span,
+    ) -> CodegenResult<Option<Option<Value>>> {
+        if !self.l.generic_index.contains_key(key) {
+            return Ok(None);
+        }
+        let arg_types: Vec<Type> = args
+            .iter()
+            .map(|arg| self.ty_of(&arg.value))
+            .collect::<CodegenResult<_>>()?;
+        let inferred = self
+            .l
+            .infer_type_args(key, &arg_types, type_args)
+            .ok_or_else(|| {
+                CodegenError::unsupported_at(
+                    format!(
+                        "cannot work out the type arguments for `{}` from this call; \
+                         write them explicitly",
+                        key
+                    ),
+                    span,
+                )
+            })?;
+        let instance = self.l.instantiate_fn(key, &inferred, span)?;
+        self.lower_user_call(&instance, self_value, args, span)
+            .map(Some)
     }
 }

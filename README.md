@@ -65,9 +65,9 @@ is a compare against the discriminant. Fibers keep working — each one gets its
 own guarded stack and switches through a hand-written context switch, so
 `spawn` and channels behave the same as on the VM.
 
-The native backend is deliberately partial: what it cannot lower yet — generics,
-and the `json`/`regex`/`http` builtins — is reported as an error rather than
-mis-compiled, and those programs still run under `lira run`. 93 of the 124
+The native backend is deliberately partial: what it cannot lower yet — chiefly
+the `json`/`regex`/`http` builtins — is reported as an error rather than
+mis-compiled, and those programs still run under `lira run`. 100 of the 124
 examples compile natively with byte-identical output to the VM. Note that
 natively compiled programs do not yet reclaim memory. See
 [docs/60-native-backend.md](docs/60-native-backend.md).

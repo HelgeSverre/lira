@@ -127,6 +127,31 @@ Classes are laid out parents-first regardless of declaration order, and a class
 extending something that is not a class in the program is reported rather than
 laid out with its inherited fields silently missing.
 
+## Generics
+
+The VM erases generics to a uniform tagged value. Native code has no such
+representation, so a generic is monomorphised: one copy per concrete type
+argument set, each with its own layout, under a mangled name.
+
+```
+fn identity<T>(x: T) -> T      identity(42)      → identity$int
+struct Box<T> { value: T }     Box { value: 1 }  → Box$int, laid out as a struct
+enum Opt<T> { Some(T), None }  Opt::Some(42)     → Opt$int, tag plus an int slot
+```
+
+The checker is no help here: it records generics as erased — `sema`'s
+`generic_instantiations` table is documented as never read, and a call to
+`identity(42)` is recorded as returning `T`. So the backend infers the bindings
+itself, by matching each declared type against the actual one: the arguments at
+a call site, the values a literal gives its fields, the payload a variant is
+constructed with. `foo::<int>(x)` names its instantiation outright.
+
+Instantiations are a worklist, since one can demand another, and each is
+recorded so a generic that calls itself terminates rather than unfolding
+forever. A generic type named in a signature — `fn describe(o: Opt<int>)` — is
+built at declaration time, so a function can take one before anything has
+constructed it.
+
 ## Closures
 
 A function value is a heap object: a code pointer, a capture count, then one
@@ -310,29 +335,27 @@ payloads and `__enum`/`__variant` reflection; tuples, tuple patterns and
 destructuring `let`; lambdas, closures with captures, and functions as values;
 optionals including boxed scalar optionals, `??`, `?.` and `?`; `Result<T, E>`
 with typed payloads; string-keyed maps; `select` with and without a default arm;
-classes with inheritance, virtual dispatch, `override` and `super`;
+classes with inheritance, virtual dispatch, `override` and `super`; generic
+functions, structs, enums and impls, monomorphised;
 arrays with indexing, assignment, `push`, `pop` and `len`; strings with
 concatenation, interpolation, comparison and `len`; `spawn`, `chan`, `send`,
 `recv`, `close`, `fiber_yield`, `fiber_id`.
 
-Of the repository's 124 examples, 93 compile natively and produce byte-identical
+Of the repository's 124 examples, 100 compile natively and produce byte-identical
 output to the bytecode VM. Eight more compile and run correctly but cannot be
 compared byte-for-byte: they print timestamps, random UUIDs, or `env_args`,
 which differ between an interpreted script and a compiled binary by nature. The
 remaining 23 use constructs listed below and are declined with a reason.
 
-55 examples are pinned as regression tests in `tests/parity.rs`, and every
+61 examples are pinned as regression tests in `tests/parity.rs`, and every
 example that type-checks is required to either compile or be declined cleanly —
 an internal error fails the suite.
 
 ## What is not supported yet
 
-Two items are large enough to be projects of their own; both are described under
-"Remaining work" below.
-
 | Not lowered | Notes |
 |---|---|
-| Generics | Type-erased in the VM; native wants monomorphisation |
+| A method with type parameters of its own | `impl<T> Box<T> { fn map<U>(...) }` — the owner's arguments are known, the method's are not until the call site |
 | `json_*`, `regex_*`, `http_*` | Need a dynamic value, a regex engine and an HTTP client |
 | Heterogeneous arrays | `push(node, node)` into an `[int]` is the dynamic escape hatch, and may be right to refuse permanently |
 | An unconstrained `[]` | Nothing pins the element type; the error says to annotate |
@@ -360,22 +383,14 @@ unboxed backend better but needs precise root tracking through the fiber stacks.
 Either way it touches every lowering path, which is why it is not half-done: a
 release in the wrong place is a use-after-free, and that is worse than a leak.
 
-### Generics
+### One generics gap
 
-`fn identity<T>(x: T) -> T`, `struct Box<T>`, `enum Opt<T>` and `impl<T> Box<T>`
-are all refused. The VM erases them to a uniform tagged value; native code has
-no such representation, so the answer is monomorphisation: one copy per concrete
-type argument set, with its own layout.
-
-The checker does not help here. It records generics as erased — `sema`'s
-`generic_instantiations` table is documented as never read — so the backend
-would have to infer the bindings itself: unify each declared parameter type with
-the actual argument types at a call site, and each generic field with the value
-it is given in a literal. Instantiations are then a worklist, since one can
-demand another (`Box<T>.map<U>` produces a `Box<U>`).
-
-That is the largest single item left, and it is what blocks the four `sync_*`
-examples, which use a generic enum through the standard library.
+A method that adds type parameters of its own — `impl<T> Box<T> { fn map<U>(...) }`
+— is not instantiated. The owner's arguments are known from the receiver, but
+the method's own have to come from the call site, which means resolving the
+method against a mangled receiver name and splitting the two sets of arguments
+apart. Everything else about generics works; this blocks
+`examples/generic_methods.li` alone.
 
 ## Differences from the bytecode VM
 

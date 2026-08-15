@@ -10,9 +10,9 @@
 //! `runtime/lira_rt.h`; field offsets below are measured from the start of the
 //! object, so they already include that header.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use lirac::ast::{Program, Statement, StatementKind};
+use lirac::ast::{Field, Program, Statement, StatementKind, TypeExpr, TypeParam};
 use lirac::checker::Type;
 
 use crate::error::{CodegenError, CodegenResult};
@@ -125,13 +125,55 @@ impl EnumLayout {
 /// the bytecode backend builds. Iterating a range reads these fields back.
 pub const RANGE_TYPE: &str = "Range";
 
+/// A generic aggregate declaration, kept as a template until a concrete use
+/// demands an instantiation.
+#[derive(Debug, Clone)]
+pub struct GenericAggregate {
+    pub name: String,
+    pub type_params: Vec<String>,
+    /// `(field name, annotation)` for a struct; empty for an enum.
+    pub fields: Vec<(String, TypeExpr)>,
+    /// `(variant name, payload annotations)` for an enum; empty for a struct.
+    pub variants: Vec<(String, Vec<TypeExpr>)>,
+}
+
 /// All aggregate layouts in a program, keyed by type name.
+///
+/// A generic type contributes no layout of its own: `Box<T>` has no size until
+/// `T` is known. Its template lives in `generics`, and each concrete use adds a
+/// layout under a mangled name such as `Box$int`.
 #[derive(Debug, Default, Clone)]
 pub struct LayoutMap {
     pub structs: HashMap<String, StructLayout>,
     pub enums: HashMap<String, EnumLayout>,
     /// `type Name = ...` declarations, unresolved.
     pub aliases: HashMap<String, Type>,
+    /// Generic struct and enum templates, by their unparameterised name.
+    pub generics: HashMap<String, GenericAggregate>,
+}
+
+/// The name a generic type takes once its arguments are known: `Box<int>`
+/// becomes `Box$int`.
+///
+/// The separator is chosen to be something no Lira identifier can contain, so a
+/// mangled name can never collide with a declared one.
+pub fn mangle(name: &str, args: &[Type]) -> String {
+    if args.is_empty() {
+        return name.to_string();
+    }
+    let mut mangled = String::from(name);
+    for arg in args {
+        mangled.push('$');
+        mangled.push_str(&arg.display_name());
+    }
+    mangled
+}
+
+/// Turn a mangled name into something a linker will accept as a symbol.
+pub fn sanitise_symbol(name: &str) -> String {
+    name.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect()
 }
 
 impl LayoutMap {
@@ -220,6 +262,25 @@ fn collect_into(
 ) -> CodegenResult<()> {
     for stmt in statements {
         match &stmt.kind {
+            StatementKind::StructDecl {
+                name,
+                type_params,
+                fields,
+                ..
+            } if !type_params.is_empty() => {
+                map.generics.insert(
+                    name.clone(),
+                    GenericAggregate {
+                        name: name.clone(),
+                        type_params: param_names(type_params),
+                        fields: fields
+                            .iter()
+                            .map(|f: &Field| (f.name.clone(), f.type_ann.clone()))
+                            .collect(),
+                        variants: Vec::new(),
+                    },
+                );
+            }
             StatementKind::StructDecl { name, fields, .. } => {
                 let named: Vec<(String, Type)> = fields
                     .iter()
@@ -252,6 +313,24 @@ fn collect_into(
                         })
                         .collect(),
                 });
+            }
+            StatementKind::EnumDecl {
+                name,
+                type_params,
+                variants,
+            } if !type_params.is_empty() => {
+                map.generics.insert(
+                    name.clone(),
+                    GenericAggregate {
+                        name: name.clone(),
+                        type_params: param_names(type_params),
+                        fields: Vec::new(),
+                        variants: variants
+                            .iter()
+                            .map(|v| (v.name.clone(), v.fields.clone()))
+                            .collect(),
+                    },
+                );
             }
             StatementKind::EnumDecl { name, variants, .. } => {
                 let mut laid_out = Vec::with_capacity(variants.len());
@@ -416,39 +495,173 @@ pub fn storage_size(ty: &Type) -> i32 {
     }
 }
 
+fn param_names(params: &[TypeParam]) -> Vec<String> {
+    params.iter().map(|p| p.name.clone()).collect()
+}
+
+impl LayoutMap {
+    /// Build the layout of `name<args>`, adding it under its mangled name.
+    ///
+    /// Returns the mangled name. Instantiating the same arguments twice is a
+    /// no-op, which is what stops a recursive generic from looping.
+    pub fn instantiate(&mut self, name: &str, args: &[Type]) -> CodegenResult<String> {
+        let mangled = mangle(name, args);
+        if self.structs.contains_key(&mangled) || self.enums.contains_key(&mangled) {
+            return Ok(mangled);
+        }
+        let template = self
+            .generics
+            .get(name)
+            .ok_or_else(|| CodegenError::unsupported(format!("`{}` is not a generic type", name)))?
+            .clone();
+        if template.type_params.len() != args.len() {
+            return Err(CodegenError::unsupported(format!(
+                "`{}` takes {} type argument(s), not {}",
+                name,
+                template.type_params.len(),
+                args.len()
+            )));
+        }
+        let bindings: HashMap<String, Type> = template
+            .type_params
+            .iter()
+            .cloned()
+            .zip(args.iter().cloned())
+            .collect();
+        let in_scope: HashSet<String> = template.type_params.iter().cloned().collect();
+
+        // Reserve the name before laying the body out, so a type that refers to
+        // itself finds the entry rather than recursing forever.
+        if template.variants.is_empty() {
+            self.structs
+                .insert(mangled.clone(), layout_fields(mangled.clone(), &[]));
+            let fields: Vec<(String, Type)> = template
+                .fields
+                .iter()
+                .map(|(field, ann)| {
+                    (
+                        field.clone(),
+                        substitute(&type_of_ann_in(ann, &in_scope), &bindings),
+                    )
+                })
+                .collect();
+            self.structs
+                .insert(mangled.clone(), layout_fields(mangled.clone(), &fields));
+        } else {
+            self.enums.insert(
+                mangled.clone(),
+                EnumLayout {
+                    name: mangled.clone(),
+                    variants: Vec::new(),
+                    size: ENUM_PAYLOAD_OFFSET,
+                },
+            );
+            let mut widest = 0usize;
+            let variants: Vec<VariantLayout> = template
+                .variants
+                .iter()
+                .enumerate()
+                .map(|(tag, (variant, payloads))| {
+                    let field_types: Vec<Type> = payloads
+                        .iter()
+                        .map(|ann| substitute(&type_of_ann_in(ann, &in_scope), &bindings))
+                        .collect();
+                    widest = widest.max(field_types.len());
+                    VariantLayout {
+                        name: variant.clone(),
+                        tag: tag as i64,
+                        field_types,
+                    }
+                })
+                .collect();
+            self.enums.insert(
+                mangled.clone(),
+                EnumLayout {
+                    name: mangled.clone(),
+                    variants,
+                    size: ENUM_PAYLOAD_OFFSET + SLOT_SIZE * widest as i32,
+                },
+            );
+        }
+        Ok(mangled)
+    }
+}
+
+/// Replace every type parameter in `ty` with what it is bound to.
+pub fn substitute(ty: &Type, bindings: &HashMap<String, Type>) -> Type {
+    match ty {
+        Type::TypeParam(name) => bindings.get(name).cloned().unwrap_or_else(|| ty.clone()),
+        Type::Array(inner) => Type::Array(Box::new(substitute(inner, bindings))),
+        Type::Optional(inner) => Type::Optional(Box::new(substitute(inner, bindings))),
+        Type::Tuple(items) => Type::Tuple(items.iter().map(|t| substitute(t, bindings)).collect()),
+        Type::Map(key, value) => Type::Map(
+            Box::new(substitute(key, bindings)),
+            Box::new(substitute(value, bindings)),
+        ),
+        Type::Result { ok_type, err_type } => Type::Result {
+            ok_type: Box::new(substitute(ok_type, bindings)),
+            err_type: Box::new(substitute(err_type, bindings)),
+        },
+        Type::Function {
+            params,
+            return_type,
+            required_params,
+        } => Type::Function {
+            params: params.iter().map(|t| substitute(t, bindings)).collect(),
+            return_type: Box::new(substitute(return_type, bindings)),
+            required_params: *required_params,
+        },
+        other => other.clone(),
+    }
+}
+
 /// Resolve an AST type annotation into a checker `Type`.
 ///
 /// The checker already resolved these for expressions, but field annotations
 /// are consulted directly while laying types out, before any expression has
 /// been visited.
 pub fn type_of_ann(ann: &lirac::ast::TypeExpr) -> Type {
+    type_of_ann_in(ann, &HashSet::new())
+}
+
+/// Resolve an annotation with a set of type parameter names in scope, so a bare
+/// `T` inside `fn f<T>(...)` becomes `Type::TypeParam("T")` rather than a
+/// reference to a type named `T`.
+pub fn type_of_ann_in(ann: &lirac::ast::TypeExpr, type_params: &HashSet<String>) -> Type {
     use lirac::ast::TypeExprKind;
+    let recur = |inner: &lirac::ast::TypeExpr| type_of_ann_in(inner, type_params);
     match &ann.kind {
+        TypeExprKind::Named(name) if type_params.contains(name) => Type::TypeParam(name.clone()),
         TypeExprKind::Named(name) => named_type(name),
         TypeExprKind::Generic { name, args } => match name.as_str() {
-            "Array" | "List" if args.len() == 1 => Type::Array(Box::new(type_of_ann(&args[0]))),
+            "Array" | "List" if args.len() == 1 => Type::Array(Box::new(recur(&args[0]))),
             // `Result<T, E>` reaches here as a generic application rather than
             // as `TypeExprKind::Result`, depending on how it was written.
             RESULT_TYPE if args.len() == 2 => Type::Result {
-                ok_type: Box::new(type_of_ann(&args[0])),
-                err_type: Box::new(type_of_ann(&args[1])),
+                ok_type: Box::new(recur(&args[0])),
+                err_type: Box::new(recur(&args[1])),
             },
-            _ => named_type(name),
+            // A user generic such as `Box<int>` names its instantiation. The
+            // layout itself is built on demand by `LayoutMap::instantiate`.
+            _ => {
+                let arguments: Vec<Type> = args.iter().map(&recur).collect();
+                named_type(&mangle(name, &arguments))
+            }
         },
-        TypeExprKind::Optional(inner) => Type::Optional(Box::new(type_of_ann(inner))),
-        TypeExprKind::Array(inner) => Type::Array(Box::new(type_of_ann(inner))),
-        TypeExprKind::Tuple(items) => Type::Tuple(items.iter().map(type_of_ann).collect()),
+        TypeExprKind::Optional(inner) => Type::Optional(Box::new(recur(inner))),
+        TypeExprKind::Array(inner) => Type::Array(Box::new(recur(inner))),
+        TypeExprKind::Tuple(items) => Type::Tuple(items.iter().map(&recur).collect()),
         TypeExprKind::Function {
             params,
             return_type,
         } => Type::Function {
-            params: params.iter().map(type_of_ann).collect(),
-            return_type: Box::new(type_of_ann(return_type)),
+            params: params.iter().map(&recur).collect(),
+            return_type: Box::new(recur(return_type)),
             required_params: params.len(),
         },
         TypeExprKind::Result { ok_type, err_type } => Type::Result {
-            ok_type: Box::new(type_of_ann(ok_type)),
-            err_type: Box::new(type_of_ann(err_type)),
+            ok_type: Box::new(recur(ok_type)),
+            err_type: Box::new(recur(err_type)),
         },
         TypeExprKind::Path(segments) => segments
             .last()

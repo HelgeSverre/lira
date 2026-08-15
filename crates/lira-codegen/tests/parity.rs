@@ -68,6 +68,12 @@ const PARITY_EXAMPLES: &[&str] = &[
     "classes_basic.li",
     "test_env.li",
     "test_hash.li",
+    "generics_basic.li",
+    "generic_enum.li",
+    "turbofish.li",
+    "sync_try_lock.li",
+    "sync_semaphore.li",
+    "sync_mutex_waitgroup.li",
 ];
 
 fn examples_dir() -> PathBuf {

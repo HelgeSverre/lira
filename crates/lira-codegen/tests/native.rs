@@ -1198,15 +1198,121 @@ fn this_and_self_name_the_same_receiver() {
 }
 
 // ---------------------------------------------------------------------- //
+// Generics                                                                //
+// ---------------------------------------------------------------------- //
+
+#[test]
+fn a_generic_function_is_instantiated_per_argument_type() {
+    assert_lines(
+        r#"
+        fn identity<T>(x: T) -> T { return x }
+        println(identity(42))
+        println(identity("hello"))
+        println(identity(1.5))
+        println(identity(true))
+        "#,
+        &["42", "hello", "1.5", "true"],
+    );
+}
+
+#[test]
+fn explicit_type_arguments_pick_the_instantiation() {
+    assert_lines(
+        r#"
+        fn identity<T>(x: T) -> T { return x }
+        println(identity::<int>(7))
+        "#,
+        &["7"],
+    );
+}
+
+#[test]
+fn a_generic_struct_takes_its_arguments_from_the_fields() {
+    assert_lines(
+        r#"
+        struct Box<T> { value: T }
+        impl<T> Box<T> {
+            fn get(self) -> T { return self.value }
+        }
+        let ints = Box { value: 100 }
+        let words = Box { value: "hello" }
+        println(ints.value)
+        println(words.value)
+        println(ints.get())
+        println(words.get())
+        "#,
+        &["100", "hello", "100", "hello"],
+    );
+}
+
+#[test]
+fn a_generic_enum_carries_a_typed_payload() {
+    assert_lines(
+        r#"
+        enum Opt<T> {
+            Some(T),
+            None
+        }
+        enum Pair<A, B> {
+            Both(A, B),
+            Neither
+        }
+        fn describe(o: Opt<int>) -> string {
+            return match o {
+                Opt::Some(v) => "some " + v,
+                Opt::None => "none"
+            }
+        }
+        println(describe(Opt::Some(42)))
+        println(describe(Opt::None))
+        match Pair::Both(1, "hello") {
+            Pair::Both(a, b) => println("both " + a + " " + b),
+            Pair::Neither => println("neither")
+        }
+        "#,
+        &["some 42", "none", "both 1 hello"],
+    );
+}
+
+#[test]
+fn one_instantiation_is_emitted_per_distinct_type() {
+    // Two calls at the same type share a body; a third at another type gets its
+    // own. Getting this wrong would either duplicate code or recurse forever.
+    assert_lines(
+        r#"
+        fn first<T>(a: T, b: T) -> T { return a }
+        println(first(1, 2))
+        println(first(3, 4))
+        println(first("x", "y"))
+        "#,
+        &["1", "3", "x"],
+    );
+}
+
+#[test]
+fn a_generic_type_used_through_a_function_boundary_keeps_its_payload() {
+    assert_lines(
+        r#"
+        enum Holder<T> { Value(T) }
+        fn wrap(n: int) -> Holder<int> { return Holder::Value(n) }
+        fn unwrap(h: Holder<int>) -> int {
+            return match h {
+                Holder::Value(v) => v
+            }
+        }
+        println(unwrap(wrap(7)))
+        "#,
+        &["7"],
+    );
+}
+
+// ---------------------------------------------------------------------- //
 // Diagnostics                                                             //
 // ---------------------------------------------------------------------- //
 
 #[test]
 fn unsupported_constructs_are_refused_rather_than_mis_compiled() {
-    assert_rejected(
-        "fn identity<T>(x: T) -> T { return x }\nprintln(identity(1))",
-        "native backend",
-    );
+    assert_rejected("let s = \"hello\"\nprintln(s[1])", "ambiguous");
 }
 
 #[test]
@@ -1216,7 +1322,7 @@ fn a_type_error_stops_native_compilation() {
 
 #[test]
 fn the_error_points_at_the_bytecode_vm_as_the_fallback() {
-    match run_native("fn identity<T>(x: T) -> T { return x }\nprintln(identity(1))") {
+    match run_native("let s = \"hello\"\nprintln(s[1])") {
         Ok(_) => panic!("expected a compile error"),
         Err(error) => assert!(
             error.contains("lira run"),
