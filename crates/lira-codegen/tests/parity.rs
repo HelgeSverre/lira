@@ -61,6 +61,11 @@ const PARITY_EXAMPLES: &[&str] = &[
     "result_propagation.li",
     "map_literals.li",
     "select_basic.li",
+    "class_inheritance.li",
+    "class_methods.li",
+    "class_super.li",
+    "class_this.li",
+    "classes_basic.li",
 ];
 
 fn examples_dir() -> PathBuf {

@@ -1119,14 +1119,93 @@ fn a_select_that_can_never_be_ready_reports_a_deadlock() {
 }
 
 // ---------------------------------------------------------------------- //
+// Classes                                                                 //
+// ---------------------------------------------------------------------- //
+
+#[test]
+fn a_child_class_inherits_its_parents_fields() {
+    assert_lines(
+        r#"
+        class Animal { name: string }
+        class Dog extends Animal { breed: string }
+        let dog = Dog { name: "Buddy", breed: "Labrador" }
+        println(dog.name)
+        println(dog.breed)
+        "#,
+        &["Buddy", "Labrador"],
+    );
+}
+
+#[test]
+fn an_inherited_method_dispatches_to_the_concrete_override() {
+    // `describe` is declared only on Animal, so the call inside it has to reach
+    // the instance's own `speak` rather than Animal's.
+    assert_lines(
+        r#"
+        class Animal {
+            name: string
+            fn speak(self) -> string { return "..." }
+            fn describe(self) -> string { return self.name + " says " + self.speak() }
+        }
+        class Dog extends Animal {
+            override fn speak(self) -> string { return "Woof" }
+        }
+        class Puppy extends Dog {
+            override fn speak(self) -> string { return "Yip" }
+        }
+        println(Animal { name: "Generic" }.describe())
+        println(Dog { name: "Rex" }.describe())
+        println(Puppy { name: "Bella" }.describe())
+        "#,
+        &["Generic says ...", "Rex says Woof", "Bella says Yip"],
+    );
+}
+
+#[test]
+fn super_calls_the_parent_implementation_directly() {
+    assert_lines(
+        r#"
+        class Animal {
+            fn sound(this) -> string { return "generic" }
+        }
+        class Dog extends Animal {
+            override fn sound(this) -> string { return "woof" }
+            fn parent_sound(this) -> string { return super.sound() }
+        }
+        let d = Dog { }
+        println(d.sound())
+        println(d.parent_sound())
+        "#,
+        &["woof", "generic"],
+    );
+}
+
+#[test]
+fn this_and_self_name_the_same_receiver() {
+    assert_lines(
+        r#"
+        class Animal {
+            name: string
+            fn who(this) -> string { return "this: " + this.name }
+            fn also(self) -> string { return "self: " + self.name }
+        }
+        let a = Animal { name: "Rex" }
+        println(a.who())
+        println(a.also())
+        "#,
+        &["this: Rex", "self: Rex"],
+    );
+}
+
+// ---------------------------------------------------------------------- //
 // Diagnostics                                                             //
 // ---------------------------------------------------------------------- //
 
 #[test]
 fn unsupported_constructs_are_refused_rather_than_mis_compiled() {
     assert_rejected(
-        "class Animal { name: string }\nclass Dog extends Animal { breed: string }",
-        "inheritance",
+        "fn identity<T>(x: T) -> T { return x }\nprintln(identity(1))",
+        "native backend",
     );
 }
 

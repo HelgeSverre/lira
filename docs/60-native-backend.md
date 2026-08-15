@@ -103,6 +103,30 @@ String literals need no runtime construction at all: the complete object, header
 included, is emitted into read-only data with a negative refcount marking it
 immortal.
 
+## Classes
+
+A class instance carries a pointer to its virtual method table between the
+header and its fields. A child's fields are laid out after its parent's, so a
+`Dog*` reads correctly as an `Animal*`, and the vtable keeps the parent's slot
+indices — an `override` changes whose code fills a slot, not where the slot is.
+
+```
+class Dog extends Animal        Dog's vtable
+  0 │ LiraHeader │              ┌──────────────┐
+ 16 │ vtable     │─────────────►│ speak → Dog  │  slot 0, overridden
+ 24 │ name       │  (Animal's)  │ describe →   │  slot 1, inherited
+ 32 │ breed      │  (Dog's)     │      Animal  │
+```
+
+That is what makes `describe()`, declared only on `Animal`, reach a `Puppy`'s
+`speak()`: the static type fixes the slot, the instance supplies the
+implementation. `super.method()` skips the table and calls the parent's code
+directly, which is the whole point of writing it.
+
+Classes are laid out parents-first regardless of declaration order, and a class
+extending something that is not a class in the program is reported rather than
+laid out with its inherited fields silently missing.
+
 ## Closures
 
 A function value is a heap object: a code pointer, a capture count, then one
@@ -286,17 +310,18 @@ payloads and `__enum`/`__variant` reflection; tuples, tuple patterns and
 destructuring `let`; lambdas, closures with captures, and functions as values;
 optionals including boxed scalar optionals, `??`, `?.` and `?`; `Result<T, E>`
 with typed payloads; string-keyed maps; `select` with and without a default arm;
+classes with inheritance, virtual dispatch, `override` and `super`;
 arrays with indexing, assignment, `push`, `pop` and `len`; strings with
 concatenation, interpolation, comparison and `len`; `spawn`, `chan`, `send`,
 `recv`, `close`, `fiber_yield`, `fiber_id`.
 
-Of the repository's 124 examples, 88 compile natively and produce byte-identical
+Of the repository's 124 examples, 92 compile natively and produce byte-identical
 output to the bytecode VM. Six more compile and run correctly but cannot be
 compared byte-for-byte: they print timestamps, random UUIDs, or `env_args`,
 which differ between an interpreted script and a compiled binary by nature. The
 rest use constructs listed below and are declined with a reason.
 
-48 examples are pinned as regression tests in `tests/parity.rs`, and every
+53 examples are pinned as regression tests in `tests/parity.rs`, and every
 example that type-checks is required to either compile or be declined cleanly —
 an internal error fails the suite.
 
@@ -304,7 +329,6 @@ an internal error fails the suite.
 
 | Not lowered | Notes |
 |---|---|
-| Class inheritance | Needs prefixed layouts and a vtable |
 | Generics | Type-erased in the VM; native wants monomorphisation |
 | `json_*`, `regex_*`, `http_*` | Need a dynamic value, a regex engine and an HTTP client |
 | String indexing | Needs a decision on byte vs. character indexing |

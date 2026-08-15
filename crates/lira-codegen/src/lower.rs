@@ -34,9 +34,9 @@ use lirac::sema::SemanticTables;
 use crate::abi::{is_unsigned, optional_is_boxed, repr_of, Repr};
 use crate::error::{CodegenError, CodegenResult};
 use crate::layout::{
-    self, storage_size, LayoutMap, CLOSURE_CAPTURES_OFFSET, CLOSURE_CODE_OFFSET,
-    CLOSURE_COUNT_OFFSET, ENUM_PAYLOAD_OFFSET, ENUM_TAG_OFFSET, HEADER_SIZE, OPTIONAL_SLOT_OFFSET,
-    SLOT_SIZE,
+    self, storage_size, LayoutMap, CLASS_VTABLE_OFFSET, CLOSURE_CAPTURES_OFFSET,
+    CLOSURE_CODE_OFFSET, CLOSURE_COUNT_OFFSET, ENUM_PAYLOAD_OFFSET, ENUM_TAG_OFFSET, HEADER_SIZE,
+    OPTIONAL_SLOT_OFFSET, SLOT_SIZE,
 };
 use crate::runtime;
 
@@ -131,6 +131,8 @@ pub struct Lowerer<'a> {
     fn_wrappers: Vec<PendingFnWrapper>,
     /// Closure objects standing in for named functions, one per function.
     fn_values: HashMap<String, DataId>,
+    /// Virtual method tables, one per class.
+    vtables: HashMap<String, DataId>,
     next_spawn: usize,
     next_string: usize,
     next_lambda: usize,
@@ -172,6 +174,7 @@ impl<'a> Lowerer<'a> {
             lambdas: Vec::new(),
             fn_wrappers: Vec::new(),
             fn_values: HashMap::new(),
+            vtables: HashMap::new(),
             next_spawn: 0,
             next_string: 0,
             next_lambda: 0,
@@ -233,7 +236,7 @@ impl<'a> Lowerer<'a> {
 
             let mut params = Vec::with_capacity(decl.params.len());
             for param in decl.params {
-                let ty = if param.name == "self" {
+                let ty = if is_receiver(&param.name) {
                     match &owner {
                         Some(type_name) => self.user_type(type_name),
                         None => {
@@ -519,6 +522,11 @@ impl<'a> Lowerer<'a> {
     }
 }
 
+/// Whether a parameter name is a method receiver. Lira accepts both spellings.
+fn is_receiver(name: &str) -> bool {
+    name == "self" || name == "this"
+}
+
 /// Key under which a function is registered: `name` for free functions,
 /// `Type::name` for methods.
 fn fn_key(owner: Option<&str>, name: &str) -> String {
@@ -635,6 +643,11 @@ impl<'a> Lowerer<'a> {
             for (index, (name, ty)) in params.iter().enumerate() {
                 let value = gen.builder.block_params(entry)[index];
                 gen.declare_local(name, ty.clone(), Some(value))?;
+                // The parser normalises a `this` parameter to `self`, but the
+                // body keeps whichever spelling was written. Bind both.
+                if is_receiver(name) {
+                    gen.alias_receiver(name);
+                }
             }
 
             // A body may end in a bare expression rather than a `return` —
@@ -867,6 +880,17 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
             .expect("a scope is always open while lowering")
             .insert(name.to_string(), Binding::Local { var, ty });
         Ok(var)
+    }
+
+    /// Make both spellings of the receiver resolve to the same binding.
+    fn alias_receiver(&mut self, declared: &str) {
+        let other = if declared == "self" { "this" } else { "self" };
+        let Some(binding) = self.lookup(declared) else {
+            return;
+        };
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.insert(other.to_string(), binding);
+        }
     }
 
     fn lookup(&self, name: &str) -> Option<Binding> {
@@ -2663,6 +2687,12 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
         args: &[Argument],
         span: &Span,
     ) -> CodegenResult<Option<Value>> {
+        // `super.method()` is a direct call to the parent's implementation, not
+        // a dispatch — that is the whole point of writing it.
+        if matches!(&receiver.kind, ExpressionKind::Identifier(name) if name == "super") {
+            return self.lower_super_call(method, args, span);
+        }
+
         // `Counter.new()` and `Counter::new()` both reach here as a call on a
         // bare type name. A local variable of the same name wins.
         if let ExpressionKind::Identifier(name) = &receiver.kind {
@@ -2720,14 +2750,25 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
                     span,
                 ));
             }
-            Type::Struct(name) | Type::Enum(name) => {
-                let key = fn_key(Some(name), method);
-                if !self.l.funcs.contains_key(&key) {
-                    return Err(CodegenError::unsupported_at(
+            Type::Struct(name) | Type::Class(name) | Type::Enum(name) => {
+                let name = name.clone();
+                // A class dispatches through its table; a struct calls directly.
+                if self
+                    .l
+                    .layouts
+                    .structs
+                    .get(&name)
+                    .is_some_and(|layout| layout.is_class)
+                {
+                    let self_value = self.lower_expr_value(receiver, &receiver_ty)?;
+                    return self.lower_virtual_call(&name, method, self_value, args, span);
+                }
+                let key = self.resolve_method(&name, method).ok_or_else(|| {
+                    CodegenError::unsupported_at(
                         format!("`{}` has no method `{}`", name, method),
                         span,
-                    ));
-                }
+                    )
+                })?;
                 let self_value = self.lower_expr_value(receiver, &receiver_ty)?;
                 return self.lower_user_call(&key, Some(self_value), args, span);
             }
@@ -2812,7 +2853,7 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
         let func_id = info.func_id;
         let ret = info.ret.clone();
         let takes_self =
-            info.owner.is_some() && info.params.first().is_some_and(|p| p.name == "self");
+            info.owner.is_some() && info.params.first().is_some_and(|p| is_receiver(&p.name));
         let params: Vec<(String, Type, Option<Expression>)> = info
             .params
             .iter()
@@ -3172,6 +3213,14 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
             .clone();
 
         let object = self.alloc_object(layout.size, runtime::KIND_STRUCT)?;
+        if layout.is_class {
+            // Every instance points at its class's method table, which is what
+            // makes an inherited method dispatch to the concrete override.
+            let vtable = self.class_vtable(name)?;
+            self.builder
+                .ins()
+                .store(MemFlagsData::trusted(), vtable, object, CLASS_VTABLE_OFFSET);
+        }
         let mut initialised = HashSet::new();
         for (field_name, expr) in fields {
             let field = layout.field(field_name).ok_or_else(|| {
@@ -3812,6 +3861,23 @@ fn method_call_type(
     receiver: &Expression,
     method: &str,
 ) -> Option<Type> {
+    // `super.method()` resolves against the parent of whatever class the
+    // receiver belongs to.
+    if matches!(&receiver.kind, ExpressionKind::Identifier(name) if name == "super") {
+        let receiver_ty = resolve("self").or_else(|| resolve("this"))?;
+        let (Type::Struct(class) | Type::Class(class)) = receiver_ty else {
+            return None;
+        };
+        let mut current = l.layouts.structs.get(&class)?.parent.clone();
+        while let Some(name) = current {
+            if let Some(info) = l.funcs.get(&fn_key(Some(&name), method)) {
+                return Some(info.ret.clone());
+            }
+            current = l.layouts.structs.get(&name)?.parent.clone();
+        }
+        return None;
+    }
+
     // `Counter.new()` — a call on a bare type name.
     if let ExpressionKind::Identifier(name) = &receiver.kind {
         if resolve(name).is_none() && l.layouts.is_aggregate(name) {
@@ -3827,6 +3893,16 @@ fn method_call_type(
     // methods on primitive types.
     if let Some(ret) = impl_method_return(l, &receiver_ty, method) {
         return Some(ret);
+    }
+    // An inherited method lives on an ancestor rather than on the class itself.
+    if let Type::Struct(class) | Type::Class(class) = &receiver_ty {
+        let mut current = Some(class.clone());
+        while let Some(name) = current {
+            if let Some(info) = l.funcs.get(&fn_key(Some(&name), method)) {
+                return Some(info.ret.clone());
+            }
+            current = l.layouts.structs.get(&name)?.parent.clone();
+        }
     }
     Some(match receiver_ty {
         Type::Array(inner) => match method {
@@ -5514,5 +5590,263 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
     /// `recv(ch)` does.
     fn select_binding_type(&self, _body: &Expression, _variable: &str) -> Type {
         Type::Int
+    }
+}
+
+// ====================================================================== //
+// Classes and virtual dispatch                                            //
+// ====================================================================== //
+
+impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
+    /// Find the method `name` on `type_name`, walking up the inheritance chain.
+    ///
+    /// A subclass that does not override a method has no entry of its own; the
+    /// implementation lives on an ancestor.
+    fn resolve_method(&self, type_name: &str, method: &str) -> Option<String> {
+        let mut current = Some(type_name.to_string());
+        while let Some(name) = current {
+            let key = fn_key(Some(&name), method);
+            if self.l.funcs.contains_key(&key) {
+                return Some(key);
+            }
+            current = self
+                .l
+                .layouts
+                .structs
+                .get(&name)
+                .and_then(|layout| layout.parent.clone());
+        }
+        None
+    }
+
+    /// The address of a class's virtual method table.
+    ///
+    /// Emitted once per class into read-only data, with one relocation per slot,
+    /// so building an instance is a single store rather than a loop.
+    fn class_vtable(&mut self, class: &str) -> CodegenResult<Value> {
+        let data_id = match self.l.vtables.get(class) {
+            Some(id) => *id,
+            None => {
+                let layout = self
+                    .l
+                    .layouts
+                    .structs
+                    .get(class)
+                    .ok_or_else(|| CodegenError::internal(format!("unknown class `{}`", class)))?
+                    .clone();
+
+                let mut description = DataDescription::new();
+                description.define(
+                    vec![0u8; layout.vtable.len().max(1) * SLOT_SIZE as usize].into_boxed_slice(),
+                );
+                description.set_align(8);
+                for (slot, entry) in layout.vtable.iter().enumerate() {
+                    let key = fn_key(Some(&entry.owner), &entry.method);
+                    let func_id = self
+                        .l
+                        .funcs
+                        .get(&key)
+                        .ok_or_else(|| CodegenError::internal(format!("`{}` is missing", key)))?
+                        .func_id;
+                    let func_ref = self
+                        .l
+                        .module
+                        .declare_func_in_data(func_id, &mut description);
+                    description.write_function_addr((slot as i32 * SLOT_SIZE) as u32, func_ref);
+                }
+
+                let symbol = format!("lira__vtable__{}", class);
+                let id = self
+                    .l
+                    .module
+                    .declare_data(&symbol, Linkage::Local, false, false)
+                    .map_err(|e| CodegenError::internal(e.to_string()))?;
+                self.l
+                    .module
+                    .define_data(id, &description)
+                    .map_err(|e| CodegenError::internal(e.to_string()))?;
+                self.l.vtables.insert(class.to_string(), id);
+                id
+            }
+        };
+        let gv = self.global_value(data_id);
+        let ptr = self.pointer_ty();
+        Ok(self.builder.ins().symbol_value(ptr, gv))
+    }
+
+    /// Call a class method through the receiver's virtual method table.
+    ///
+    /// The static type only fixes the slot; which implementation runs comes from
+    /// the instance, which is what makes an inherited `describe()` reach a
+    /// subclass's `speak()` override.
+    fn lower_virtual_call(
+        &mut self,
+        class: &str,
+        method: &str,
+        self_value: Value,
+        args: &[Argument],
+        span: &Span,
+    ) -> CodegenResult<Option<Value>> {
+        let layout = self
+            .l
+            .layouts
+            .structs
+            .get(class)
+            .ok_or_else(|| {
+                CodegenError::unsupported_at(format!("unknown class `{}`", class), span)
+            })?
+            .clone();
+        let Some(slot) = layout.vtable_slot(method) else {
+            return Err(CodegenError::unsupported_at(
+                format!("`{}` has no method `{}`", class, method),
+                span,
+            ));
+        };
+
+        // The signature comes from the declaration the slot currently holds;
+        // an override has to match it, which the checker enforces.
+        let key = fn_key(Some(&layout.vtable[slot].owner), method);
+        let info = self
+            .l
+            .funcs
+            .get(&key)
+            .ok_or_else(|| CodegenError::internal(format!("`{}` is missing", key)))?;
+        let ret = info.ret.clone();
+        let params: Vec<(String, Type, Option<Expression>)> = info
+            .params
+            .iter()
+            .map(|p| (p.name.clone(), p.ty.clone(), p.default.clone()))
+            .collect();
+
+        let mut sig = Signature::new(self.l.call_conv);
+        for (_, ty, _) in &params {
+            let clif = repr_of(ty)?
+                .clif(self.pointer_ty())
+                .ok_or_else(|| CodegenError::internal("a parameter cannot be `void`"))?;
+            sig.params.push(AbiParam::new(clif));
+        }
+        if let Some(clif) = repr_of(&ret)?.clif(self.pointer_ty()) {
+            sig.returns.push(AbiParam::new(clif));
+        }
+        let sig_ref = self.builder.import_signature(sig);
+
+        let ptr = self.pointer_ty();
+        let vtable = self.builder.ins().load(
+            ptr,
+            MemFlagsData::trusted(),
+            self_value,
+            CLASS_VTABLE_OFFSET,
+        );
+        let code = self.builder.ins().load(
+            ptr,
+            MemFlagsData::trusted(),
+            vtable,
+            slot as i32 * SLOT_SIZE,
+        );
+
+        let call_args = self.build_method_args(&key, &params, self_value, args, span)?;
+        let call = self.builder.ins().call_indirect(sig_ref, code, &call_args);
+        let results = self.builder.inst_results(call);
+        let result = results.first().copied();
+        Ok(if matches!(ret, Type::Void) {
+            None
+        } else {
+            result
+        })
+    }
+
+    /// `super.method(...)` — the parent's implementation, without dispatch.
+    fn lower_super_call(
+        &mut self,
+        method: &str,
+        args: &[Argument],
+        span: &Span,
+    ) -> CodegenResult<Option<Value>> {
+        let receiver = self
+            .lookup("self")
+            .or_else(|| self.lookup("this"))
+            .ok_or_else(|| CodegenError::unsupported_at("`super` outside of a method", span))?;
+        let receiver_ty = match &receiver {
+            Binding::Local { ty, .. } => ty.clone(),
+            Binding::Global(global) => global.ty.clone(),
+        };
+        let (Type::Struct(class) | Type::Class(class)) = receiver_ty.clone() else {
+            return Err(CodegenError::unsupported_at(
+                "`super` outside of a class",
+                span,
+            ));
+        };
+        let parent = self
+            .l
+            .layouts
+            .structs
+            .get(&class)
+            .and_then(|layout| layout.parent.clone())
+            .ok_or_else(|| {
+                CodegenError::unsupported_at(format!("`{}` has no parent class", class), span)
+            })?;
+        let key = self.resolve_method(&parent, method).ok_or_else(|| {
+            CodegenError::unsupported_at(format!("`{}` has no method `{}`", parent, method), span)
+        })?;
+        let self_value = self.load_binding(&receiver);
+        self.lower_user_call(&key, Some(self_value), args, span)
+    }
+
+    /// Evaluate a method call's arguments into the order the declaration wants.
+    fn build_method_args(
+        &mut self,
+        key: &str,
+        params: &[(String, Type, Option<Expression>)],
+        self_value: Value,
+        args: &[Argument],
+        span: &Span,
+    ) -> CodegenResult<Vec<Value>> {
+        let explicit = &params[1..];
+        let mut slots: Vec<Option<Value>> = vec![None; explicit.len()];
+        let mut positional = 0usize;
+        for arg in args {
+            let index = match &arg.name {
+                Some(name) => explicit
+                    .iter()
+                    .position(|(param, _, _)| param == name)
+                    .ok_or_else(|| {
+                        CodegenError::unsupported_at(
+                            format!("`{}` has no parameter named `{}`", key, name),
+                            &arg.span,
+                        )
+                    })?,
+                None => {
+                    let index = positional;
+                    positional += 1;
+                    if index >= explicit.len() {
+                        return Err(CodegenError::unsupported_at(
+                            format!("too many arguments for `{}`", key),
+                            &arg.span,
+                        ));
+                    }
+                    index
+                }
+            };
+            slots[index] = Some(self.lower_expr_value(&arg.value, &explicit[index].1)?);
+        }
+
+        let mut call_args = Vec::with_capacity(params.len());
+        call_args.push(self_value);
+        for (index, (name, ty, default)) in explicit.iter().enumerate() {
+            let value = match slots[index] {
+                Some(value) => value,
+                None => match default {
+                    Some(default) => self.lower_expr_value(default, ty)?,
+                    None => {
+                        return Err(CodegenError::unsupported_at(
+                            format!("missing argument `{}` for `{}`", name, key),
+                            span,
+                        ))
+                    }
+                },
+            };
+            call_args.push(value);
+        }
+        Ok(call_args)
     }
 }

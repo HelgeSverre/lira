@@ -26,6 +26,10 @@ pub const ARRAY_LEN_OFFSET: i32 = 16;
 pub const ENUM_TAG_OFFSET: i32 = 16;
 pub const ENUM_PAYLOAD_OFFSET: i32 = 24;
 
+/// A class instance carries a pointer to its virtual method table between the
+/// header and its fields, so a method call is two loads and an indirect call.
+pub const CLASS_VTABLE_OFFSET: i32 = 16;
+
 /// A closure object: header, the code pointer, the capture count, then one
 /// 8-byte cell per captured value.
 ///
@@ -65,11 +69,33 @@ pub struct StructLayout {
     pub fields: Vec<FieldLayout>,
     /// Total allocation size, rounded up to the type's alignment.
     pub size: i32,
+    /// The class this one extends, if any. A class's fields are laid out after
+    /// its parent's, so a `Dog*` can be read as an `Animal*`.
+    pub parent: Option<String>,
+    /// Virtual method table, in slot order: the parent's methods first, with an
+    /// `override` replacing the inherited entry, then any new ones appended.
+    /// Each entry names the type that supplies the implementation.
+    pub vtable: Vec<VtableEntry>,
+    /// Whether instances carry a vtable pointer. Only classes do.
+    pub is_class: bool,
+}
+
+/// One slot of a class's virtual method table.
+#[derive(Debug, Clone)]
+pub struct VtableEntry {
+    pub method: String,
+    /// The class whose implementation fills this slot.
+    pub owner: String,
 }
 
 impl StructLayout {
     pub fn field(&self, name: &str) -> Option<&FieldLayout> {
         self.fields.iter().find(|f| f.name == name)
+    }
+
+    /// Slot index of a method in the virtual table.
+    pub fn vtable_slot(&self, method: &str) -> Option<usize> {
+        self.vtable.iter().position(|entry| entry.method == method)
     }
 }
 
@@ -172,7 +198,26 @@ impl LayoutMap {
     }
 }
 
+/// A class declaration, gathered before anything is laid out so parents can be
+/// resolved regardless of declaration order.
+struct ClassDecl {
+    name: String,
+    parent: Option<String>,
+    fields: Vec<(String, Type)>,
+    methods: Vec<String>,
+}
+
 fn collect(statements: &[Statement], map: &mut LayoutMap) -> CodegenResult<()> {
+    let mut classes = Vec::new();
+    collect_into(statements, map, &mut classes)?;
+    lay_out_classes(classes, map)
+}
+
+fn collect_into(
+    statements: &[Statement],
+    map: &mut LayoutMap,
+    classes: &mut Vec<ClassDecl>,
+) -> CodegenResult<()> {
     for stmt in statements {
         match &stmt.kind {
             StatementKind::StructDecl { name, fields, .. } => {
@@ -187,24 +232,26 @@ fn collect(statements: &[Statement], map: &mut LayoutMap) -> CodegenResult<()> {
                 name,
                 parent,
                 fields,
+                methods,
                 ..
             } => {
-                if parent.is_some() {
-                    // Inherited fields would have to be prefixed onto the child's
-                    // layout, and virtual dispatch needs a vtable. Neither is
-                    // wired up yet, so refuse instead of laying out a class whose
-                    // parent fields silently go missing.
-                    return Err(CodegenError::unsupported(format!(
-                        "class `{}` uses inheritance, which the native backend does not support yet",
-                        name
-                    )));
-                }
-                let named: Vec<(String, Type)> = fields
-                    .iter()
-                    .map(|f| (f.name.clone(), type_of_ann(&f.type_ann)))
-                    .collect();
-                map.structs
-                    .insert(name.clone(), layout_fields(name.clone(), &named));
+                // Deferred: a child's fields sit after its parent's, so the
+                // parent has to be laid out first whatever the source order.
+                classes.push(ClassDecl {
+                    name: name.clone(),
+                    parent: parent.clone(),
+                    fields: fields
+                        .iter()
+                        .map(|f| (f.name.clone(), type_of_ann(&f.type_ann)))
+                        .collect(),
+                    methods: methods
+                        .iter()
+                        .filter_map(|m| match &m.kind {
+                            StatementKind::FnDecl { name, .. } => Some(name.clone()),
+                            _ => None,
+                        })
+                        .collect(),
+                });
             }
             StatementKind::EnumDecl { name, variants, .. } => {
                 let mut laid_out = Vec::with_capacity(variants.len());
@@ -230,16 +277,100 @@ fn collect(statements: &[Statement], map: &mut LayoutMap) -> CodegenResult<()> {
             StatementKind::TypeAlias { name, type_expr } => {
                 map.aliases.insert(name.clone(), type_of_ann(type_expr));
             }
-            StatementKind::Block(block) => collect(&block.statements, map)?,
+            StatementKind::Block(block) => collect_into(&block.statements, map, classes)?,
             _ => {}
         }
     }
     Ok(())
 }
 
+/// Lay out classes parents-first, prefixing inherited fields and building each
+/// virtual method table.
+fn lay_out_classes(mut classes: Vec<ClassDecl>, map: &mut LayoutMap) -> CodegenResult<()> {
+    let mut pending = classes.len();
+    while !classes.is_empty() {
+        let before = classes.len();
+        let mut deferred = Vec::new();
+
+        for class in classes {
+            let parent_layout = match &class.parent {
+                Some(parent) => match map.structs.get(parent) {
+                    Some(layout) => Some(layout.clone()),
+                    None => {
+                        // Parent not laid out yet; try again next round.
+                        deferred.push(class);
+                        continue;
+                    }
+                },
+                None => None,
+            };
+
+            let mut fields: Vec<(String, Type)> = parent_layout
+                .as_ref()
+                .map(|layout| {
+                    layout
+                        .fields
+                        .iter()
+                        .map(|f| (f.name.clone(), f.ty.clone()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            for (name, ty) in &class.fields {
+                if !fields.iter().any(|(existing, _)| existing == name) {
+                    fields.push((name.clone(), ty.clone()));
+                }
+            }
+
+            // The parent's slots keep their indices so an inherited method
+            // called through a child's table lands in the same place.
+            let mut vtable = parent_layout
+                .as_ref()
+                .map(|layout| layout.vtable.clone())
+                .unwrap_or_default();
+            for method in &class.methods {
+                match vtable.iter_mut().find(|entry| &entry.method == method) {
+                    Some(entry) => entry.owner = class.name.clone(),
+                    None => vtable.push(VtableEntry {
+                        method: method.clone(),
+                        owner: class.name.clone(),
+                    }),
+                }
+            }
+
+            let mut layout = layout_fields_from(class.name.clone(), &fields, CLASS_FIELD_START);
+            layout.parent = class.parent.clone();
+            layout.vtable = vtable;
+            layout.is_class = true;
+            map.structs.insert(class.name.clone(), layout);
+        }
+
+        classes = deferred;
+        if classes.len() == before {
+            // No progress: a parent that is not a class in this program, or a
+            // cycle. Report the first offender rather than looping.
+            let orphan = &classes[0];
+            return Err(CodegenError::unsupported(format!(
+                "class `{}` extends `{}`, which is not a class in this program",
+                orphan.name,
+                orphan.parent.as_deref().unwrap_or("?")
+            )));
+        }
+        pending = classes.len();
+    }
+    let _ = pending;
+    Ok(())
+}
+
+/// Where a class's own fields begin: after the header and the vtable pointer.
+const CLASS_FIELD_START: i32 = CLASS_VTABLE_OFFSET + SLOT_SIZE;
+
 /// Lay fields out in declaration order with natural C alignment.
 fn layout_fields(name: String, fields: &[(String, Type)]) -> StructLayout {
-    let mut offset = HEADER_SIZE;
+    layout_fields_from(name, fields, HEADER_SIZE)
+}
+
+fn layout_fields_from(name: String, fields: &[(String, Type)], start: i32) -> StructLayout {
+    let mut offset = start;
     let mut max_align = 8; // the header itself is 8-byte aligned
     let mut laid_out = Vec::with_capacity(fields.len());
 
@@ -261,6 +392,9 @@ fn layout_fields(name: String, fields: &[(String, Type)]) -> StructLayout {
         name,
         fields: laid_out,
         size: align_to(offset, max_align),
+        parent: None,
+        vtable: Vec::new(),
+        is_class: false,
     }
 }
 
@@ -435,9 +569,46 @@ mod tests {
     }
 
     #[test]
-    fn class_inheritance_is_rejected() {
+    fn a_child_class_prefixes_its_parents_fields() {
         let src = "class Base { x: int }\nclass Child extends Base { y: int }";
-        let err = LayoutMap::build(&program(src)).unwrap_err();
-        assert!(err.to_string().contains("inheritance"));
+        let map = LayoutMap::build(&program(src)).unwrap();
+        let base = map.structs.get("Base").unwrap();
+        let child = map.structs.get("Child").unwrap();
+        // Header, vtable pointer, then the fields.
+        assert_eq!(base.field("x").unwrap().offset, 24);
+        // The inherited field keeps its offset, so a `Child*` reads as a `Base*`.
+        assert_eq!(child.field("x").unwrap().offset, 24);
+        assert_eq!(child.field("y").unwrap().offset, 32);
+        assert_eq!(child.parent.as_deref(), Some("Base"));
+    }
+
+    #[test]
+    fn a_child_class_is_laid_out_after_its_parent_whatever_the_order() {
+        let src = "class Child extends Base { y: int }\nclass Base { x: int }";
+        let map = LayoutMap::build(&program(src)).unwrap();
+        assert_eq!(
+            map.structs.get("Child").unwrap().field("x").unwrap().offset,
+            24
+        );
+    }
+
+    #[test]
+    fn an_override_replaces_the_inherited_vtable_slot() {
+        let src = "class Animal { fn speak(self) -> string { return \"...\" }\n                   fn describe(self) -> string { return \"x\" } }\n                   class Dog extends Animal { override fn speak(self) -> string { return \"Woof\" } }";
+        let map = LayoutMap::build(&program(src)).unwrap();
+        let animal = map.structs.get("Animal").unwrap();
+        let dog = map.structs.get("Dog").unwrap();
+        assert_eq!(animal.vtable_slot("speak"), Some(0));
+        // The override keeps the slot index but changes whose code fills it.
+        assert_eq!(dog.vtable_slot("speak"), Some(0));
+        assert_eq!(dog.vtable[0].owner, "Dog");
+        assert_eq!(dog.vtable_slot("describe"), Some(1));
+        assert_eq!(dog.vtable[1].owner, "Animal");
+    }
+
+    #[test]
+    fn a_class_extending_something_unknown_is_reported() {
+        let err = LayoutMap::build(&program("class Child extends Missing { y: int }")).unwrap_err();
+        assert!(err.to_string().contains("not a class"));
     }
 }
