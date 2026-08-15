@@ -1736,6 +1736,18 @@ impl<'a, 'b, 'c> FuncGen<'a, 'b, 'c> {
                         let slot = self.call_rt_value("lira_rt_map_get", &[map, key])?;
                         Ok(Some(self.slot_to_value(slot, &value_ty)?))
                     }
+                    // The checker types `s[i]` as `char`, which is an integer
+                    // code point here, but the bytecode VM hands back a
+                    // one-character string. Picking either side silently would
+                    // make one of them wrong, so refuse until they agree.
+                    // `str_char_code(s, i)` and `str_substring(s, i, i + 1)`
+                    // both work and say which is meant.
+                    Type::String => Err(CodegenError::unsupported_at(
+                        "indexing a string is ambiguous: the checker calls it a `char` and the \
+                         bytecode VM returns a one-character string. Use `str_char_code` or \
+                         `str_substring` instead",
+                        &expr.span,
+                    )),
                     Type::Tuple(element_types) => {
                         // A tuple is an array underneath, so a constant index
                         // reads the slot at that position's declared type.
