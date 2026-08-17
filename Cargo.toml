@@ -1,3 +1,11 @@
 [workspace]
-members = ["crates/lira", "crates/lira-core", "crates/lirac", "crates/lira-codegen", "crates/liravm", "crates/lira-lsp", "crates/lira-doc", "crates/lira-spec", "lira-playground/backend"]
+members = ["crates/lira", "crates/lira-core", "crates/lirac", "crates/lira-codegen", "crates/liravm", "crates/lira-lsp", "crates/lira-doc", "crates/lira-spec", "crates/lira-native-runtime", "lira-playground/backend"]
 resolver = "2"
+
+[workspace.package]
+rust-version = "1.94"
+
+[workspace.dependencies]
+regex = "1.12.4"
+serde_json = "1"
+ureq = "3"

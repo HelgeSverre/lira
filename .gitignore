@@ -1,5 +1,7 @@
 # Rust
 /target/
+# Nested workspace crate targets are built standalone in dev; keep them out.
+**/target/
 Cargo.lock
 
 # macOS
