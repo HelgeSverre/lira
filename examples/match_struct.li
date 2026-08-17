@@ -19,6 +19,6 @@ fn area(r: Rect) -> int {
 }
 
 fn main() {
-    print(sum(Point { x: 10, y: 20 }))
-    print(area(Rect { width: 15, height: 20 }))
+    println(sum(Point { x: 10, y: 20 }))
+    println(area(Rect { width: 15, height: 20 }))
 }

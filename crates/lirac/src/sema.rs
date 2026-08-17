@@ -14,6 +14,13 @@ pub struct SemanticTables {
     /// Expression result types
     pub expr_types: HashMap<NodeId, Type>,
 
+    /// Resolved targets of `is` expressions, keyed by the expression node.
+    ///
+    /// Type-check targets must be consumed from this table by codegen rather
+    /// than reconstructed from source spelling: aliases and nominal types are
+    /// already canonical here, and `any` has no VM type tag.
+    pub type_check_targets: HashMap<NodeId, Type>,
+
     /// Statement types (for VarDecl, the declared/inferred type)
     pub stmt_types: HashMap<NodeId, Type>,
 
@@ -39,6 +46,14 @@ pub struct SemanticTables {
     /// future monomorphizing backend; see `checker::GenericInstantiation`.
     pub generic_instantiations: Vec<GenericInstantiation>,
 
+    /// Concrete applications of user-defined generic aggregate types, keyed
+    /// by their source-facing nominal spelling (for example `Box<int>`).
+    ///
+    /// The VM may erase these arguments at runtime, while native codegen uses
+    /// them to select a concrete layout. Keeping the mapping authoritative
+    /// avoids parsing nested type names from display strings.
+    pub generic_type_instances: HashMap<String, GenericTypeInstance>,
+
     /// Per-type member snapshot (fields + methods) keyed by type name.
     ///
     /// Populated by the checker from its (otherwise dropped) `TypeEnv` so that
@@ -46,6 +61,12 @@ pub struct SemanticTables {
     /// completion and signature-aware hover without reaching into checker
     /// internals.
     pub type_members: HashMap<String, TypeMembers>,
+
+    /// Concrete runtime types observed in this checked program that satisfy
+    /// each structural interface. Backends use this closed-world set to build
+    /// bounded witnesses and dynamic membership checks without reconstructing
+    /// checker rules from source spellings.
+    pub interface_implementations: HashMap<String, Vec<Type>>,
 }
 
 impl SemanticTables {
@@ -53,6 +74,7 @@ impl SemanticTables {
     pub fn new() -> Self {
         Self {
             expr_types: HashMap::new(),
+            type_check_targets: HashMap::new(),
             stmt_types: HashMap::new(),
             pattern_types: HashMap::new(),
             symbol_refs: HashMap::new(),
@@ -60,7 +82,9 @@ impl SemanticTables {
             call_resolution: HashMap::new(),
             field_resolution: HashMap::new(),
             generic_instantiations: Vec::new(),
+            generic_type_instances: HashMap::new(),
             type_members: HashMap::new(),
+            interface_implementations: HashMap::new(),
         }
     }
 }
@@ -144,6 +168,13 @@ pub struct GenericInstantiation {
     pub concrete_type: Type,
 }
 
+/// A concrete application of a user-defined generic aggregate declaration.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GenericTypeInstance {
+    pub base_name: String,
+    pub args: Vec<Type>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,6 +183,7 @@ mod tests {
     fn test_empty_semantic_tables() {
         let sema = SemanticTables::new();
         assert!(sema.expr_types.is_empty());
+        assert!(sema.type_check_targets.is_empty());
         assert!(sema.stmt_types.is_empty());
         assert!(sema.pattern_types.is_empty());
         assert!(sema.symbol_refs.is_empty());
@@ -159,6 +191,7 @@ mod tests {
         assert!(sema.call_resolution.is_empty());
         assert!(sema.field_resolution.is_empty());
         assert!(sema.generic_instantiations.is_empty());
+        assert!(sema.generic_type_instances.is_empty());
         assert!(sema.type_members.is_empty());
     }
 

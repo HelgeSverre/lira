@@ -1,5 +1,10 @@
 // File I/O Tests
 // Tests file operations using host primitives
+// @expect-contains: File closed: true
+// @expect-contains: File exists after write: true
+// @expect-contains: Hello from Lira!
+// @expect-contains: Missing var is null: true
+// @expect-contains: === All File I/O Tests Passed ===
 
 println("=== File I/O Tests ===")
 

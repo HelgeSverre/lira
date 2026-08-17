@@ -16,10 +16,12 @@
 // overlap. With 8 workers this crawl runs several times faster than fetching
 // sequentially.
 //
-// Makes real network requests, so it is skipped by the test suite. Run it with:
+// Makes real network requests when run normally. Tests inject a local server
+// through LIRA_CRAWLER_BASE_URL. Run it with:
 //   lira run examples/concurrent_crawler.li
 //
-// @skip
+// @test-local-crawler
+// @expect-contains: Done. Fetched 4 pages, discovered 4 unique in-domain URLs.
 
 struct Page {
     url: string
@@ -43,20 +45,36 @@ fn is_asset(url: string) -> bool {
 }
 
 // Turn an href into an absolute, same-domain URL — or "" to skip it.
-fn normalize(href: string) -> string {
-    let base = "https://quotes.toscrape.com"
-    let host = "quotes.toscrape.com"
+fn crawler_origin() -> string {
+    let configured = env_get("LIRA_CRAWLER_BASE_URL")
+    if configured == null {
+        return "https://quotes.toscrape.com"
+    }
+    var origin = "" + configured
+    if len(origin) == 0 {
+        return "https://quotes.toscrape.com"
+    }
+    while len(origin) > 0 && str_substring(origin, len(origin) - 1, len(origin)) == "/" {
+        origin = str_substring(origin, 0, len(origin) - 1)
+    }
+    if origin == "" { return "https://quotes.toscrape.com" }
+    return origin
+}
+
+fn normalize(href: string, origin: string) -> string {
     if is_asset(href) { return "" }
-    if starts_with(href, "#") { return "" }
-    if starts_with(href, "/") { return base + href }
-    if starts_with(href, "http") {
-        if str_index_of(href, host) >= 0 { return href }
-        return ""
+    if str_index_of(href, "#") >= 0 { return "" }
+    if starts_with(href, "//") { return "" }
+    if starts_with(href, "/") { return origin + href }
+    if href == origin { return href }
+    let origin_prefix = origin + "/"
+    if starts_with(href, origin_prefix) {
+        return href
     }
     return ""
 }
 
-fn extract_links(html: string) -> [string] {
+fn extract_links(html: string, origin: string) -> [string] {
     // regex_find_all returns whole matches like `href="/page/2/"`; strip the
     // 6-char `href="` prefix and the trailing quote to recover the URL.
     let matches = regex_find_all("href=\"([^\"]+)\"", html)
@@ -65,7 +83,7 @@ fn extract_links(html: string) -> [string] {
     while i < len(matches) {
         let m = matches[i]
         let href = str_substring(m, 6, len(m) - 1)
-        let norm = normalize(href)
+        let norm = normalize(href, origin)
         if norm != "" { push(out, norm) }
         i = i + 1
     }
@@ -82,19 +100,20 @@ fn contains(arr: [string], x: string) -> bool {
 }
 
 // Worker fiber: fetch URLs from `work` until told to STOP.
-fn worker(work: Channel<string>, done: Channel<Page>) {
+fn worker(work: Channel<string>, done: Channel<Page>, origin: string) {
     while true {
         var url = ""
         select { u = <-work => url = u }
         if url == "STOP" { return }
         let r = http_get(url)
-        let links = extract_links(r[1])
+        let links = extract_links(r[1], origin)
         send(done, Page { url: url, status: r[0], nbytes: len(r[1]), links: links })
     }
 }
 
 fn main() {
-    let seed = "https://quotes.toscrape.com/"
+    let origin = crawler_origin()
+    let seed = origin + "/"
     let max_pages = 20
     let n_workers = 8
 
@@ -107,7 +126,7 @@ fn main() {
 
     var w = 0
     while w < n_workers {
-        spawn worker(work, done)
+        spawn worker(work, done, origin)
         w = w + 1
     }
 

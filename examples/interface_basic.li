@@ -29,6 +29,11 @@ struct Circle {
     radius: int
 }
 
+fn report(shape: Drawable) {
+    // The call is dispatched through Drawable's runtime witness table.
+    println("Shape area: " + shape.area())
+}
+
 impl Circle {
     fn area(self) -> int {
         // Approximate pi * r^2 as 3 * r^2 for integer math
@@ -43,10 +48,12 @@ impl Circle {
 
 fn main() {
     let rect = Rectangle { width: 10, height: 5 }
-    println("Shape area: " + rect.area())
+    let drawable: Drawable = rect
+    report(drawable)
 
     let circle = Circle { radius: 5 }
-    println("Shape area: " + circle.area())
+    let other: Drawable = circle
+    report(other)
 }
 
 main()

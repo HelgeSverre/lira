@@ -8,6 +8,10 @@
 // @expect: warm
 // @expect: warm
 // @expect: other
+// @expect: 11
+// @expect: 22
+// @expect: 33
+// @expect: 44
 
 fn classify_char(c: int) -> string {
     return match c {
@@ -25,14 +29,27 @@ fn classify_color(c: Color) -> string {
     }
 }
 
+enum Choice { Left(int), Right(int), Pair(int, int) }
+
+fn choice_value(choice: Choice) -> int {
+    return match choice {
+        Choice::Left(x) | Choice::Right(x) => x,
+        Choice::Pair(x, 0 | 1) => x
+    }
+}
+
 fn main() {
-    print(classify_char(97))
-    print(classify_char(101))
-    print(classify_char(105))
-    print(classify_char(111))
-    print(classify_char(117))
-    print(classify_char(98))
-    print(classify_color(Color::Red))
-    print(classify_color(Color::Green))
-    print(classify_color(Color::Blue))
+    println(classify_char(97))
+    println(classify_char(101))
+    println(classify_char(105))
+    println(classify_char(111))
+    println(classify_char(117))
+    println(classify_char(98))
+    println(classify_color(Color::Red))
+    println(classify_color(Color::Green))
+    println(classify_color(Color::Blue))
+    println(choice_value(Choice::Left(11)))
+    println(choice_value(Choice::Right(22)))
+    println(choice_value(Choice::Pair(33, 0)))
+    println(choice_value(Choice::Pair(44, 1)))
 }

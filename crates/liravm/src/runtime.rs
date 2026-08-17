@@ -118,18 +118,365 @@
 use crate::value::Value;
 use gc::{Gc, GcCell};
 use md5::{Digest, Md5};
-use regex::Regex;
+use regex::{Captures, Regex, RegexBuilder};
 use serde_json::{Map, Value as JsonValue};
 use sha1::Sha1;
 use sha2::{Sha256, Sha512};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::net::TcpStream;
 use std::rc::Rc;
+use std::time::Duration;
 
 /// File handle for open files
 pub type FileHandle = i64;
+
+const MAX_JSON_BYTES: usize = 16 * 1024 * 1024;
+const MAX_JSON_NODES: usize = 1_000_000;
+const MAX_JSON_DEPTH: usize = 128;
+const MAX_JSON_OUTPUT_BYTES: usize = 32 * 1024 * 1024;
+const JSON_SIZE_LIMIT_ERROR: &str = "input exceeds JSON size limit";
+const JSON_RESOURCE_LIMIT_ERROR: &str = "input exceeds JSON resource limit";
+
+// Keep regex work bounded in both the VM and native runtimes. These limits
+// prevent one call from consuming unaccounted compilation, iteration, or
+// output memory; the native runtime mirrors these exact values.
+const MAX_REGEX_PATTERN_BYTES: usize = 64 * 1024;
+const MAX_REGEX_INPUT_BYTES: usize = 16 * 1024 * 1024;
+const MAX_REGEX_RESULT_COUNT: usize = 100_000;
+const MAX_REGEX_OUTPUT_BYTES: usize = 32 * 1024 * 1024;
+const MAX_REGEX_COMPILED_BYTES: usize = 8 * 1024 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum JsonResourceError {
+    Size,
+    Resource,
+}
+
+#[derive(Clone, Copy)]
+enum JsonFrame {
+    ArrayValue,
+    ArrayAfterValue,
+    ObjectKey,
+    ObjectColon,
+    ObjectValue,
+    ObjectAfterValue,
+}
+
+fn skip_json_string(bytes: &[u8], mut index: usize) -> usize {
+    index += 1;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\\' => index = index.saturating_add(2),
+            b'"' => return index + 1,
+            _ => index += 1,
+        }
+    }
+    bytes.len()
+}
+
+fn skip_json_primitive(bytes: &[u8], mut index: usize) -> usize {
+    while index < bytes.len()
+        && !bytes[index].is_ascii_whitespace()
+        && !matches!(bytes[index], b',' | b']' | b'}')
+    {
+        index += 1;
+    }
+    index
+}
+
+/// Preflight JSON without using serde_json's recursive parser. This keeps
+/// deeply nested adversarial input from reaching the parser before our depth
+/// limit is known, while serde_json remains responsible for syntax validation.
+fn check_json_resources(input: &str) -> Result<(), JsonResourceError> {
+    if input.len() > MAX_JSON_BYTES {
+        return Err(JsonResourceError::Size);
+    }
+    let bytes = input.as_bytes();
+    let mut frames = Vec::new();
+    let mut root_done = false;
+    let mut nodes = 0usize;
+    let mut index = 0usize;
+
+    while index < bytes.len() {
+        while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+            index += 1;
+        }
+        if index == bytes.len() {
+            break;
+        }
+
+        let byte = bytes[index];
+        match frames.last_mut().copied() {
+            Some(JsonFrame::ArrayAfterValue) if byte == b',' => {
+                if let Some(frame) = frames.last_mut() {
+                    *frame = JsonFrame::ArrayValue;
+                }
+                index += 1;
+            }
+            Some(JsonFrame::ArrayAfterValue) if byte == b']' => {
+                frames.pop();
+                index += 1;
+            }
+            Some(JsonFrame::ArrayValue) if byte == b']' => {
+                frames.pop();
+                index += 1;
+            }
+            Some(JsonFrame::ArrayValue) => {
+                let depth = frames.len();
+                if depth > MAX_JSON_DEPTH || nodes >= MAX_JSON_NODES {
+                    return Err(JsonResourceError::Resource);
+                }
+                nodes += 1;
+                if let Some(frame) = frames.last_mut() {
+                    *frame = JsonFrame::ArrayAfterValue;
+                }
+                if matches!(byte, b'[' | b'{') {
+                    frames.push(if byte == b'[' {
+                        JsonFrame::ArrayValue
+                    } else {
+                        JsonFrame::ObjectKey
+                    });
+                    index += 1;
+                } else if byte == b'"' {
+                    index = skip_json_string(bytes, index);
+                } else {
+                    index = skip_json_primitive(bytes, index);
+                }
+            }
+            Some(JsonFrame::ObjectKey) if byte == b'}' => {
+                frames.pop();
+                index += 1;
+            }
+            Some(JsonFrame::ObjectKey) if byte == b'"' => {
+                index = skip_json_string(bytes, index);
+                if let Some(frame) = frames.last_mut() {
+                    *frame = JsonFrame::ObjectColon;
+                }
+            }
+            Some(JsonFrame::ObjectColon) if byte == b':' => {
+                if let Some(frame) = frames.last_mut() {
+                    *frame = JsonFrame::ObjectValue;
+                }
+                index += 1;
+            }
+            Some(JsonFrame::ObjectValue) => {
+                let depth = frames.len();
+                if depth > MAX_JSON_DEPTH || nodes >= MAX_JSON_NODES {
+                    return Err(JsonResourceError::Resource);
+                }
+                nodes += 1;
+                if let Some(frame) = frames.last_mut() {
+                    *frame = JsonFrame::ObjectAfterValue;
+                }
+                if matches!(byte, b'[' | b'{') {
+                    frames.push(if byte == b'[' {
+                        JsonFrame::ArrayValue
+                    } else {
+                        JsonFrame::ObjectKey
+                    });
+                    index += 1;
+                } else if byte == b'"' {
+                    index = skip_json_string(bytes, index);
+                } else {
+                    index = skip_json_primitive(bytes, index);
+                }
+            }
+            Some(JsonFrame::ObjectAfterValue) if byte == b',' => {
+                if let Some(frame) = frames.last_mut() {
+                    *frame = JsonFrame::ObjectKey;
+                }
+                index += 1;
+            }
+            Some(JsonFrame::ObjectAfterValue) if byte == b'}' => {
+                frames.pop();
+                index += 1;
+            }
+            Some(_) => {
+                // Let serde_json report malformed punctuation. Advancing here
+                // still ensures malformed input cannot make this preflight loop.
+                index += 1;
+            }
+            None if root_done => break,
+            None => {
+                if nodes >= MAX_JSON_NODES {
+                    return Err(JsonResourceError::Resource);
+                }
+                nodes += 1;
+                root_done = true;
+                if matches!(byte, b'[' | b'{') {
+                    frames.push(if byte == b'[' {
+                        JsonFrame::ArrayValue
+                    } else {
+                        JsonFrame::ObjectKey
+                    });
+                    index += 1;
+                } else if byte == b'"' {
+                    index = skip_json_string(bytes, index);
+                } else {
+                    index = skip_json_primitive(bytes, index);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+struct JsonBuildState {
+    nodes: usize,
+}
+
+impl JsonBuildState {
+    fn visit(&mut self, depth: usize) -> Result<(), String> {
+        if depth > MAX_JSON_DEPTH || self.nodes >= MAX_JSON_NODES {
+            return Err(JSON_RESOURCE_LIMIT_ERROR.to_owned());
+        }
+        self.nodes += 1;
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+enum JsonConvertError {
+    ResourceLimit,
+}
+
+struct JsonConvertState {
+    nodes: usize,
+    active: HashSet<usize>,
+}
+
+impl JsonConvertState {
+    fn visit(&mut self, depth: usize) -> Result<(), JsonConvertError> {
+        if depth > MAX_JSON_DEPTH || self.nodes >= MAX_JSON_NODES {
+            return Err(JsonConvertError::ResourceLimit);
+        }
+        self.nodes += 1;
+        Ok(())
+    }
+}
+
+fn build_regex(pattern: &str) -> Option<Regex> {
+    if pattern.len() > MAX_REGEX_PATTERN_BYTES {
+        return None;
+    }
+    RegexBuilder::new(pattern)
+        .size_limit(MAX_REGEX_COMPILED_BYTES)
+        .dfa_size_limit(MAX_REGEX_COMPILED_BYTES)
+        .build()
+        .ok()
+}
+
+fn valid_regex_input(pattern: &str, text: &str) -> bool {
+    pattern.len() <= MAX_REGEX_PATTERN_BYTES && text.len() <= MAX_REGEX_INPUT_BYTES
+}
+
+fn push_regex_bounded(output: &mut String, value: &str) -> bool {
+    let Some(next_len) = output.len().checked_add(value.len()) else {
+        return false;
+    };
+    if next_len > MAX_REGEX_OUTPUT_BYTES {
+        return false;
+    }
+    output.push_str(value);
+    true
+}
+
+fn regex_capture_reference<'a>(captures: &'a Captures<'_>, reference: &str) -> Option<&'a str> {
+    if let Ok(index) = reference.parse::<usize>() {
+        return captures.get(index).map(|capture| capture.as_str());
+    }
+    captures.name(reference).map(|capture| capture.as_str())
+}
+
+/// Append a replacement with regex's `$name`, `${name}`, `$0`, and `$$`
+/// interpolation semantics without giving the interpolator an unbounded
+/// destination string.
+fn push_regex_replacement(captures: &Captures<'_>, replacement: &str, output: &mut String) -> bool {
+    let mut remaining = replacement;
+    while !remaining.is_empty() {
+        let Some(dollar) = remaining.find('$') else {
+            return push_regex_bounded(output, remaining);
+        };
+        if !push_regex_bounded(output, &remaining[..dollar]) {
+            return false;
+        }
+        remaining = &remaining[dollar..];
+        if remaining.as_bytes().get(1) == Some(&b'$') {
+            if !push_regex_bounded(output, "$") {
+                return false;
+            }
+            remaining = &remaining[2..];
+            continue;
+        }
+
+        let bytes = remaining.as_bytes();
+        let (reference, end) = if bytes.get(1) == Some(&b'{') {
+            let Some(close) = remaining[2..].find('}') else {
+                if !push_regex_bounded(output, "$") {
+                    return false;
+                }
+                remaining = &remaining[1..];
+                continue;
+            };
+            let end = close + 3;
+            (&remaining[2..end - 1], end)
+        } else {
+            let mut end = 1;
+            while bytes
+                .get(end)
+                .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+            {
+                end += 1;
+            }
+            if end == 1 {
+                if !push_regex_bounded(output, "$") {
+                    return false;
+                }
+                remaining = &remaining[1..];
+                continue;
+            }
+            (&remaining[1..end], end)
+        };
+        if let Some(value) = regex_capture_reference(captures, reference) {
+            if !push_regex_bounded(output, value) {
+                return false;
+            }
+        }
+        remaining = &remaining[end..];
+    }
+    true
+}
+
+fn bounded_regex_replace(
+    regex: &Regex,
+    text: &str,
+    replacement: &str,
+    all: bool,
+) -> Option<String> {
+    let mut output = String::new();
+    let mut last_match = 0;
+    for (match_count, captures) in regex.captures_iter(text).enumerate() {
+        if match_count >= MAX_REGEX_RESULT_COUNT {
+            return None;
+        }
+        let full_match = captures.get(0)?;
+        if !push_regex_bounded(&mut output, &text[last_match..full_match.start()])
+            || !push_regex_replacement(&captures, replacement, &mut output)
+        {
+            return None;
+        }
+        last_match = full_match.end();
+        if !all {
+            break;
+        }
+    }
+    if !push_regex_bounded(&mut output, &text[last_match..]) {
+        return None;
+    }
+    Some(output)
+}
 
 /// Runtime context for built-in function calls
 pub struct Runtime {
@@ -144,6 +491,8 @@ pub struct Runtime {
     tcp_sockets: HashMap<i64, TcpStream>,
     /// Next socket ID to assign
     next_socket_id: i64,
+    /// Per-VM environment values used by hermetic embedders and tests.
+    env_overrides: HashMap<String, String>,
 }
 
 impl Runtime {
@@ -154,6 +503,7 @@ impl Runtime {
             next_fd: 10, // Start at 10 to avoid confusion with stdin/stdout/stderr
             tcp_sockets: HashMap::new(),
             next_socket_id: 100, // Start at 100 to distinguish from file handles
+            env_overrides: HashMap::new(),
         }
     }
 
@@ -284,17 +634,32 @@ impl Runtime {
         sec: i64,
     ) -> i64 {
         use chrono::{TimeZone, Utc};
-        Utc.with_ymd_and_hms(
-            year as i32,
-            month as u32,
-            day as u32,
-            hour as u32,
-            min as u32,
-            sec as u32,
-        )
-        .single()
-        .map(|dt| dt.timestamp_millis())
-        .unwrap_or(0)
+        // Fail closed (return 0, matching a `timegm` failure and the native
+        // backend) rather than truncating a component that cannot be held by
+        // the underlying narrow chrono types. Without this, an extreme `year`
+        // (e.g. i64::MIN) would silently become a plausible but wrong date.
+        let Some(year) = i32::try_from(year).ok() else {
+            return 0;
+        };
+        let Some(month) = u32::try_from(month).ok() else {
+            return 0;
+        };
+        let Some(day) = u32::try_from(day).ok() else {
+            return 0;
+        };
+        let Some(hour) = u32::try_from(hour).ok() else {
+            return 0;
+        };
+        let Some(min) = u32::try_from(min).ok() else {
+            return 0;
+        };
+        let Some(sec) = u32::try_from(sec).ok() else {
+            return 0;
+        };
+        Utc.with_ymd_and_hms(year, month, day, hour, min, sec)
+            .single()
+            .map(|dt| dt.timestamp_millis())
+            .unwrap_or(0)
     }
 
     // ========================================================================
@@ -395,7 +760,7 @@ impl Runtime {
             .get_mut(&fd)
             .ok_or_else(|| format!("Invalid file handle: {}", fd))?;
 
-        let mut buffer = vec![0u8; max_bytes.min(1024 * 1024) as usize]; // Cap at 1MB
+        let mut buffer = vec![0u8; max_bytes.clamp(0, 1024 * 1024) as usize]; // Cap at 1MB
         let bytes_read = file
             .read(&mut buffer)
             .map_err(|e| format!("Read error: {}", e))?;
@@ -463,7 +828,15 @@ impl Runtime {
 
     /// Get an environment variable
     pub fn env_get(&self, name: &str) -> Option<String> {
-        std::env::var(name).ok()
+        self.env_overrides
+            .get(name)
+            .cloned()
+            .or_else(|| std::env::var(name).ok())
+    }
+
+    /// Override an environment value for this runtime instance only.
+    pub(crate) fn set_env_override(&mut self, name: impl Into<String>, value: impl Into<String>) {
+        self.env_overrides.insert(name.into(), value.into());
     }
 
     /// Get command line arguments
@@ -543,10 +916,27 @@ impl Runtime {
         (u64::from_le_bytes(raw) as f64) / (u64::MAX as f64)
     }
 
-    /// Generate random integer in range [min, max]
+    /// Generate random integer in range [min, max] (inclusive), overflow-safe
+    /// for the entire i64 domain. When `min > max`, returns `min` (matching
+    /// the native backend's contract). Computes the inclusive span in unsigned
+    /// arithmetic so a full-domain request cannot overflow.
     pub fn random_int(&self, min: i64, max: i64) -> i64 {
-        let range = (max - min + 1) as f64;
-        min + (self.random_float() * range) as i64
+        if max <= min {
+            return min;
+        }
+        let lo = min as u64;
+        let hi = max as u64;
+        // hi > lo, so `hi - lo` is in [1, UINT64_MAX]; adding one wraps to 0
+        // exactly for the full 2^64-domain, in which case every value is valid.
+        let span = hi.wrapping_sub(lo).wrapping_add(1);
+        let mut raw = [0u8; 8];
+        raw.copy_from_slice(&self.random_bytes(8));
+        let bits = u64::from_le_bytes(raw);
+        if span == 0 {
+            lo.wrapping_add(bits) as i64
+        } else {
+            lo.wrapping_add(bits % span) as i64
+        }
     }
 
     // ========================================================================
@@ -723,21 +1113,53 @@ impl Runtime {
 
     /// URL decode a string (percent-decoding)
     pub fn url_decode(&self, input: &str) -> String {
-        let mut result = String::new();
-        let mut chars = input.chars().peekable();
-        while let Some(c) = chars.next() {
-            match c {
-                '%' => {
-                    let hex: String = chars.by_ref().take(2).collect();
-                    if let Ok(byte) = u8::from_str_radix(&hex, 16) {
-                        result.push(byte as char);
-                    }
-                }
-                '+' => result.push(' '),
-                _ => result.push(c),
+        fn hex_value(byte: u8) -> Option<u8> {
+            match byte {
+                b'0'..=b'9' => Some(byte - b'0'),
+                b'a'..=b'f' => Some(byte - b'a' + 10),
+                b'A'..=b'F' => Some(byte - b'A' + 10),
+                _ => None,
             }
         }
-        result
+
+        let bytes = input.as_bytes();
+        let mut decoded = Vec::with_capacity(input.len());
+        let mut index = 0;
+        while index < bytes.len() {
+            match bytes[index] {
+                b'%' => {
+                    let remaining = bytes.len() - index;
+                    if remaining < 3 {
+                        // Match the existing decoder contract: a malformed
+                        // escape consumes the percent and any trailing digits.
+                        break;
+                    }
+                    if let (Some(high), Some(low)) =
+                        (hex_value(bytes[index + 1]), hex_value(bytes[index + 2]))
+                    {
+                        decoded.push((high << 4) | low);
+                    }
+                    // Invalid hex escapes are consumed, but produce no byte.
+                    index += 3;
+                }
+                b'+' => {
+                    decoded.push(b' ');
+                    index += 1;
+                }
+                byte => {
+                    decoded.push(byte);
+                    index += 1;
+                }
+            }
+        }
+
+        match String::from_utf8(decoded) {
+            Ok(result) => result,
+            Err(error) => {
+                eprintln!("url_decode error: UTF-8 decode error: {}", error);
+                String::new()
+            }
+        }
     }
 
     // ========================================================================
@@ -746,70 +1168,156 @@ impl Runtime {
 
     /// Parse JSON string to Lira Value
     pub fn json_parse(&self, json_str: &str) -> Result<Value, String> {
+        check_json_resources(json_str).map_err(|error| match error {
+            JsonResourceError::Size => JSON_SIZE_LIMIT_ERROR.to_owned(),
+            JsonResourceError::Resource => JSON_RESOURCE_LIMIT_ERROR.to_owned(),
+        })?;
         let parsed: JsonValue =
             serde_json::from_str(json_str).map_err(|e| format!("JSON parse error: {}", e))?;
-        Ok(self.json_to_value(parsed))
+        let mut state = JsonBuildState { nodes: 0 };
+        self.json_to_value(parsed, 0, &mut state)
     }
 
-    fn json_to_value(&self, json: JsonValue) -> Value {
+    fn json_to_value(
+        &self,
+        json: JsonValue,
+        depth: usize,
+        state: &mut JsonBuildState,
+    ) -> Result<Value, String> {
+        state.visit(depth)?;
         match json {
-            JsonValue::Null => Value::Null,
-            JsonValue::Bool(b) => Value::Bool(b),
+            JsonValue::Null => Ok(Value::Null),
+            JsonValue::Bool(b) => Ok(Value::Bool(b)),
             JsonValue::Number(n) => {
                 if let Some(i) = n.as_i64() {
-                    Value::Int(i)
+                    Ok(Value::Int(i))
                 } else {
-                    Value::Float(n.as_f64().unwrap_or(0.0))
+                    n.as_f64()
+                        .filter(|value| value.is_finite())
+                        .map(Value::Float)
+                        .ok_or_else(|| JSON_RESOURCE_LIMIT_ERROR.to_owned())
                 }
             }
-            JsonValue::String(s) => Value::String(Rc::new(s)),
+            JsonValue::String(s) => Ok(Value::String(Rc::new(s))),
             JsonValue::Array(arr) => {
-                let values: Vec<Value> = arr.into_iter().map(|v| self.json_to_value(v)).collect();
-                Value::Array(Gc::new(GcCell::new(values)))
+                let values = arr
+                    .into_iter()
+                    .map(|value| self.json_to_value(value, depth + 1, state))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(Value::Array(Gc::new(GcCell::new(values))))
             }
             JsonValue::Object(map) => {
                 let mut obj = HashMap::new();
                 for (k, v) in map {
-                    obj.insert(k, self.json_to_value(v));
+                    obj.insert(k, self.json_to_value(v, depth + 1, state)?);
                 }
-                Value::Object(Gc::new(GcCell::new(obj)))
+                Ok(Value::Object(Gc::new(GcCell::new(obj))))
             }
         }
     }
 
     /// Stringify Lira Value to JSON
     pub fn json_stringify(&self, value: &Value) -> String {
-        self.value_to_json(value).to_string()
+        self.stringify_json(value, false)
     }
 
     /// Stringify with pretty printing
     pub fn json_stringify_pretty(&self, value: &Value) -> String {
-        serde_json::to_string_pretty(&self.value_to_json(value)).unwrap_or_default()
+        self.stringify_json(value, true)
     }
 
-    fn value_to_json(&self, value: &Value) -> JsonValue {
+    fn stringify_json(&self, value: &Value, pretty: bool) -> String {
+        let mut state = JsonConvertState {
+            nodes: 0,
+            active: HashSet::new(),
+        };
+        let Ok(json) = self.value_to_json(value, 0, &mut state) else {
+            return "null".to_owned();
+        };
+        let output = if pretty {
+            serde_json::to_string_pretty(&json)
+        } else {
+            serde_json::to_string(&json)
+        };
+        match output {
+            Ok(output) if output.len() <= MAX_JSON_OUTPUT_BYTES => output,
+            _ => "null".to_owned(),
+        }
+    }
+
+    fn value_to_json(
+        &self,
+        value: &Value,
+        depth: usize,
+        state: &mut JsonConvertState,
+    ) -> Result<JsonValue, JsonConvertError> {
+        state.visit(depth)?;
         match value {
-            Value::Null => JsonValue::Null,
-            Value::Bool(b) => JsonValue::Bool(*b),
-            Value::Int(i) => JsonValue::Number((*i).into()),
-            Value::Float(f) => serde_json::Number::from_f64(*f)
+            Value::Null => Ok(JsonValue::Null),
+            Value::Bool(b) => Ok(JsonValue::Bool(*b)),
+            Value::Int(i) => Ok(JsonValue::Number((*i).into())),
+            Value::Float(f) => Ok(serde_json::Number::from_f64(*f)
                 .map(JsonValue::Number)
-                .unwrap_or(JsonValue::Null),
-            Value::String(s) => JsonValue::String((**s).clone()),
+                .unwrap_or(JsonValue::Null)),
+            Value::String(s) => Ok(JsonValue::String((**s).clone())),
             Value::Array(arr) => {
-                let values: Vec<JsonValue> =
-                    arr.borrow().iter().map(|v| self.value_to_json(v)).collect();
-                JsonValue::Array(values)
-            }
-            Value::Object(obj) => {
-                let mut map = Map::new();
-                for (k, v) in obj.borrow().iter() {
-                    map.insert(k.clone(), self.value_to_json(v));
+                let identity = Gc::as_ptr(arr) as usize;
+                if !state.active.insert(identity) {
+                    return Ok(JsonValue::Null);
                 }
-                JsonValue::Object(map)
+                let result = arr
+                    .borrow()
+                    .iter()
+                    .map(|value| self.value_to_json(value, depth + 1, state))
+                    .collect::<Result<Vec<_>, _>>();
+                state.active.remove(&identity);
+                Ok(JsonValue::Array(result?))
             }
-            // Functions, closures, fibers, channels can't be serialized to JSON
-            _ => JsonValue::Null,
+            // JSON has no tuple type; preserve tuple element order as an
+            // array while retaining the tuple representation inside the VM.
+            Value::Tuple(tuple) => {
+                let identity = Gc::as_ptr(tuple) as usize;
+                if !state.active.insert(identity) {
+                    return Ok(JsonValue::Null);
+                }
+                let result = tuple
+                    .borrow()
+                    .elements
+                    .iter()
+                    .map(|value| self.value_to_json(value, depth + 1, state))
+                    .collect::<Result<Vec<_>, _>>();
+                state.active.remove(&identity);
+                Ok(JsonValue::Array(result?))
+            }
+            Value::Object(obj) | Value::Struct(obj) => {
+                let identity = Gc::as_ptr(obj) as usize;
+                if !state.active.insert(identity) {
+                    return Ok(JsonValue::Null);
+                }
+                let mut entries: Vec<_> = obj
+                    .borrow()
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect();
+                entries.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+                let result = entries
+                    .into_iter()
+                    .map(|(key, value)| {
+                        self.value_to_json(&value, depth + 1, state)
+                            .map(|value| (key, value))
+                    })
+                    .collect::<Result<Vec<_>, _>>();
+                state.active.remove(&identity);
+                let mut map = Map::new();
+                for (key, value) in result? {
+                    map.insert(key, value);
+                }
+                Ok(JsonValue::Object(map))
+            }
+            // Interfaces, functions, closures, fibers, and channels can't be
+            // serialized to JSON without exposing opaque runtime state.
+            Value::Interface(_) => Ok(JsonValue::Null),
+            _ => Ok(JsonValue::Null),
         }
     }
 
@@ -1121,6 +1629,10 @@ impl Runtime {
     // HTTP Client Operations
     // ========================================================================
 
+    const HTTP_GLOBAL_TIMEOUT: Duration = Duration::from_secs(30);
+    const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+    const HTTP_MAX_RESPONSE_BODY_BYTES: u64 = 10 * 1024 * 1024;
+
     /// A blocking HTTP agent configured so non-2xx responses come back as `Ok`
     /// (the builtins surface the status code + body to the caller rather than
     /// treating 4xx/5xx as transport errors).
@@ -1128,8 +1640,28 @@ impl Runtime {
         ureq::Agent::new_with_config(
             ureq::Agent::config_builder()
                 .http_status_as_error(false)
+                .timeout_global(Some(Self::HTTP_GLOBAL_TIMEOUT))
+                .timeout_resolve(Some(Self::HTTP_CONNECT_TIMEOUT))
+                .timeout_connect(Some(Self::HTTP_CONNECT_TIMEOUT))
+                .timeout_send_request(Some(Self::HTTP_GLOBAL_TIMEOUT))
+                .timeout_send_body(Some(Self::HTTP_GLOBAL_TIMEOUT))
+                .timeout_recv_response(Some(Self::HTTP_GLOBAL_TIMEOUT))
+                .timeout_recv_body(Some(Self::HTTP_GLOBAL_TIMEOUT))
                 .build(),
         )
+    }
+
+    /// Read a response body with the same bounded, text-oriented behavior as
+    /// the native runtime. Once a response status exists, body failures are
+    /// represented by an empty body by the callers below.
+    fn read_http_body(response: &mut ureq::http::Response<ureq::Body>) -> String {
+        response
+            .body_mut()
+            .with_config()
+            .limit(Self::HTTP_MAX_RESPONSE_BODY_BYTES)
+            .lossy_utf8(true)
+            .read_to_string()
+            .unwrap_or_default()
     }
 
     /// Render response headers as `Name: value` lines.
@@ -1157,7 +1689,7 @@ impl Runtime {
             .map_err(|e| format!("HTTP error: {}", e))?;
         let status = resp.status().as_u16() as i64;
         let headers = Self::format_headers(resp.headers());
-        let body = resp.body_mut().read_to_string().unwrap_or_default();
+        let body = Self::read_http_body(&mut resp);
         Ok((status, headers, body))
     }
 
@@ -1186,7 +1718,7 @@ impl Runtime {
             .map_err(|e| format!("HTTP error: {}", e))?;
         let status = resp.status().as_u16() as i64;
         let headers = Self::format_headers(resp.headers());
-        let resp_body = resp.body_mut().read_to_string().unwrap_or_default();
+        let resp_body = Self::read_http_body(&mut resp);
         Ok((status, headers, resp_body))
     }
 
@@ -1211,7 +1743,14 @@ impl Runtime {
         let mut builder = ureq::http::Request::builder().method(method).uri(url);
         for line in headers_str.lines() {
             if let Some((name, value)) = line.split_once(':') {
-                builder = builder.header(name.trim(), value.trim());
+                let name = name.trim();
+                let value = value.trim();
+                if let (Ok(name), Ok(value)) = (
+                    name.parse::<ureq::http::HeaderName>(),
+                    value.parse::<ureq::http::HeaderValue>(),
+                ) {
+                    builder = builder.header(name, value);
+                }
             }
         }
         let req = builder
@@ -1221,7 +1760,7 @@ impl Runtime {
             .run(req)
             .map_err(|e| format!("HTTP error: {}", e))?;
         let status = resp.status().as_u16() as i64;
-        let resp_body = resp.body_mut().read_to_string().unwrap_or_default();
+        let resp_body = Self::read_http_body(&mut resp);
         Ok((status, resp_body))
     }
 
@@ -1231,64 +1770,105 @@ impl Runtime {
 
     /// Check if pattern matches string
     pub fn regex_match(&self, pattern: &str, text: &str) -> bool {
-        Regex::new(pattern)
-            .map(|re| re.is_match(text))
-            .unwrap_or(false)
+        valid_regex_input(pattern, text)
+            && build_regex(pattern).is_some_and(|regex| regex.is_match(text))
     }
 
     /// Find first match, return matched string or empty
     pub fn regex_find(&self, pattern: &str, text: &str) -> String {
-        Regex::new(pattern)
-            .ok()
-            .and_then(|re| re.find(text))
-            .map(|m| m.as_str().to_string())
+        if !valid_regex_input(pattern, text) {
+            return String::new();
+        }
+        build_regex(pattern)
+            .and_then(|regex| regex.find(text).map(|m| m.as_str().to_owned()))
             .unwrap_or_default()
     }
 
     /// Find all matches, return array of strings
     pub fn regex_find_all(&self, pattern: &str, text: &str) -> Vec<String> {
-        Regex::new(pattern)
-            .map(|re| re.find_iter(text).map(|m| m.as_str().to_string()).collect())
-            .unwrap_or_default()
+        if !valid_regex_input(pattern, text) {
+            return Vec::new();
+        }
+        let Some(regex) = build_regex(pattern) else {
+            return Vec::new();
+        };
+        let count = regex
+            .find_iter(text)
+            .take(MAX_REGEX_RESULT_COUNT + 1)
+            .count();
+        if count > MAX_REGEX_RESULT_COUNT {
+            return Vec::new();
+        }
+        regex
+            .find_iter(text)
+            .map(|m| m.as_str().to_owned())
+            .collect()
     }
 
     /// Replace first occurrence
     pub fn regex_replace(&self, pattern: &str, text: &str, replacement: &str) -> String {
-        Regex::new(pattern)
-            .map(|re| re.replace(text, replacement).to_string())
-            .unwrap_or_else(|_| text.to_string())
+        if !valid_regex_input(pattern, text) || replacement.len() > MAX_REGEX_INPUT_BYTES {
+            return text.to_owned();
+        }
+        build_regex(pattern)
+            .and_then(|regex| bounded_regex_replace(&regex, text, replacement, false))
+            .unwrap_or_else(|| text.to_owned())
     }
 
     /// Replace all occurrences
     pub fn regex_replace_all(&self, pattern: &str, text: &str, replacement: &str) -> String {
-        Regex::new(pattern)
-            .map(|re| re.replace_all(text, replacement).to_string())
-            .unwrap_or_else(|_| text.to_string())
+        if !valid_regex_input(pattern, text) || replacement.len() > MAX_REGEX_INPUT_BYTES {
+            return text.to_owned();
+        }
+        build_regex(pattern)
+            .and_then(|regex| bounded_regex_replace(&regex, text, replacement, true))
+            .unwrap_or_else(|| text.to_owned())
     }
 
     /// Split by pattern
     pub fn regex_split(&self, pattern: &str, text: &str) -> Vec<String> {
-        Regex::new(pattern)
-            .map(|re| re.split(text).map(|s| s.to_string()).collect())
-            .unwrap_or_else(|_| vec![text.to_string()])
+        if !valid_regex_input(pattern, text) {
+            return vec![text.to_owned()];
+        }
+        let Some(regex) = build_regex(pattern) else {
+            return vec![text.to_owned()];
+        };
+        let count = regex.split(text).take(MAX_REGEX_RESULT_COUNT + 1).count();
+        if count > MAX_REGEX_RESULT_COUNT {
+            return vec![text.to_owned()];
+        }
+        regex.split(text).map(str::to_owned).collect()
     }
 
     /// Get capture groups from first match
     pub fn regex_captures(&self, pattern: &str, text: &str) -> Vec<String> {
-        Regex::new(pattern)
-            .ok()
-            .and_then(|re| re.captures(text))
+        if !valid_regex_input(pattern, text) {
+            return Vec::new();
+        }
+        build_regex(pattern)
+            .and_then(|regex| regex.captures(text))
             .map(|caps| {
-                caps.iter()
-                    .filter_map(|m| m.map(|m| m.as_str().to_string()))
-                    .collect()
+                let mut total_bytes = 0usize;
+                let mut values = Vec::new();
+                for capture in caps.iter().flatten() {
+                    let Some(next_bytes) = total_bytes.checked_add(capture.as_str().len()) else {
+                        return Vec::new();
+                    };
+                    if next_bytes > MAX_REGEX_OUTPUT_BYTES || values.len() == MAX_REGEX_RESULT_COUNT
+                    {
+                        return Vec::new();
+                    }
+                    total_bytes = next_bytes;
+                    values.push(capture.as_str().to_owned());
+                }
+                values
             })
             .unwrap_or_default()
     }
 
     /// Check if pattern is valid regex
     pub fn regex_is_valid(&self, pattern: &str) -> bool {
-        Regex::new(pattern).is_ok()
+        build_regex(pattern).is_some()
     }
 
     // ========================================================================
@@ -1319,5 +1899,176 @@ impl Runtime {
 impl Default for Runtime {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod json_tests {
+    use super::*;
+
+    #[test]
+    fn malformed_json_reports_parse_error() {
+        let error = Runtime::new().json_parse("{").unwrap_err();
+        assert!(
+            error.starts_with("JSON parse error:"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn nested_json_round_trips() {
+        let runtime = Runtime::new();
+        let value = runtime
+            .json_parse(r#"{"outer":{"items":[1,true,"ok"]}}"#)
+            .expect("valid JSON");
+        assert_eq!(
+            runtime.json_stringify(&value),
+            r#"{"outer":{"items":[1,true,"ok"]}}"#
+        );
+    }
+
+    #[test]
+    fn resource_preflight_rejects_depth_and_node_boundaries() {
+        let too_deep = format!(
+            "{}0{}",
+            "[".repeat(MAX_JSON_DEPTH + 1),
+            "]".repeat(MAX_JSON_DEPTH + 1)
+        );
+        assert_eq!(
+            check_json_resources(&too_deep),
+            Err(JsonResourceError::Resource)
+        );
+        assert!(matches!(
+            Runtime::new().json_parse(&too_deep),
+            Err(error) if error == JSON_RESOURCE_LIMIT_ERROR
+        ));
+
+        let too_many_nodes = format!(
+            "[{}]",
+            (0..=MAX_JSON_NODES).map(|_| "0,").collect::<String>()
+        );
+        assert_eq!(
+            check_json_resources(&too_many_nodes),
+            Err(JsonResourceError::Resource)
+        );
+    }
+
+    #[test]
+    fn stringify_cycles_unsupported_and_nonfinite_values_as_null() {
+        let runtime = Runtime::new();
+        let array = Gc::new(GcCell::new(Vec::new()));
+        array.borrow_mut().push(Value::Array(array.clone()));
+        assert_eq!(runtime.json_stringify(&Value::Array(array)), "[null]");
+        assert_eq!(runtime.json_stringify(&Value::Function(1)), "null");
+        assert_eq!(runtime.json_stringify(&Value::Float(f64::NAN)), "null");
+    }
+
+    #[test]
+    fn stringify_checks_output_size() {
+        let value = Value::String(Rc::new("x".repeat(MAX_JSON_OUTPUT_BYTES + 1)));
+        assert_eq!(Runtime::new().json_stringify(&value), "null");
+    }
+}
+
+#[cfg(test)]
+mod env_tests {
+    use super::Runtime;
+
+    #[test]
+    fn per_runtime_override_wins_without_mutating_process_environment() {
+        const NAME: &str = "LIRA_VM_ENV_OVERRIDE_TEST_UNIQUE";
+        let process_value = std::env::var(NAME).ok();
+        let mut runtime = Runtime::new();
+        runtime.set_env_override(NAME, "local-value");
+
+        assert_eq!(runtime.env_get(NAME).as_deref(), Some("local-value"));
+        assert_eq!(std::env::var(NAME).ok(), process_value);
+    }
+}
+
+#[cfg(test)]
+mod url_decode_tests {
+    use super::Runtime;
+
+    #[test]
+    fn percent_decoding_preserves_utf8_and_plus_behavior() {
+        let runtime = Runtime::new();
+        assert_eq!(runtime.url_decode("%C3%A9"), "é");
+        assert_eq!(runtime.url_decode("hello+world"), "hello world");
+        assert_eq!(runtime.url_decode("%E2%9C%93+ok"), "✓ ok");
+    }
+
+    #[test]
+    fn invalid_utf8_returns_empty_without_panicking() {
+        let runtime = Runtime::new();
+        assert_eq!(runtime.url_decode("%FF"), "");
+        assert_eq!(runtime.url_decode("%C3%28"), "");
+    }
+
+    #[test]
+    fn malformed_percent_escapes_are_bounded() {
+        let runtime = Runtime::new();
+        assert_eq!(runtime.url_decode("%"), "");
+        assert_eq!(runtime.url_decode("%A"), "");
+        assert_eq!(runtime.url_decode("%GGtail"), "tail");
+    }
+}
+
+#[cfg(test)]
+mod regex_tests {
+    use super::*;
+
+    #[test]
+    fn ordinary_unicode_and_invalid_patterns_keep_existing_behavior() {
+        let runtime = Runtime::new();
+        assert!(runtime.regex_match(r"\p{Greek}+", "γειά"));
+        assert_eq!(runtime.regex_find_all(r"[,;]", "a,b;c"), [",", ";"]);
+        assert_eq!(runtime.regex_split(r"[,;]", "a,b;c"), ["a", "b", "c"]);
+        assert_eq!(runtime.regex_captures(r"(a)(b)?", "a"), ["a", "a"]);
+        assert_eq!(
+            runtime.regex_replace_all(r"(?P<word>[a-z]+)-([0-9]+)", "abc-42", "${word}:$2"),
+            "abc:42"
+        );
+        assert_eq!(
+            runtime.regex_replace_all(r"[0-9]+", "a1b22", "[$0]/$$"),
+            "a[1]/$b[22]/$"
+        );
+        assert!(!runtime.regex_is_valid("["));
+        assert_eq!(runtime.regex_replace_all("[", "abc", "x"), "abc");
+        assert_eq!(runtime.regex_split("[", "abc"), ["abc"]);
+    }
+
+    #[test]
+    fn oversized_pattern_and_input_use_deterministic_fallbacks() {
+        let runtime = Runtime::new();
+        let pattern = "a".repeat(MAX_REGEX_PATTERN_BYTES + 1);
+        let input = "a".repeat(MAX_REGEX_INPUT_BYTES + 1);
+        assert!(!runtime.regex_is_valid(&pattern));
+        assert!(!runtime.regex_match("a", &input));
+        assert_eq!(runtime.regex_find("a", &input), "");
+        assert!(runtime.regex_find_all("a", &input).is_empty());
+        assert_eq!(runtime.regex_replace("a", &input, "x"), input);
+        assert_eq!(runtime.regex_replace_all("a", &input, "x"), input);
+        assert_eq!(runtime.regex_split("a", &input), [input.as_str()]);
+        assert!(runtime.regex_captures("a", &input).is_empty());
+    }
+
+    #[test]
+    fn result_count_and_output_limits_do_not_truncate() {
+        let runtime = Runtime::new();
+        let many = "a".repeat(MAX_REGEX_RESULT_COUNT + 1);
+        assert!(runtime.regex_find_all("a", &many).is_empty());
+        assert_eq!(runtime.regex_split("a", &many), [many.as_str()]);
+
+        let input = "a".repeat(4 * 1024 * 1024);
+        let replacement = "x".repeat(9);
+        assert_eq!(runtime.regex_replace_all("a", &input, &replacement), input);
+    }
+
+    #[test]
+    fn zero_width_matches_remain_bounded_and_preserve_unicode() {
+        let runtime = Runtime::new();
+        assert_eq!(runtime.regex_find_all("^|$", "é"), ["", ""]);
+        assert_eq!(runtime.regex_split("^|$", "é"), ["", "é", ""]);
     }
 }

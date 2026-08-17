@@ -2,6 +2,7 @@
 // @expect: 97
 // @expect: 97
 // @expect: newline test
+// @expect: 10
 
 fn main() {
     // Basic char literal
@@ -18,8 +19,8 @@ fn main() {
     let quote = '\''
     let backslash = '\\'
 
-    print("newline test")
-    print(newline)
+    println("newline test")
+    println(newline)
 }
 
 main()

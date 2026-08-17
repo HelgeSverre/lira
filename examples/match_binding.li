@@ -12,7 +12,7 @@ fn describe(n: int) -> int {
 }
 
 fn main() {
-    print(describe(42))
-    print(describe(100))
-    print(describe(5))
+    println(describe(42))
+    println(describe(100))
+    println(describe(5))
 }

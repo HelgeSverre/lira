@@ -2,6 +2,7 @@
 name = "lirac"
 version = "0.1.0"
 edition = "2021"
+rust-version.workspace = true
 description = "Lira compiler - compiles .li source files to .lic bytecode"
 license = "MIT"
 

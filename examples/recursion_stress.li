@@ -1,5 +1,9 @@
 // Recursion Stress Tests
 // Tests deep recursion and various recursive patterns
+// @expect-contains: 3628800
+// @expect-contains: is_even(7): false
+// @expect-contains: 1024
+// @expect-contains: === All Recursion Tests Passed ===
 
 println("=== Factorial Recursion ===")
 

@@ -17,6 +17,7 @@ interface ExpandableValueProps {
 }
 
 const MAX_ARRAY_PREVIEW = 5;
+const MAX_TUPLE_PREVIEW = 5;
 const MAX_OBJECT_PREVIEW = 3;
 const DEFAULT_MAX_DEPTH = 10;
 
@@ -50,7 +51,7 @@ function formatSimpleValue(value: ValueJson): { text: string; className: string 
  * Check if a value is expandable (has children)
  */
 function isExpandable(value: ValueJson): boolean {
-  return value.type === 'Array' || value.type === 'Object' || value.type === 'Closure';
+  return value.type === 'Array' || value.type === 'Tuple' || value.type === 'Object' || value.type === 'Closure';
 }
 
 /**
@@ -61,6 +62,9 @@ function getPreview(value: ValueJson): string {
     case 'Array':
       if (value.elements.length === 0) return '[]';
       return `Array(${value.elements.length})`;
+    case 'Tuple':
+      if (value.elements.length === 0) return '()';
+      return `Tuple(${value.elements.length})`;
     case 'Object': {
       const keys = Object.keys(value.fields);
       if (keys.length === 0) return '{}';
@@ -127,6 +131,44 @@ export const ExpandableValue = memo(function ExpandableValue({
               <div className="expand-more">
                 <button onClick={() => setShowAll(true)} className="show-more-btn">
                   Show {elements.length - MAX_ARRAY_PREVIEW} more...
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (value.type === 'Tuple') {
+    const elements = value.elements;
+    const displayElements = showAll ? elements : elements.slice(0, MAX_TUPLE_PREVIEW);
+    const hasMore = elements.length > MAX_TUPLE_PREVIEW && !showAll;
+
+    return (
+      <div className="expandable-value expandable-container">
+        <span className="expand-toggle" onClick={toggle}>
+          <span className="expand-icon">{expanded ? '▼' : '▶'}</span>
+          <span className="value-preview value-tuple">
+            {expanded ? `Tuple(${elements.length})` : getPreview(value)}
+          </span>
+        </span>
+        {expanded && (
+          <div className="expand-children">
+            {displayElements.map((element, index) => (
+              <div key={index} className="expand-child">
+                <span className="child-key">{index}:</span>
+                <ExpandableValue
+                  value={element}
+                  depth={depth + 1}
+                  maxDepth={maxDepth}
+                />
+              </div>
+            ))}
+            {hasMore && (
+              <div className="expand-more">
+                <button onClick={() => setShowAll(true)} className="show-more-btn">
+                  Show {elements.length - MAX_TUPLE_PREVIEW} more...
                 </button>
               </div>
             )}
@@ -235,6 +277,13 @@ export function formatValueInline(value: ValueJson): string {
         return `[${value.elements.map(formatValueInline).join(', ')}]`;
       }
       return `[${value.elements.slice(0, 3).map(formatValueInline).join(', ')}, ...]`;
+    case 'Tuple':
+      if (value.elements.length === 0) return '()';
+      if (value.elements.length <= 3) {
+        const elements = value.elements.map(formatValueInline).join(', ');
+        return `(${elements}${value.elements.length === 1 ? ',' : ''})`;
+      }
+      return `(${value.elements.slice(0, 3).map(formatValueInline).join(', ')}, ...)`;
     case 'Object': {
       const keys = Object.keys(value.fields);
       if (keys.length === 0) return '{}';

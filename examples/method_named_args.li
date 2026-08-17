@@ -1,0 +1,40 @@
+// Named and default arguments on method calls bind by declaration name.
+// The bytecode VM and the native backend must agree.
+
+struct Point {
+    x: int
+    y: int
+}
+
+impl Point {
+    // Static method with named/default args.
+    fn make(x: int, y: int = 0) -> Point {
+        return Point { x: x, y: y }
+    }
+
+    // Instance method with named/default args (self dropped first).
+    fn shift(self, dx: int, dy: int = 1, scale: int = 1) -> string {
+        return "(${dx * scale}, ${self.y + dy})"
+    }
+}
+
+fn main() {
+    let p = Point.make(y: 7, x: 3)
+    println("(${p.x}, ${p.y})") // @expect: (3, 7)
+
+    let p2 = Point.make(x: 5) // @expect: (5, 0)
+    println("(${p2.x}, ${p2.y})")
+
+    // Named args out of order on an instance method.
+    let q = Point { x: 1, y: 2 }
+    let out = q.shift(scale: 3, dx: 4)
+    println(out) // @expect: (12, 3)
+
+    // Defaulted trailing and middle parameters filled by name.
+    let out2 = q.shift(dx: 2, dy: 9, scale: 1)
+    println(out2) // @expect: (2, 11)
+
+    // Trailing defaults left out entirely.
+    let out3 = q.shift(dx: 1)
+    println(out3) // @expect: (1, 3)
+}

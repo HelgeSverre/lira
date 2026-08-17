@@ -14,8 +14,8 @@ fn classify(n: int) -> string {
 }
 
 fn main() {
-    print(classify(3))
-    print(classify(7))
-    print(classify(15))
-    print(classify(100))
+    println(classify(3))
+    println(classify(7))
+    println(classify(15))
+    println(classify(100))
 }

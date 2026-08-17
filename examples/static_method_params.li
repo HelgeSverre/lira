@@ -1,6 +1,6 @@
 // Test static methods with parameters
-// @expect: === Task Manager ===
-// @expect: Pending tasks:
+// @expect-contains: === Task Manager ===
+// @expect-contains: Pending tasks:
 // @expect-contains: ○ [P5] Deploy to production
 // @expect-contains: ○ [P2] Write documentation
 // @expect-contains: ○ [P4] Fix critical bug

@@ -171,6 +171,18 @@ pub fn load(bytes: &[u8]) -> Result<Program, String> {
     }
     let code = reader.read_bytes(code_len as usize)?.to_vec();
 
+    // Validate that the entry point actually lies within the code section.
+    // A header that points past the end would otherwise fall through the
+    // interpreter loop and silently report a clean exit, losing any pending
+    // fibers. Rejecting it here keeps malformed bytecode fail-closed before
+    // execution begins.
+    if entry_point >= code.len() {
+        return Err(format!(
+            "Bytecode entry point {entry_point} is out of bounds for a {} byte code section",
+            code.len()
+        ));
+    }
+
     // Debug info section
     let mut debug_info = DebugInfo::new();
     let line_count = reader.read_u32()? as usize;
@@ -247,8 +259,8 @@ mod tests {
     fn test_reject_excessive_constant_count() {
         let mut buf = Vec::new();
         // Header: magic, version, flags, entry_point
-        buf.extend_from_slice(&0x4C494243u32.to_le_bytes()); // BYTECODE_MAGIC
-        buf.extend_from_slice(&1u32.to_le_bytes()); // version
+        buf.extend_from_slice(&BYTECODE_MAGIC.to_le_bytes());
+        buf.extend_from_slice(&BYTECODE_VERSION.to_le_bytes());
         buf.extend_from_slice(&0u32.to_le_bytes()); // flags
         buf.extend_from_slice(&0u32.to_le_bytes()); // entry_point
                                                     // Excessive constant count
@@ -269,8 +281,8 @@ mod tests {
     fn test_reject_excessive_code_length() {
         let mut buf = Vec::new();
         // Header: magic, version, flags, entry_point
-        buf.extend_from_slice(&0x4C494243u32.to_le_bytes()); // BYTECODE_MAGIC
-        buf.extend_from_slice(&1u32.to_le_bytes()); // version
+        buf.extend_from_slice(&BYTECODE_MAGIC.to_le_bytes());
+        buf.extend_from_slice(&BYTECODE_VERSION.to_le_bytes());
         buf.extend_from_slice(&0u32.to_le_bytes()); // flags
         buf.extend_from_slice(&0u32.to_le_bytes()); // entry_point
         buf.extend_from_slice(&0u32.to_le_bytes()); // constant_count = 0
@@ -292,8 +304,8 @@ mod tests {
     fn test_accept_valid_bounds() {
         let mut buf = Vec::new();
         // Header: magic, version, flags, entry_point
-        buf.extend_from_slice(&0x4C494243u32.to_le_bytes()); // BYTECODE_MAGIC
-        buf.extend_from_slice(&1u32.to_le_bytes()); // version
+        buf.extend_from_slice(&BYTECODE_MAGIC.to_le_bytes());
+        buf.extend_from_slice(&BYTECODE_VERSION.to_le_bytes());
         buf.extend_from_slice(&0u32.to_le_bytes()); // flags
         buf.extend_from_slice(&0u32.to_le_bytes()); // entry_point
         buf.extend_from_slice(&1u32.to_le_bytes()); // 1 constant
@@ -313,6 +325,34 @@ mod tests {
                 assert_eq!(prog.code.len(), 4);
             }
             Err(e) => panic!("Valid bytecode should load, got: {}", e),
+        }
+    }
+
+    #[test]
+    fn test_reject_entry_point_past_end_of_code() {
+        // A header whose entry point lies past the end of the code section is
+        // malformed: rejecting it at load time keeps the VM from silently
+        // falling off the end of the interpreter loop and reporting a clean
+        // exit while dropping any pending fibers.
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&BYTECODE_MAGIC.to_le_bytes());
+        buf.extend_from_slice(&BYTECODE_VERSION.to_le_bytes());
+        buf.extend_from_slice(&0u32.to_le_bytes()); // flags
+        buf.extend_from_slice(&8u32.to_le_bytes()); // entry_point PAST 4-byte code
+        buf.extend_from_slice(&0u32.to_le_bytes()); // constant_count = 0
+        buf.extend_from_slice(&0u32.to_le_bytes()); // function_count
+        buf.extend_from_slice(&4u32.to_le_bytes()); // code_len
+        buf.extend_from_slice(&[0xFFu8, 0x00, 0x00, 0x00]); // Halt; Nop; Nop; Nop
+        buf.extend_from_slice(&0u32.to_le_bytes()); // line_count = 0
+        buf.extend_from_slice(&0u32.to_le_bytes()); // filename_len = 0
+
+        match load(&buf) {
+            Ok(_) => panic!("Expected error for entry point past end of code"),
+            Err(err) => assert!(
+                err.contains("entry point") && err.contains("out of bounds"),
+                "Expected an entry-point-out-of-bounds error, got: {}",
+                err
+            ),
         }
     }
 }

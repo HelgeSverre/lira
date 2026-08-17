@@ -42,3 +42,32 @@ fn sub_overflow_wraps() {
     let out = run("var min = 9223372036854775807 + 1\nprintln(min - 1)\n").unwrap();
     assert_eq!(out, vec!["9223372036854775807".to_string()]);
 }
+
+#[test]
+fn modulo_promotes_mixed_int_float_operands() {
+    // `Mod` must accept mixed int/float operands (as the type checker and the
+    // other arithmetic operators already do), promoting to float. It used to
+    // reject them with "Cannot modulo int by float" even though the checker
+    // accepted the same source — a checker/runtime divergence.
+    let out = run("println(10 % 2.5)\n").unwrap();
+    assert_eq!(out, vec!["0".to_string()]);
+    let out = run("println(10.5 % 2)\n").unwrap();
+    assert_eq!(out, vec!["0.5".to_string()]);
+}
+
+#[test]
+fn modulo_results_match_native_for_mixed_operands() {
+    // Guard the full matrix of int/float operand combinations so the VM never
+    // regresses to rejecting a pair the native backend computes.
+    let out =
+        run("println(7 % 2)\nprintln(7.0 % 2.0)\nprintln(7 % 2.0)\nprintln(7.0 % 2)").unwrap();
+    assert_eq!(
+        out,
+        vec![
+            "1".to_string(),
+            "1".to_string(),
+            "1".to_string(),
+            "1".to_string()
+        ]
+    );
+}

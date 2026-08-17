@@ -1,11 +1,12 @@
 // Test spawn expressions for fiber creation
-// Note: Actual fiber execution requires fiber mode in VM
 // @expect: Fiber syntax test
 // @expect: Worker spawned
+// @expect: Worker 1 running
 // @expect: Computation spawned
 
-fn worker(id: int) {
+fn worker(id: int, done: Channel<int>) {
     println("Worker " + id + " running")
+    send(done, id)
 }
 
 fn compute(a: int, b: int) -> int {
@@ -15,9 +16,13 @@ fn compute(a: int, b: int) -> int {
 fn main() {
     println("Fiber syntax test")
 
-    // Spawn a simple function call
-    spawn worker(1)
+    let done: Channel<int> = chan(1)
+
+    // Spawn a simple function call. Main waits on the channel so the
+    // example is deterministic on the bytecode VM and the native backend.
+    spawn worker(1, done)
     println("Worker spawned")
+    let _ = recv(done)
 
     // Spawn a computation
     spawn compute(10, 20)

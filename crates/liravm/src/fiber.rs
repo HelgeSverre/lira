@@ -7,6 +7,10 @@ use crate::value::{ChannelId, FiberId, Value};
 use std::collections::{HashMap, VecDeque};
 use std::sync::mpsc::Sender;
 
+const MAX_CHANNEL_ALLOCATION_BYTES: usize = 16 * 1024 * 1024;
+pub(crate) const MAX_CHANNEL_CAPACITY: usize =
+    MAX_CHANNEL_ALLOCATION_BYTES / std::mem::size_of::<Value>();
+
 /// Events emitted by the scheduler for fiber/channel monitoring
 #[derive(Debug, Clone)]
 pub enum FiberEvent {
@@ -61,9 +65,12 @@ pub enum FiberState {
 ///
 /// When a fiber parks on a `select` (no ready arm), it registers as a waiter on
 /// its channels. A waker (`channel_send`/`channel_receive`/`close_channel`) that
-/// commits a parked select arm records the outcome here so the woken fiber's
-/// re-run of the `Select` opcode commits to that exact arm instead of
-/// re-polling (which would otherwise risk double send/recv).
+/// commits a parked select arm records the communication endpoint here so the
+/// woken fiber's re-run of the `Select` opcode can consume the already-completed
+/// operation instead of re-polling (which would otherwise risk double
+/// send/recv). Ambiguous duplicate offers are deferred until the parked fiber
+/// arbitrates them itself, so this endpoint resolution is exact for the value
+/// and body that ran.
 #[derive(Debug, Clone)]
 pub struct SelectResolution {
     /// The select channel id whose arm was committed.
@@ -71,6 +78,12 @@ pub struct SelectResolution {
     /// For a committed recv arm, the value (and ok flag) received.
     /// `None` for a committed send arm.
     pub recv: Option<(Value, bool)>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SelectOffer {
+    channel_id: ChannelId,
+    is_send: bool,
 }
 
 /// A fiber (green thread)
@@ -94,12 +107,20 @@ pub struct Fiber {
     pub result: Option<Value>,
     /// Resolution recorded by a waker for a parked `select` (consumed on resume).
     pub select_resolution: Option<SelectResolution>,
+    /// Instruction offset that caused a failure, when the scheduler fails a
+    /// parked fiber without the VM's live instruction context.
+    pub failure_ip: Option<usize>,
     /// Channel ids this fiber registered on while parked in a `select`
     /// (every recv channel and every send channel). When a waker commits one
     /// arm, these are used to de-register the fiber from the *other* channels'
     /// `receivers`/`senders` queues so no phantom send/recv or stale reschedule
     /// can occur. Empty when the fiber is not parked on a select.
     pub select_channels: Vec<ChannelId>,
+    /// Exact communication offers registered by this parked select. Keeping
+    /// direction as well as channel id lets two interacting selects defer a
+    /// rendezvous until the parked selector has arbitrated its other arms.
+    select_parked: bool,
+    select_offers: Vec<SelectOffer>,
 }
 
 /// Call frame within a fiber
@@ -122,7 +143,10 @@ impl Fiber {
             fiber_locals: HashMap::new(),
             result: None,
             select_resolution: None,
+            failure_ip: None,
             select_channels: Vec::new(),
+            select_parked: false,
+            select_offers: Vec::new(),
         }
     }
 
@@ -151,15 +175,24 @@ pub struct Channel {
 
 impl Channel {
     /// Create a new channel with the given capacity
-    pub fn new(id: ChannelId, capacity: usize) -> Self {
-        Self {
+    pub fn new(id: ChannelId, capacity: usize) -> Result<Self, String> {
+        if capacity > MAX_CHANNEL_CAPACITY {
+            return Err(format!(
+                "Channel capacity exceeds VM limit of {MAX_CHANNEL_CAPACITY} elements"
+            ));
+        }
+        let mut buffer = VecDeque::new();
+        buffer.try_reserve_exact(capacity).map_err(|_| {
+            format!("Channel allocation failed while reserving {capacity} elements")
+        })?;
+        Ok(Self {
             id,
-            buffer: VecDeque::with_capacity(capacity),
+            buffer,
             capacity,
             receivers: VecDeque::new(),
             senders: VecDeque::new(),
             closed: false,
-        }
+        })
     }
 
     /// Check if the channel can accept a send without blocking
@@ -179,6 +212,12 @@ impl Channel {
     /// Check if the channel has data to receive
     pub fn can_receive(&self) -> bool {
         !self.buffer.is_empty() || !self.senders.is_empty()
+    }
+
+    /// Check whether a receive arm completes immediately. A closed channel is
+    /// ready even when it has no buffered value.
+    pub fn can_select_receive(&self) -> bool {
+        self.can_receive() || self.closed
     }
 }
 
@@ -202,9 +241,20 @@ pub struct Scheduler {
     default_time_slice: usize,
     /// Optional event sender for monitoring
     event_sender: Option<Sender<FiberEvent>>,
+    /// First unhandled fiber failure, in deterministic scheduler order.
+    ///
+    /// Failures are retained until the VM observes them so a child that is
+    /// awakened by a channel close cannot disappear while the root fiber
+    /// continues to run to completion.
+    first_failure: Option<(FiberId, String)>,
 }
 
 impl Scheduler {
+    fn is_parked_select(fiber: &Fiber) -> bool {
+        matches!(fiber.state, FiberState::BlockedSelect)
+            || (matches!(fiber.state, FiberState::Ready) && fiber.select_parked)
+    }
+
     pub fn new() -> Self {
         Self {
             fibers: HashMap::new(),
@@ -216,6 +266,7 @@ impl Scheduler {
             time_slice: 1000,
             default_time_slice: 1000,
             event_sender: None,
+            first_failure: None,
         }
     }
 
@@ -406,15 +457,39 @@ impl Scheduler {
     /// Mark the current fiber as failed
     pub fn fail_current(&mut self, error: String) {
         if let Some(current_id) = self.current {
-            if let Some(fiber) = self.fibers.get_mut(&current_id) {
-                fiber.state = FiberState::Failed(error.clone());
-                self.emit_event(FiberEvent::FiberStateChanged {
-                    fiber_id: current_id,
-                    new_state: format!("Failed({})", error),
-                });
-            }
+            self.fail_fiber(current_id, error);
             self.current = None;
         }
+    }
+
+    /// Mark a fiber failed without changing the currently running fiber.
+    ///
+    /// This is used for blocked senders awakened by channel close. The first
+    /// failure is retained; later failures are still reflected in their fiber
+    /// states but cannot race the causal error that happened first.
+    fn fail_fiber(&mut self, fiber_id: FiberId, error: String) {
+        if let Some(fiber) = self.fibers.get_mut(&fiber_id) {
+            if matches!(fiber.state, FiberState::Finished | FiberState::Failed(_)) {
+                return;
+            }
+            fiber.failure_ip = Some(match fiber.state {
+                FiberState::BlockedSend(_) => fiber.ip.saturating_sub(1),
+                _ => fiber.ip,
+            });
+            fiber.state = FiberState::Failed(error.clone());
+            self.emit_event(FiberEvent::FiberStateChanged {
+                fiber_id,
+                new_state: format!("Failed({})", error),
+            });
+            if self.first_failure.is_none() {
+                self.first_failure = Some((fiber_id, error));
+            }
+        }
+    }
+
+    /// Return the first unhandled fiber failure, if any.
+    pub fn first_failure(&self) -> Option<(FiberId, String)> {
+        self.first_failure.clone()
     }
 
     /// Check if there are any runnable fibers
@@ -453,11 +528,15 @@ impl Scheduler {
     // Channel operations
 
     /// Create a new channel with the given capacity (0 = unbuffered)
-    pub fn create_channel(&mut self, capacity: usize) -> ChannelId {
+    pub fn create_channel(&mut self, capacity: usize) -> Result<ChannelId, String> {
         let id = self.next_channel_id;
-        self.next_channel_id += 1;
+        let next_id = self
+            .next_channel_id
+            .checked_add(1)
+            .ok_or_else(|| "Channel identifier space exhausted".to_string())?;
 
-        let channel = Channel::new(id, capacity);
+        let channel = Channel::new(id, capacity)?;
+        self.next_channel_id = next_id;
         self.channels.insert(id, channel);
 
         // Emit channel created event
@@ -466,7 +545,7 @@ impl Scheduler {
             capacity,
         });
 
-        id
+        Ok(id)
     }
 
     /// Send a value on a channel, returns true if sent immediately, false if blocked
@@ -491,10 +570,10 @@ impl Scheduler {
         let mut woken_selectors: Vec<FiberId> = Vec::new();
         let mut direct_receiver: Option<FiberId> = None;
         while let Some(receiver_id) = channel.receivers.pop_front() {
-            let is_select = matches!(
-                self.fibers.get(&receiver_id).map(|f| &f.state),
-                Some(FiberState::BlockedSelect)
-            );
+            let is_select = self
+                .fibers
+                .get(&receiver_id)
+                .is_some_and(Self::is_parked_select);
             if is_select {
                 woken_selectors.push(receiver_id);
             } else {
@@ -543,14 +622,18 @@ impl Scheduler {
             if let Some(channel) = self.channels.get_mut(&channel_id) {
                 channel.senders.push_back((current_id, value));
             }
+            woken_selectors.sort_unstable();
+            woken_selectors.dedup();
             for receiver_id in woken_selectors {
                 if let Some(receiver) = self.fibers.get_mut(&receiver_id) {
-                    receiver.state = FiberState::Ready;
-                    self.emit_event(FiberEvent::FiberStateChanged {
-                        fiber_id: receiver_id,
-                        new_state: "Ready".to_string(),
-                    });
-                    self.ready_queue.push_back(receiver_id);
+                    if matches!(receiver.state, FiberState::BlockedSelect) {
+                        receiver.state = FiberState::Ready;
+                        self.emit_event(FiberEvent::FiberStateChanged {
+                            fiber_id: receiver_id,
+                            new_state: "Ready".to_string(),
+                        });
+                        self.ready_queue.push_back(receiver_id);
+                    }
                 }
             }
             self.current = None;
@@ -593,19 +676,63 @@ impl Scheduler {
     ) -> Result<Option<(Value, bool)>, String> {
         let current_id = self.current.ok_or("No current fiber")?;
 
-        let channel = self
+        if !self.channels.contains_key(&channel_id) {
+            return Err("Invalid channel".to_string());
+        }
+
+        // Check buffer first.
+        let buffered = self
             .channels
             .get_mut(&channel_id)
-            .ok_or("Invalid channel")?;
-
-        // Check buffer first
-        if let Some(value) = channel.buffer.pop_front() {
+            .and_then(|channel| channel.buffer.pop_front());
+        if let Some(value) = buffered {
             let value_str = format!("{:?}", value);
-            // Wake up a blocked sender if any
-            if let Some((sender_id, sender_value)) = channel.senders.pop_front() {
-                channel.buffer.push_back(sender_value);
+            if let Some(sender_index) = self.first_ordinary_sender(channel_id) {
+                if let Some((sender_id, sender_value)) = self
+                    .channels
+                    .get_mut(&channel_id)
+                    .and_then(|channel| channel.senders.remove(sender_index))
+                {
+                    if let Some(channel) = self.channels.get_mut(&channel_id) {
+                        channel.buffer.push_back(sender_value);
+                    }
+                    if let Some(sender) = self.fibers.get_mut(&sender_id) {
+                        if Self::is_parked_select(sender) {
+                            sender.select_resolution = Some(SelectResolution {
+                                channel_id,
+                                recv: None,
+                            });
+                        }
+                        sender.state = FiberState::Ready;
+                        self.ready_queue.push_back(sender_id);
+                    }
+                }
+            } else if self
+                .channels
+                .get(&channel_id)
+                .is_some_and(|channel| !channel.senders.is_empty())
+            {
+                self.wake_select_senders(channel_id);
+            }
+            self.emit_event(FiberEvent::ChannelMessage {
+                channel_id,
+                operation: "receive".to_string(),
+                value: value_str,
+            });
+            return Ok(Some((value, true)));
+        }
+
+        // Check for a waiting sender (unbuffered handoff). Skip deferred
+        // parked select senders, but consume a later ordinary sender.
+        if let Some(sender_index) = self.first_ordinary_sender(channel_id) {
+            if let Some((sender_id, value)) = self
+                .channels
+                .get_mut(&channel_id)
+                .and_then(|channel| channel.senders.remove(sender_index))
+            {
+                let value_str = format!("{:?}", value);
                 if let Some(sender) = self.fibers.get_mut(&sender_id) {
-                    if matches!(sender.state, FiberState::BlockedSelect) {
+                    if Self::is_parked_select(sender) {
                         sender.select_resolution = Some(SelectResolution {
                             channel_id,
                             recv: None,
@@ -618,45 +745,21 @@ impl Scheduler {
                     });
                     self.ready_queue.push_back(sender_id);
                 }
-            }
-            self.emit_event(FiberEvent::ChannelMessage {
-                channel_id,
-                operation: "receive".to_string(),
-                value: value_str,
-            });
-            return Ok(Some((value, true)));
-        }
-
-        // Check for waiting sender (unbuffered handoff)
-        if let Some((sender_id, value)) = channel.senders.pop_front() {
-            let value_str = format!("{:?}", value);
-            if let Some(sender) = self.fibers.get_mut(&sender_id) {
-                // If the sender is a select-waiter, record that its send arm on
-                // this channel was committed so its `Select` re-run does NOT
-                // send again.
-                if matches!(sender.state, FiberState::BlockedSelect) {
-                    sender.select_resolution = Some(SelectResolution {
-                        channel_id,
-                        recv: None,
-                    });
-                }
-                sender.state = FiberState::Ready;
-                self.emit_event(FiberEvent::FiberStateChanged {
-                    fiber_id: sender_id,
-                    new_state: "Ready".to_string(),
+                self.emit_event(FiberEvent::ChannelMessage {
+                    channel_id,
+                    operation: "receive".to_string(),
+                    value: value_str,
                 });
-                self.ready_queue.push_back(sender_id);
+                return Ok(Some((value, true)));
             }
-            self.emit_event(FiberEvent::ChannelMessage {
-                channel_id,
-                operation: "receive".to_string(),
-                value: value_str,
-            });
-            return Ok(Some((value, true)));
         }
 
         // Channel is empty
-        if channel.closed {
+        if self
+            .channels
+            .get(&channel_id)
+            .is_some_and(|channel| channel.closed)
+        {
             self.emit_event(FiberEvent::ChannelMessage {
                 channel_id,
                 operation: "receive".to_string(),
@@ -675,12 +778,59 @@ impl Scheduler {
         }
 
         // Re-get channel
+        let select_sender_waiting = self
+            .channels
+            .get(&channel_id)
+            .is_some_and(|channel| !channel.senders.is_empty());
         if let Some(channel) = self.channels.get_mut(&channel_id) {
             channel.receivers.push_back(current_id);
         }
 
+        if select_sender_waiting {
+            self.wake_select_senders(channel_id);
+        }
+
         self.current = None;
         Ok(None)
+    }
+
+    /// Wake every select sender currently parked on a channel. The sender
+    /// remains queued so its resumed Select can choose among all arms; this is
+    /// only a readiness notification, not a channel commit.
+    fn wake_select_senders(&mut self, channel_id: ChannelId) {
+        let sender_ids: Vec<FiberId> = self
+            .channels
+            .get(&channel_id)
+            .map(|channel| {
+                channel
+                    .senders
+                    .iter()
+                    .filter_map(|(fiber_id, _)| {
+                        matches!(
+                            self.fibers.get(fiber_id).map(|fiber| &fiber.state),
+                            Some(FiberState::BlockedSelect)
+                        )
+                        .then_some(*fiber_id)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let mut sender_ids = sender_ids;
+        sender_ids.sort_unstable();
+        sender_ids.dedup();
+        for fiber_id in sender_ids {
+            if let Some(sender) = self.fibers.get_mut(&fiber_id) {
+                if matches!(sender.state, FiberState::BlockedSelect) {
+                    sender.state = FiberState::Ready;
+                    self.emit_event(FiberEvent::FiberStateChanged {
+                        fiber_id,
+                        new_state: "Ready".to_string(),
+                    });
+                    self.ready_queue.push_back(fiber_id);
+                }
+            }
+        }
     }
 
     /// Close a channel
@@ -703,32 +853,57 @@ impl Scheduler {
         // Emit channel closed event
         self.emit_event(FiberEvent::ChannelClosed { channel_id });
 
+        // A select can register duplicate arms on one channel. Close wakes a
+        // fiber once even when the channel queue contains duplicate entries.
+        let mut receiver_ids = receiver_ids;
+        receiver_ids.sort_unstable();
+        receiver_ids.dedup();
+
         // Wake all blocked receivers with (null, false). Select-waiters
         // (BlockedSelect) must NOT get the pair pushed onto their stack: they
         // re-run `Select`, and `try_select` reports the closed channel as ready.
         for receiver_id in receiver_ids {
             if let Some(receiver) = self.fibers.get_mut(&receiver_id) {
-                if !matches!(receiver.state, FiberState::BlockedSelect) {
+                let is_select = Self::is_parked_select(receiver);
+                let should_enqueue = !matches!(receiver.state, FiberState::Ready);
+                if !is_select {
                     receiver.stack.push(Value::Null);
                     receiver.stack.push(Value::Bool(false)); // ok = false
                 }
                 receiver.state = FiberState::Ready;
-                self.emit_event(FiberEvent::FiberStateChanged {
-                    fiber_id: receiver_id,
-                    new_state: "Ready".to_string(),
-                });
-                self.ready_queue.push_back(receiver_id);
+                if should_enqueue {
+                    self.emit_event(FiberEvent::FiberStateChanged {
+                        fiber_id: receiver_id,
+                        new_state: "Ready".to_string(),
+                    });
+                    self.ready_queue.push_back(receiver_id);
+                }
             }
         }
 
-        // Wake all blocked senders with error
+        // Ordinary blocked sends fail on close. A parked select sender is
+        // different: its send arm simply becomes unavailable, so wake it to
+        // re-arbitrate any remaining arms instead of failing the fiber.
         for (sender_id, _) in sender_ids {
-            if let Some(sender) = self.fibers.get_mut(&sender_id) {
-                sender.state = FiberState::Failed("send on closed channel".to_string());
-                self.emit_event(FiberEvent::FiberStateChanged {
-                    fiber_id: sender_id,
-                    new_state: "Failed(send on closed channel)".to_string(),
-                });
+            let is_select = matches!(
+                self.fibers.get(&sender_id),
+                Some(fiber)
+                    if fiber.select_channels.contains(&channel_id)
+                        || matches!(fiber.state, FiberState::BlockedSelect)
+            );
+            if is_select {
+                if let Some(sender) = self.fibers.get_mut(&sender_id) {
+                    if sender.state != FiberState::Ready {
+                        sender.state = FiberState::Ready;
+                        self.emit_event(FiberEvent::FiberStateChanged {
+                            fiber_id: sender_id,
+                            new_state: "Ready".to_string(),
+                        });
+                        self.ready_queue.push_back(sender_id);
+                    }
+                }
+            } else {
+                self.fail_fiber(sender_id, "send on closed channel".to_string());
             }
         }
 
@@ -744,34 +919,291 @@ impl Scheduler {
     /// unbuffered sender is woken on handoff.
     pub fn try_select(&mut self, channel_ids: &[ChannelId]) -> Option<(usize, Value, bool)> {
         for (index, &channel_id) in channel_ids.iter().enumerate() {
-            if let Some(channel) = self.channels.get_mut(&channel_id) {
-                // Check buffer
-                if let Some(value) = channel.buffer.pop_front() {
-                    return Some((index, value, true));
+            if let Some((value, ok)) = self.try_select_receive(channel_id) {
+                return Some((index, value, ok));
+            }
+        }
+        None
+    }
+
+    /// Check whether a receive arm is ready without consuming it.
+    pub fn select_receive_ready(&self, channel_id: ChannelId) -> bool {
+        self.select_receive_ready_excluding(channel_id, self.current)
+    }
+
+    fn select_receive_ready_excluding(
+        &self,
+        channel_id: ChannelId,
+        exclude_fiber: Option<FiberId>,
+    ) -> bool {
+        self.channels.get(&channel_id).is_some_and(|channel| {
+            !channel.buffer.is_empty()
+                || channel.closed
+                || channel
+                    .senders
+                    .iter()
+                    .any(|(fiber_id, _)| Some(*fiber_id) != exclude_fiber)
+        })
+    }
+
+    /// Check whether a send arm is ready without consuming or producing a
+    /// channel value. A parked select receiver is a valid rendezvous target.
+    pub fn select_send_ready(&self, channel_id: ChannelId) -> bool {
+        self.select_send_ready_excluding(channel_id, self.current)
+    }
+
+    fn select_send_ready_excluding(
+        &self,
+        channel_id: ChannelId,
+        exclude_fiber: Option<FiberId>,
+    ) -> bool {
+        self.channels.get(&channel_id).is_some_and(|channel| {
+            !channel.closed
+                && if channel.capacity > 0 {
+                    channel.buffer.len() < channel.capacity
+                } else {
+                    channel
+                        .receivers
+                        .iter()
+                        .any(|fiber_id| Some(*fiber_id) != exclude_fiber)
                 }
-                // Check waiting senders (unbuffered handoff).
-                if let Some((sender_id, value)) = channel.senders.pop_front() {
-                    if let Some(sender) = self.fibers.get_mut(&sender_id) {
-                        // A select send-waiter must record that its send arm on
-                        // this channel committed, so its `Select` re-run does not
-                        // send the value again.
-                        if matches!(sender.state, FiberState::BlockedSelect) {
-                            sender.select_resolution = Some(SelectResolution {
-                                channel_id,
-                                recv: None,
-                            });
-                        }
-                        sender.state = FiberState::Ready;
-                        self.ready_queue.push_back(sender_id);
+        })
+    }
+
+    fn parked_offer_has_alternate(
+        &self,
+        fiber_id: FiberId,
+        channel_id: ChannelId,
+        is_send: bool,
+    ) -> bool {
+        let Some(fiber) = self.fibers.get(&fiber_id) else {
+            return false;
+        };
+        fiber.select_parked
+            && fiber.select_offers.iter().any(|offer| {
+                (offer.channel_id != channel_id || offer.is_send != is_send)
+                    && if offer.is_send {
+                        self.select_send_ready_excluding(offer.channel_id, Some(fiber_id))
+                    } else {
+                        self.select_receive_ready_excluding(offer.channel_id, Some(fiber_id))
                     }
-                    return Some((index, value, true));
-                }
-                // A closed channel makes its recv arm immediately ready.
-                if channel.closed {
-                    return Some((index, Value::Null, false));
+            })
+    }
+
+    /// Duplicate arms on the same endpoint still need one queue registration,
+    /// but they remain distinct offers for seeded body/value arbitration.
+    fn parked_offer_is_ambiguous(
+        &self,
+        fiber_id: FiberId,
+        channel_id: ChannelId,
+        is_send: bool,
+    ) -> bool {
+        self.fibers.get(&fiber_id).is_some_and(|fiber| {
+            fiber.select_parked
+                && fiber
+                    .select_offers
+                    .iter()
+                    .filter(|offer| offer.channel_id == channel_id && offer.is_send == is_send)
+                    .count()
+                    > 1
+        })
+    }
+
+    /// Find an ordinary blocked sender, deliberately excluding every parked
+    /// select sender. A normal receive defers parked select offers so the
+    /// selector can arbitrate (and can still consume a later ordinary sender
+    /// queued behind them).
+    fn first_ordinary_sender(&self, channel_id: ChannelId) -> Option<usize> {
+        let channel = self.channels.get(&channel_id)?;
+        channel.senders.iter().position(|(sender_id, _)| {
+            !self
+                .fibers
+                .get(sender_id)
+                .is_some_and(Self::is_parked_select)
+        })
+    }
+
+    fn first_committable_sender(&self, channel_id: ChannelId) -> Option<usize> {
+        let channel = self.channels.get(&channel_id)?;
+        channel.senders.iter().position(|(sender_id, _)| {
+            if !self
+                .fibers
+                .get(sender_id)
+                .is_some_and(Self::is_parked_select)
+            {
+                true
+            } else {
+                !self.parked_offer_has_alternate(*sender_id, channel_id, true)
+                    && !self.parked_offer_is_ambiguous(*sender_id, channel_id, true)
+            }
+        })
+    }
+
+    /// Whether every currently queued sender is a parked select sender that
+    /// has another ready offer. Such a rendezvous must be deferred so that the
+    /// parked selector can arbitrate its own offers first.
+    pub fn select_receive_deferred(&self, channel_id: ChannelId) -> bool {
+        let Some(channel) = self.channels.get(&channel_id) else {
+            return false;
+        };
+        if !channel.buffer.is_empty() || channel.closed || channel.senders.is_empty() {
+            return false;
+        }
+        let external: Vec<FiberId> = channel
+            .senders
+            .iter()
+            .filter_map(|(fiber_id, _)| (Some(*fiber_id) != self.current).then_some(*fiber_id))
+            .collect();
+        if external.is_empty() {
+            return false;
+        }
+        let mut found = false;
+        for &fiber_id in &external {
+            if !self
+                .fibers
+                .get(&fiber_id)
+                .is_some_and(Self::is_parked_select)
+            {
+                return false;
+            }
+            found = true;
+            if !self.parked_offer_has_alternate(fiber_id, channel_id, true)
+                && !self.parked_offer_is_ambiguous(fiber_id, channel_id, true)
+            {
+                return false;
+            }
+        }
+        found
+    }
+
+    /// Whether every currently queued receiver is a parked select receiver
+    /// that has another ready offer and therefore must not be consumed yet.
+    pub fn select_send_deferred(&self, channel_id: ChannelId) -> bool {
+        let Some(channel) = self.channels.get(&channel_id) else {
+            return false;
+        };
+        if channel.capacity > 0 || channel.closed || channel.receivers.is_empty() {
+            return false;
+        }
+        let external: Vec<FiberId> = channel
+            .receivers
+            .iter()
+            .filter_map(|fiber_id| (Some(*fiber_id) != self.current).then_some(*fiber_id))
+            .collect();
+        if external.is_empty() {
+            return false;
+        }
+        let mut found = false;
+        for fiber_id in &external {
+            if !self
+                .fibers
+                .get(fiber_id)
+                .is_some_and(Self::is_parked_select)
+            {
+                return false;
+            }
+            found = true;
+            if !self.parked_offer_has_alternate(*fiber_id, channel_id, false) {
+                return false;
+            }
+        }
+        found
+    }
+
+    /// Wake parked selectors offering the opposite direction on the supplied
+    /// channels. This is a readiness notification only; the queues remain
+    /// untouched until the woken selector commits its chosen arm.
+    pub fn wake_select_counterparts(&mut self, recv_ids: &[ChannelId], send_ids: &[ChannelId]) {
+        let mut wake = Vec::new();
+        for channel_id in recv_ids {
+            if let Some(channel) = self.channels.get(channel_id) {
+                for (fiber_id, _) in &channel.senders {
+                    if matches!(
+                        self.fibers.get(fiber_id).map(|fiber| &fiber.state),
+                        Some(FiberState::BlockedSelect)
+                    ) {
+                        wake.push(*fiber_id);
+                    }
                 }
             }
         }
+        for channel_id in send_ids {
+            if let Some(channel) = self.channels.get(channel_id) {
+                for fiber_id in &channel.receivers {
+                    if matches!(
+                        self.fibers.get(fiber_id).map(|fiber| &fiber.state),
+                        Some(FiberState::BlockedSelect)
+                    ) {
+                        wake.push(*fiber_id);
+                    }
+                }
+            }
+        }
+        wake.sort_unstable();
+        wake.dedup();
+        for fiber_id in wake {
+            if let Some(fiber) = self.fibers.get_mut(&fiber_id) {
+                fiber.state = FiberState::Ready;
+                self.ready_queue.push_back(fiber_id);
+            }
+        }
+    }
+
+    /// Commit a receive on exactly one channel selected by fair arbitration.
+    /// Readiness probing is intentionally separate so probing another arm
+    /// cannot consume this arm's value.
+    pub fn try_select_receive(&mut self, channel_id: ChannelId) -> Option<(Value, bool)> {
+        let buffered = self.channels.get(&channel_id)?.buffer.front().cloned();
+        if let Some(value) = buffered {
+            self.channels.get_mut(&channel_id)?.buffer.pop_front();
+            return Some((value, true));
+        }
+
+        let sender_index = self.first_committable_sender(channel_id);
+        if let Some(sender_index) = sender_index {
+            let (sender_id, value) = self
+                .channels
+                .get_mut(&channel_id)?
+                .senders
+                .remove(sender_index)?;
+            let is_select = self
+                .fibers
+                .get(&sender_id)
+                .is_some_and(Self::is_parked_select);
+            let should_enqueue = self
+                .fibers
+                .get(&sender_id)
+                .is_some_and(|sender| !matches!(sender.state, FiberState::Ready));
+            if is_select {
+                // Record the exact communication before withdrawing every
+                // losing offer. This makes a parked selector atomic: another
+                // operation cannot commit its stale registrations while it is
+                // waiting in the ready queue.
+                if let Some(sender) = self.fibers.get_mut(&sender_id) {
+                    sender.select_resolution = Some(SelectResolution {
+                        channel_id,
+                        recv: None,
+                    });
+                }
+                self.deregister_select_waiter(sender_id);
+            }
+            if let Some(sender) = self.fibers.get_mut(&sender_id) {
+                sender.state = FiberState::Ready;
+                if should_enqueue {
+                    self.ready_queue.push_back(sender_id);
+                }
+            }
+            return Some((value, true));
+        }
+
+        if self
+            .channels
+            .get(&channel_id)
+            .is_some_and(|channel| channel.closed)
+        {
+            return Some((Value::Null, false));
+        }
+
         None
     }
 
@@ -781,22 +1213,42 @@ impl Scheduler {
     /// `false` if the send would block (no receiver, full/unbuffered). Never
     /// parks the current fiber.
     pub fn try_select_send(&mut self, channel_id: ChannelId, value: Value) -> bool {
-        let channel = match self.channels.get_mut(&channel_id) {
-            Some(ch) => ch,
-            None => return false,
-        };
-
-        if channel.closed {
+        if self
+            .channels
+            .get(&channel_id)
+            .is_none_or(|channel| channel.closed)
+        {
             return false;
         }
 
-        // Direct handoff to a waiting receiver.
-        if let Some(receiver_id) = channel.receivers.pop_front() {
+        // Direct handoff to a waiting receiver. A parked select receiver with
+        // another ready arm is skipped until it has re-arbitrated.
+        let receiver_index = self.channels.get(&channel_id).and_then(|channel| {
+            channel.receivers.iter().position(|receiver_id| {
+                !self
+                    .fibers
+                    .get(receiver_id)
+                    .is_some_and(Self::is_parked_select)
+                    || !self.parked_offer_has_alternate(*receiver_id, channel_id, false)
+            })
+        });
+        if let Some(receiver_index) = receiver_index {
+            let receiver_id = match self.channels.get_mut(&channel_id) {
+                Some(channel) => match channel.receivers.remove(receiver_index) {
+                    Some(receiver_id) => receiver_id,
+                    None => return false,
+                },
+                None => return false,
+            };
             let value_str = format!("{:?}", value);
-            let is_select = matches!(
-                self.fibers.get(&receiver_id).map(|f| &f.state),
-                Some(FiberState::BlockedSelect)
-            );
+            let is_select = self
+                .fibers
+                .get(&receiver_id)
+                .is_some_and(Self::is_parked_select);
+            let should_enqueue = self
+                .fibers
+                .get(&receiver_id)
+                .is_some_and(|receiver| !matches!(receiver.state, FiberState::Ready));
             if let Some(receiver) = self.fibers.get_mut(&receiver_id) {
                 if is_select {
                     // A select recv-waiter: record the committed recv arm so its
@@ -809,12 +1261,19 @@ impl Scheduler {
                     receiver.stack.push(value);
                     receiver.stack.push(Value::Bool(true)); // ok = true
                 }
+            }
+            if is_select {
+                self.deregister_select_waiter(receiver_id);
+            }
+            if let Some(receiver) = self.fibers.get_mut(&receiver_id) {
                 receiver.state = FiberState::Ready;
-                self.emit_event(FiberEvent::FiberStateChanged {
-                    fiber_id: receiver_id,
-                    new_state: "Ready".to_string(),
-                });
-                self.ready_queue.push_back(receiver_id);
+                if should_enqueue {
+                    self.emit_event(FiberEvent::FiberStateChanged {
+                        fiber_id: receiver_id,
+                        new_state: "Ready".to_string(),
+                    });
+                    self.ready_queue.push_back(receiver_id);
+                }
             }
             self.emit_event(FiberEvent::ChannelMessage {
                 channel_id,
@@ -825,6 +1284,10 @@ impl Scheduler {
         }
 
         // Buffer if there is room.
+        let channel = match self.channels.get_mut(&channel_id) {
+            Some(channel) => channel,
+            None => return false,
+        };
         if channel.capacity > 0 && channel.buffer.len() < channel.capacity {
             let value_str = format!("{:?}", value);
             channel.buffer.push_back(value);
@@ -855,9 +1318,22 @@ impl Scheduler {
             None => return,
         };
 
+        // A spurious wake can re-enter Select while its old registrations are
+        // still present. Withdraw them before re-registering so each fiber has
+        // at most one queue entry per channel/direction; duplicate arm offers
+        // are retained separately below for fair body/value selection.
+        let has_old_registration = self
+            .fibers
+            .get(&current_id)
+            .is_some_and(|fiber| fiber.select_parked || !fiber.select_channels.is_empty());
+        if has_old_registration {
+            self.deregister_select_waiter(current_id);
+        }
+
         // Record every channel the fiber registers on so the commit paths can
         // de-register it from the losing arms.
         let mut registered: Vec<ChannelId> = Vec::with_capacity(recv_ids.len() + send_specs.len());
+        let mut offers = Vec::with_capacity(recv_ids.len() + send_specs.len());
         if let Some(fiber) = self.fibers.get_mut(&current_id) {
             fiber.state = FiberState::BlockedSelect;
             self.emit_event(FiberEvent::FiberStateChanged {
@@ -868,19 +1344,48 @@ impl Scheduler {
 
         for &channel_id in recv_ids {
             if let Some(channel) = self.channels.get_mut(&channel_id) {
-                channel.receivers.push_back(current_id);
-                registered.push(channel_id);
+                if !channel.receivers.contains(&current_id) {
+                    channel.receivers.push_back(current_id);
+                }
+                if !registered.contains(&channel_id) {
+                    registered.push(channel_id);
+                }
+                offers.push(SelectOffer {
+                    channel_id,
+                    is_send: false,
+                });
             }
         }
         for (channel_id, value) in send_specs {
             if let Some(channel) = self.channels.get_mut(channel_id) {
-                channel.senders.push_back((current_id, value.clone()));
-                registered.push(*channel_id);
+                // A send on a closed channel is not selectable. In
+                // particular, do not register it as a parked sender: closing
+                // the channel must not turn a losing select arm into a fiber
+                // failure.
+                if channel.closed {
+                    continue;
+                }
+                if !channel
+                    .senders
+                    .iter()
+                    .any(|(fiber_id, _)| *fiber_id == current_id)
+                {
+                    channel.senders.push_back((current_id, value.clone()));
+                }
+                if !registered.contains(channel_id) {
+                    registered.push(*channel_id);
+                }
+                offers.push(SelectOffer {
+                    channel_id: *channel_id,
+                    is_send: true,
+                });
             }
         }
 
         if let Some(fiber) = self.fibers.get_mut(&current_id) {
             fiber.select_channels = registered;
+            fiber.select_parked = true;
+            fiber.select_offers = offers;
         }
 
         self.current = None;
@@ -896,16 +1401,50 @@ impl Scheduler {
     /// re-running its `Select` against a corrupted stack). This purges the
     /// fiber from all channels it registered on so only its chosen arm commits.
     pub fn deregister_select_waiter(&mut self, fiber_id: FiberId) {
-        let channels = match self.fibers.get_mut(&fiber_id) {
-            Some(fiber) if !fiber.select_channels.is_empty() => {
-                std::mem::take(&mut fiber.select_channels)
-            }
-            _ => return,
+        let Some(channels) = self.fibers.get_mut(&fiber_id).map(|fiber| {
+            let channels = std::mem::take(&mut fiber.select_channels);
+            fiber.select_parked = false;
+            fiber.select_offers.clear();
+            channels
+        }) else {
+            return;
         };
-        for channel_id in channels {
+        if channels.is_empty() {
+            return;
+        }
+        for &channel_id in &channels {
             if let Some(channel) = self.channels.get_mut(&channel_id) {
                 channel.receivers.retain(|&id| id != fiber_id);
                 channel.senders.retain(|(id, _)| *id != fiber_id);
+            }
+        }
+        self.wake_select_waiters_after_offer_withdrawal(&channels, fiber_id);
+    }
+
+    /// A parked selector withdrawing an offer can make an opposite parked
+    /// selector runnable again. Wake each such selector once; a selector that
+    /// is already Ready has already been queued and must not be duplicated.
+    fn wake_select_waiters_after_offer_withdrawal(
+        &mut self,
+        channels: &[ChannelId],
+        withdrawn_fiber: FiberId,
+    ) {
+        let mut wake = std::collections::HashSet::new();
+        for channel_id in channels {
+            if let Some(channel) = self.channels.get(channel_id) {
+                wake.extend(channel.receivers.iter().copied());
+                wake.extend(channel.senders.iter().map(|(id, _)| *id));
+            }
+        }
+        for fiber_id in wake {
+            if fiber_id == withdrawn_fiber {
+                continue;
+            }
+            if let Some(fiber) = self.fibers.get_mut(&fiber_id) {
+                if matches!(fiber.state, FiberState::BlockedSelect) {
+                    fiber.state = FiberState::Ready;
+                    self.ready_queue.push_back(fiber_id);
+                }
             }
         }
     }
@@ -957,7 +1496,7 @@ mod tests {
         let _fiber = sched.spawn(0);
         sched.schedule();
 
-        let ch = sched.create_channel(2);
+        let ch = sched.create_channel(2).expect("create buffered channel");
 
         // Send should succeed (buffered)
         let result = sched.channel_send(ch, Value::Int(42));
@@ -968,13 +1507,128 @@ mod tests {
     #[test]
     fn test_channel_close() {
         let mut sched = Scheduler::new();
-        let ch = sched.create_channel(1);
+        let ch = sched.create_channel(1).expect("create channel");
 
         let result = sched.close_channel(ch);
         assert!(result.is_ok());
 
         // Channel should be closed
         assert!(sched.channels.get(&ch).unwrap().closed);
+    }
+
+    #[test]
+    fn reparking_select_does_not_duplicate_channel_registrations() {
+        let mut sched = Scheduler::new();
+        let fiber_id = sched.spawn(0);
+        assert_eq!(sched.schedule(), Some(fiber_id));
+        let ch = sched.create_channel(0).expect("create channel");
+        let sends = [(ch, Value::Int(11)), (ch, Value::Int(22))];
+
+        sched.park_select(&[ch], &sends);
+        assert_eq!(sched.channels[&ch].receivers, [fiber_id]);
+        assert_eq!(
+            sched.channels[&ch]
+                .senders
+                .iter()
+                .map(|(id, _)| *id)
+                .collect::<Vec<_>>(),
+            [fiber_id]
+        );
+        assert_eq!(sched.fibers[&fiber_id].select_offers.len(), 3);
+
+        // Simulate a spurious wake before the select has committed. Re-parking
+        // must retain all arm offers but replace, rather than append, queue
+        // registrations.
+        sched.current = Some(fiber_id);
+        sched.fibers.get_mut(&fiber_id).unwrap().state = FiberState::Ready;
+        sched.park_select(&[ch], &sends);
+        assert_eq!(sched.channels[&ch].receivers, [fiber_id]);
+        assert_eq!(
+            sched.channels[&ch]
+                .senders
+                .iter()
+                .map(|(id, _)| *id)
+                .collect::<Vec<_>>(),
+            [fiber_id]
+        );
+        assert_eq!(sched.fibers[&fiber_id].select_channels, [ch]);
+        assert_eq!(sched.fibers[&fiber_id].select_offers.len(), 3);
+    }
+
+    #[test]
+    fn deregister_clears_closed_send_only_select_state() {
+        let mut sched = Scheduler::new();
+        let fiber_id = sched.spawn(0);
+        assert_eq!(sched.schedule(), Some(fiber_id));
+        let ch = sched.create_channel(0).expect("create channel");
+        sched.close_channel(ch).unwrap();
+
+        // park_select records the select state even though closed sends are
+        // intentionally omitted from channel queues.
+        sched.park_select(&[], &[(ch, Value::Int(1))]);
+        assert!(sched.fibers[&fiber_id].select_parked);
+        assert!(sched.fibers[&fiber_id].select_channels.is_empty());
+
+        sched.deregister_select_waiter(fiber_id);
+        assert!(!sched.fibers[&fiber_id].select_parked);
+        assert!(sched.fibers[&fiber_id].select_offers.is_empty());
+    }
+
+    #[test]
+    fn select_resolution_withdraws_losing_receive_offers_atomically() {
+        let mut sched = Scheduler::new();
+        let parked = sched.spawn(0);
+        assert_eq!(sched.schedule(), Some(parked));
+        let a = sched.create_channel(0).expect("create channel a");
+        let b = sched.create_channel(0).expect("create channel b");
+        sched.park_select(&[a, b], &[]);
+
+        let sender = sched.spawn(0);
+        assert_eq!(sched.schedule(), Some(sender));
+        assert!(sched.try_select_send(a, Value::Int(1)));
+        assert!(!sched.try_select_send(b, Value::Int(2)));
+        assert_eq!(sched.channels[&b].receivers, Vec::<FiberId>::new());
+        assert_eq!(
+            sched.ready_queue.iter().filter(|id| **id == parked).count(),
+            1
+        );
+        assert_eq!(
+            sched.fibers[&parked]
+                .select_resolution
+                .as_ref()
+                .map(|resolution| resolution.channel_id),
+            Some(a)
+        );
+    }
+
+    #[test]
+    fn select_resolution_withdraws_losing_send_offers_atomically() {
+        let mut sched = Scheduler::new();
+        let parked = sched.spawn(0);
+        assert_eq!(sched.schedule(), Some(parked));
+        let a = sched.create_channel(0).expect("create channel a");
+        let b = sched.create_channel(0).expect("create channel b");
+        sched.park_select(&[], &[(a, Value::Int(1)), (b, Value::Int(2))]);
+
+        let receiver = sched.spawn(0);
+        assert_eq!(sched.schedule(), Some(receiver));
+        assert!(matches!(
+            sched.try_select_receive(a),
+            Some((Value::Int(1), true))
+        ));
+        assert!(sched.try_select_receive(b).is_none());
+        assert_eq!(sched.channels[&b].senders.len(), 0);
+        assert_eq!(
+            sched.ready_queue.iter().filter(|id| **id == parked).count(),
+            1
+        );
+        assert_eq!(
+            sched.fibers[&parked]
+                .select_resolution
+                .as_ref()
+                .map(|resolution| resolution.channel_id),
+            Some(a)
+        );
     }
 
     #[test]
@@ -1012,7 +1666,7 @@ mod tests {
         // Spawn one that blocks on receive
         let _id2 = sched.spawn(0);
         sched.schedule();
-        let ch = sched.create_channel(1);
+        let ch = sched.create_channel(1).expect("create channel");
         // Simulate blocking: set fiber state directly
         if let Some(fiber) = sched.current_fiber_mut() {
             fiber.state = FiberState::BlockedReceive(ch);

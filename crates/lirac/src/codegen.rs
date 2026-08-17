@@ -6,11 +6,12 @@
 use crate::ast::*;
 use crate::checker::{CheckedProgram, Type};
 use crate::errors::CodegenError;
+use crate::ids::NodeId;
 use crate::sema::SemanticTables;
 use lira_core::bytecode::{Constant, DebugInfo};
 use lira_core::opcode::Opcode;
 use lira_core::{BYTECODE_MAGIC, BYTECODE_VERSION};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Table of syscall-based builtins: (function_name, syscall_number, required_arg_count).
 /// Special builtins (print, chan, send, recv, close, fiber_yield, fiber_id, len, push, pop)
@@ -152,6 +153,8 @@ pub struct CodeGenerator {
     code: Vec<u8>,
     /// Pending function reference patches: (constant_index, function_name)
     pending_func_patches: Vec<(u16, String)>,
+    /// Pending closure target patches: (code offset operand, function name).
+    pending_closure_patches: Vec<(usize, String)>,
     /// Function table
     functions: Vec<FunctionInfo>,
     /// Current function being compiled
@@ -183,11 +186,35 @@ pub struct CodeGenerator {
     class_parents: HashMap<String, Option<String>>,
     /// Captured variables for current closure (name -> capture index)
     captures: Vec<String>,
+    /// Mutable variables declared in the root program scope. They are lowered
+    /// to one-element arrays so closures can retain a live reference while the
+    /// root code continues to assign the variable.
+    global_mutables: HashSet<String>,
+    /// Whether code generation is currently emitting root program statements.
+    /// Lambda bodies temporarily clear this so a local shadowing a global name
+    /// is not mistaken for the global cell.
+    main_scope: bool,
+    /// Names captured by reference by the currently generated lambda. This is
+    /// tracked separately from all root mutable names so a local shadow with
+    /// the same spelling still keeps value-capture semantics.
+    capture_global_mutables: HashSet<String>,
+    /// Root mutable cells captured by free-function/method bodies. Functions
+    /// are emitted as closures at call sites when this list is non-empty so
+    /// their code can access the shared root cell through `LoadCapture`.
+    function_global_captures: HashMap<String, Vec<String>>,
+    /// During the initial function scan, include function identifiers in the
+    /// free-name walk so root-cell captures can be propagated through helper
+    /// functions without treating those identifiers as lambda captures.
+    collecting_function_refs: bool,
     /// Function default parameter values: fn_name -> [(param_index, default_expr)]
     function_defaults: FunctionDefaults,
     /// Function parameter names (in declaration order): fn_name -> [param_name, ...].
     /// Used to reorder named arguments at call sites into positional order.
     function_param_names: HashMap<String, Vec<String>>,
+    /// Source parameters for methods, keyed by their bytecode function name.
+    /// Spawn lowering uses the declarations to stage named/default arguments
+    /// in the parent before creating the child closure.
+    method_params: HashMap<String, Vec<Parameter>>,
     /// Module-level constants: name -> constant pool index
     module_consts: HashMap<String, u16>,
     /// Impl methods for all types: type_name -> {method_name -> mangled_function_name}
@@ -196,6 +223,8 @@ pub struct CodeGenerator {
     /// Used so chained method calls (e.g. `self.sort().reverse()`) can recover the
     /// receiver type of the outer call and dispatch via the typed-impl path.
     impl_method_returns: HashMap<String, HashMap<String, String>>,
+    /// Source aliases normalized before registering impl method keys.
+    type_aliases: HashMap<String, String>,
     /// Semantic tables produced by the type checker (authoritative expression types).
     sema: SemanticTables,
     /// Byte offset of the `Call` opcode byte when the last emitted instruction
@@ -204,6 +233,11 @@ pub struct CodeGenerator {
     /// scanning raw bytes is unsound because operand bytes (constant indices,
     /// jump offsets) can collide with the `Call` opcode value.
     trailing_call: Option<usize>,
+    /// Interface declarations are retained for witness emission and for
+    /// applying the interface's (rather than the implementation's) defaults.
+    interface_methods: HashMap<String, Vec<InterfaceMethodSpec>>,
+    current_return_type: Option<Type>,
+    expected_expression_type: Option<Type>,
 }
 
 /// Key for constant deduplication
@@ -222,6 +256,13 @@ struct FunctionInfo {
     code_offset: usize,
     param_count: u8,
     local_count: u16,
+}
+
+#[derive(Clone)]
+struct InterfaceMethodSpec {
+    name: String,
+    params: Vec<Parameter>,
+    return_type: Option<TypeExpr>,
 }
 
 /// Function parameter defaults: fn_name -> vec of (param_index, default_expr)
@@ -243,6 +284,7 @@ impl CodeGenerator {
             constant_map: HashMap::new(),
             code: Vec::new(),
             pending_func_patches: Vec::new(),
+            pending_closure_patches: Vec::new(),
             functions: Vec::new(),
             current_function: None,
             locals: vec![HashMap::new()],
@@ -256,13 +298,23 @@ impl CodeGenerator {
             current_class_name: None,
             class_parents: HashMap::new(),
             captures: Vec::new(),
+            global_mutables: HashSet::new(),
+            main_scope: false,
+            capture_global_mutables: HashSet::new(),
+            function_global_captures: HashMap::new(),
+            collecting_function_refs: false,
             function_defaults: HashMap::new(),
             function_param_names: HashMap::new(),
+            method_params: HashMap::new(),
             module_consts: HashMap::new(),
             impl_methods: HashMap::new(),
             impl_method_returns: HashMap::new(),
+            type_aliases: HashMap::new(),
             sema: SemanticTables::new(),
             trailing_call: None,
+            interface_methods: HashMap::new(),
+            current_return_type: None,
+            expected_expression_type: None,
         }
     }
 
@@ -285,7 +337,46 @@ impl CodeGenerator {
         // Adopt the checker's semantic tables as the authoritative source of
         // expression types for method dispatch.
         self.sema = program.sema.clone();
+        self.interface_methods.clear();
+        for stmt in &program.program.statements {
+            if let StatementKind::InterfaceDecl { name, methods } = &stmt.kind {
+                self.interface_methods.insert(
+                    name.clone(),
+                    methods
+                        .iter()
+                        .map(|method| InterfaceMethodSpec {
+                            name: method.name.clone(),
+                            params: method.params.clone(),
+                            return_type: method.return_type.clone(),
+                        })
+                        .collect(),
+                );
+            }
+        }
+        self.type_aliases.clear();
+        for stmt in &program.program.statements {
+            if let StatementKind::TypeAlias { name, type_expr } = &stmt.kind {
+                self.type_aliases
+                    .insert(name.clone(), self.type_expr_to_string(type_expr));
+            }
+        }
 
+        // Root-scope mutable bindings have to remain live for closures. Record
+        // them before emitting any code so a lambda can capture the cell even
+        // when its body is generated after the declaration.
+        self.global_mutables.clear();
+        for stmt in &program.program.statements {
+            if let StatementKind::VarDecl {
+                pattern,
+                mutable: true,
+                ..
+            } = &stmt.kind
+            {
+                if let PatternKind::Variable(name) = &pattern.kind {
+                    self.global_mutables.insert(name.clone());
+                }
+            }
+        }
         // First pass: collect functions (but don't generate code yet)
         for stmt in &program.program.statements {
             match &stmt.kind {
@@ -315,6 +406,7 @@ impl CodeGenerator {
                 StatementKind::ImplDecl {
                     type_name, methods, ..
                 } => {
+                    let owner = self.canonical_impl_owner(type_name);
                     // Collect impl methods with mangled names
                     for method in methods {
                         if let StatementKind::FnDecl {
@@ -324,7 +416,9 @@ impl CodeGenerator {
                             ..
                         } = &method.kind
                         {
-                            let mangled_name = format!("{}_{}", type_name, name);
+                            let mangled_name = format!("{}_{}", owner, name);
+                            self.method_params
+                                .insert(mangled_name.clone(), params.clone());
                             self.functions.push(FunctionInfo {
                                 name: mangled_name.clone(),
                                 code_offset: 0,
@@ -333,7 +427,7 @@ impl CodeGenerator {
                             });
                             // Track all impl methods for method call dispatch
                             self.impl_methods
-                                .entry(type_name.clone())
+                                .entry(owner.clone())
                                 .or_default()
                                 .insert(name.clone(), mangled_name);
                             // Track the declared return type so chained method
@@ -341,19 +435,48 @@ impl CodeGenerator {
                             if let Some(ret) = return_type {
                                 let ret_name = self.type_expr_to_string(ret);
                                 self.impl_method_returns
-                                    .entry(type_name.clone())
+                                    .entry(owner.clone())
                                     .or_default()
                                     .insert(name.clone(), ret_name);
                             }
                         }
                     }
                 }
-                StatementKind::ClassDecl { name, parent, .. } => {
+                StatementKind::StructDecl { name, methods, .. } => {
+                    for method in methods {
+                        if let StatementKind::FnDecl {
+                            name: method_name,
+                            params,
+                            ..
+                        } = &method.kind
+                        {
+                            self.method_params
+                                .insert(format!("{}_{}", name, method_name), params.clone());
+                        }
+                    }
+                }
+                StatementKind::ClassDecl {
+                    name,
+                    parent,
+                    methods,
+                    ..
+                } => {
                     // Record the inheritance edge so a class instance can be
                     // given its full (own + inherited) method set at
                     // construction. Method bodies are generated in the second
                     // pass, mirroring `StructDecl`.
                     self.class_parents.insert(name.clone(), parent.clone());
+                    for method in methods {
+                        if let StatementKind::FnDecl {
+                            name: method_name,
+                            params,
+                            ..
+                        } = &method.kind
+                        {
+                            self.method_params
+                                .insert(format!("{}_{}", name, method_name), params.clone());
+                        }
+                    }
                 }
                 StatementKind::ConstDecl {
                     name, initializer, ..
@@ -365,6 +488,70 @@ impl CodeGenerator {
                     }
                 }
                 _ => {}
+            }
+        }
+
+        self.function_global_captures.clear();
+        let mut direct_function_refs: HashMap<String, Vec<String>> = HashMap::new();
+        self.collecting_function_refs = true;
+        for stmt in &program.program.statements {
+            let StatementKind::FnDecl {
+                name, params, body, ..
+            } = &stmt.kind
+            else {
+                continue;
+            };
+            let mut bound: Vec<_> = params.iter().map(|param| param.name.clone()).collect();
+            let mut captures = Vec::new();
+            for body_stmt in &body.statements {
+                self.collect_free_vars_stmt(body_stmt, &mut bound, &mut captures);
+            }
+            let function_refs = captures
+                .iter()
+                .filter(|name| {
+                    self.functions
+                        .iter()
+                        .any(|function| function.name == **name)
+                })
+                .cloned()
+                .collect();
+            captures.retain(|name| self.global_mutables.contains(name));
+            self.function_global_captures.insert(name.clone(), captures);
+            direct_function_refs.insert(name.clone(), function_refs);
+        }
+        self.collecting_function_refs = false;
+
+        // A function may call a helper whose body reads a root mutable. The
+        // caller must capture that cell too, so construct the transitive
+        // capture set before emitting any function bodies.
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for function in &self.functions {
+                let refs = direct_function_refs
+                    .get(&function.name)
+                    .cloned()
+                    .unwrap_or_default();
+                let inherited: Vec<String> = refs
+                    .iter()
+                    .flat_map(|reference| {
+                        self.function_global_captures
+                            .get(reference)
+                            .into_iter()
+                            .flatten()
+                            .cloned()
+                    })
+                    .collect();
+                let captures = self
+                    .function_global_captures
+                    .entry(function.name.clone())
+                    .or_default();
+                for capture in inherited {
+                    if !captures.contains(&capture) {
+                        captures.push(capture);
+                        changed = true;
+                    }
+                }
             }
         }
 
@@ -413,8 +600,17 @@ impl CodeGenerator {
                 }
             }
         }
+        for (operand_offset, func_name) in std::mem::take(&mut self.pending_closure_patches) {
+            if let Some(func) = self.functions.iter().find(|f| f.name == func_name) {
+                if let Ok(offset) = u16::try_from(func.code_offset) {
+                    self.code[operand_offset] = (offset & 0xff) as u8;
+                    self.code[operand_offset + 1] = (offset >> 8) as u8;
+                }
+            }
+        }
 
         // Third pass: generate main code (non-function statements)
+        self.main_scope = true;
         for stmt in &program.program.statements {
             if !matches!(
                 &stmt.kind,
@@ -426,6 +622,7 @@ impl CodeGenerator {
                 self.generate_statement(stmt);
             }
         }
+        self.main_scope = false;
 
         // Auto-invoke main() as the entry point — but only if the top level
         // doesn't already call it. Writing `fn main() { ... }` followed by an
@@ -445,13 +642,7 @@ impl CodeGenerator {
         if !top_level_calls_main {
             if let Some(main_func) = self.functions.iter().find(|f| f.name == "main") {
                 if main_func.param_count == 0 {
-                    let offset = main_func.code_offset;
-                    let idx = self.add_constant_internal(Constant::Function(offset));
-                    if offset == 0 {
-                        self.pending_func_patches.push((idx, "main".to_string()));
-                    }
-                    self.emit_opcode(Opcode::LoadConst);
-                    self.emit_u16(idx);
+                    self.emit_function_reference("main");
                     self.emit_opcode(Opcode::Call);
                     self.emit_u8(0); // No arguments
                     self.emit_opcode(Opcode::Pop); // Discard return value
@@ -576,12 +767,371 @@ impl CodeGenerator {
         self.code.push(opcode as u8);
     }
 
+    /// Mark a language value boundary. The VM instruction is deliberately
+    /// distinct from `Dup`: it recursively copies structs and leaves all
+    /// reference values shared.
+    fn emit_copy_value(&mut self) {
+        self.emit_opcode(Opcode::CopyValue);
+    }
+
+    fn interface_specs(&self, name: &str) -> Option<&[InterfaceMethodSpec]> {
+        self.interface_methods.get(name).map(Vec::as_slice)
+    }
+
+    fn canonical_interface_name(&self, name: &str) -> Option<String> {
+        let mut current = name;
+        for _ in 0..32 {
+            if self.interface_methods.contains_key(current) {
+                return Some(current.to_string());
+            }
+            current = self.type_aliases.get(current)?.as_str();
+        }
+        None
+    }
+
+    fn interface_receiver_type(&self, expr: &Expression) -> Option<String> {
+        match self.sema.expr_types.get(&expr.id) {
+            Some(Type::Interface(name)) => Some(name.clone()),
+            _ => match &expr.kind {
+                ExpressionKind::Identifier(name) => self
+                    .lookup_local_type(name)
+                    .and_then(|type_name| self.canonical_interface_name(type_name)),
+                _ => None,
+            },
+        }
+    }
+
+    /// Emit a witness descriptor after the receiver has been evaluated. The
+    /// descriptor is inline in the instruction stream, keeping the existing
+    /// constant pool and serialized bytecode header unchanged.
+    fn emit_interface_box(&mut self, interface_name: &str, source: &Type) {
+        let interface_name = self
+            .canonical_interface_name(interface_name)
+            .unwrap_or_else(|| interface_name.to_string());
+        let Some(specs) = self
+            .interface_specs(&interface_name)
+            .map(<[InterfaceMethodSpec]>::to_vec)
+        else {
+            self.errors.push(CodegenError::GenericError {
+                message: format!("Unknown interface '{interface_name}'"),
+            });
+            return;
+        };
+        if specs.len() > u8::MAX as usize {
+            self.errors.push(CodegenError::GenericError {
+                message: "Interface has too many methods".to_string(),
+            });
+            return;
+        }
+        self.emit_opcode(Opcode::InterfaceBox);
+        self.emit_u8(u8::from(matches!(source, Type::Struct(_))));
+        self.emit_u8(specs.len() as u8);
+        for spec in specs {
+            let name_idx = self.add_constant(Constant::String(spec.name.clone()));
+            self.emit_u16(name_idx);
+            if matches!(source, Type::Interface(_)) {
+                self.emit_u8(0);
+                continue;
+            }
+            if matches!(source, Type::Any | Type::Unknown) {
+                // The VM resolves this bounded witness against the erased
+                // runtime representation (string/array intrinsic or a
+                // callable object field). Nominal custom primitive methods
+                // remain fail-closed because Any carries no nominal identity.
+                self.emit_u8(3);
+                continue;
+            }
+            let mut emitted = false;
+            let is_aggregate = matches!(source, Type::Struct(_) | Type::Class(_));
+            if !is_aggregate {
+                if let Some(methods) = self.impl_methods_for(&source.display_name()) {
+                    if let Some(mangled) = methods.get(&spec.name) {
+                        if let Some(offset) = self
+                            .functions
+                            .iter()
+                            .find(|function| function.name == *mangled)
+                            .map(|function| function.code_offset)
+                        {
+                            self.emit_u8(1);
+                            self.emit_checked_u16(offset, "interface method code offset");
+                            emitted = true;
+                        }
+                    }
+                }
+            }
+            if !emitted {
+                let intrinsic = match (source, spec.name.as_str()) {
+                    (Type::String, "len") => Some(0),
+                    (Type::Array(_), "len") => Some(1),
+                    (Type::Array(_), "push") => Some(2),
+                    (Type::Array(_), "pop") => Some(3),
+                    _ => None,
+                };
+                if let Some(intrinsic) = intrinsic {
+                    self.emit_u8(2);
+                    self.emit_u8(intrinsic);
+                } else {
+                    self.emit_u8(0);
+                }
+            }
+        }
+    }
+
+    fn emit_interface_is(&mut self, interface_name: &str, source: Option<&Type>) {
+        let interface_name = self
+            .canonical_interface_name(interface_name)
+            .unwrap_or_else(|| interface_name.to_string());
+        let Some(specs) = self
+            .interface_specs(&interface_name)
+            .map(<[InterfaceMethodSpec]>::to_vec)
+        else {
+            self.errors.push(CodegenError::GenericError {
+                message: format!("Unknown interface '{interface_name}'"),
+            });
+            return;
+        };
+        if specs.len() > u8::MAX as usize {
+            self.errors.push(CodegenError::GenericError {
+                message: "Interface has too many methods".to_string(),
+            });
+            return;
+        }
+        self.emit_opcode(Opcode::InterfaceIs);
+        let source_id = match source {
+            Some(ty)
+                if !matches!(ty, Type::Any | Type::Unknown | Type::Interface(_))
+                    && !self
+                        .sema
+                        .interface_implementations
+                        .get(&interface_name)
+                        .is_some_and(|types| types.contains(ty)) =>
+            {
+                254
+            }
+            Some(ty) if !matches!(ty, Type::Any | Type::Unknown | Type::Interface(_)) => {
+                Self::resolved_type_to_id(ty)
+            }
+            _ => u8::MAX,
+        };
+        self.emit_u8(source_id);
+        self.emit_u8(specs.len() as u8);
+        for spec in specs {
+            let name_idx = self.add_constant(Constant::String(spec.name.clone()));
+            self.emit_u16(name_idx);
+            let is_aggregate =
+                source.is_some_and(|ty| matches!(ty, Type::Struct(_) | Type::Class(_)));
+            if source.is_some_and(|ty| matches!(ty, Type::Interface(_))) || is_aggregate {
+                self.emit_u8(0);
+            } else if source.is_none()
+                || source.is_some_and(|ty| matches!(ty, Type::Any | Type::Unknown))
+            {
+                self.emit_u8(3);
+            } else if source.is_some_and(|ty| {
+                self.impl_methods_for(&ty.display_name())
+                    .is_some_and(|methods| methods.contains_key(&spec.name))
+            }) {
+                self.emit_u8(1);
+            } else if source.is_some_and(|ty| {
+                (matches!(ty, Type::String) && spec.name == "len")
+                    || (matches!(ty, Type::Array(_))
+                        && matches!(spec.name.as_str(), "len" | "push" | "pop"))
+            }) {
+                self.emit_u8(2);
+                let intrinsic = match spec.name.as_str() {
+                    "len" if source.is_some_and(|ty| matches!(ty, Type::String)) => 0,
+                    "len" => 1,
+                    "push" => 2,
+                    _ => 3,
+                };
+                self.emit_u8(intrinsic);
+            } else {
+                self.emit_u8(0);
+            }
+        }
+    }
+
+    fn generate_expression_as(&mut self, expr: &Expression, expected: Option<&Type>) {
+        let previous_expected = self.expected_expression_type.take();
+        self.expected_expression_type = expected.cloned();
+        self.generate_expression(expr);
+        self.expected_expression_type = previous_expected;
+        let interface_name = match expected {
+            Some(Type::Interface(name)) => Some(name.clone()),
+            Some(Type::Optional(inner)) => match inner.as_ref() {
+                Type::Interface(name) => Some(name.clone()),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(interface_name) = interface_name {
+            let source = self
+                .sema
+                .expr_types
+                .get(&expr.id)
+                .cloned()
+                .unwrap_or(Type::Unknown);
+            let already_optional_interface = matches!(
+                &source,
+                Type::Optional(inner) if matches!(inner.as_ref(), Type::Interface(_))
+            );
+            if !matches!(source, Type::Null) && !already_optional_interface {
+                let source_for_box = match &source {
+                    Type::Optional(inner) => inner.as_ref(),
+                    _ => &source,
+                };
+                self.emit_interface_box(&interface_name, source_for_box);
+            }
+        }
+    }
+
+    fn binding_type(&self, pattern: &Pattern) -> Option<Type> {
+        self.sema
+            .symbol_refs
+            .get(&pattern.id)
+            .and_then(|symbol| self.sema.symbols.get(symbol))
+            .map(|symbol| symbol.ty.clone())
+    }
+
+    fn const_binding_type(&self, stmt: &Statement) -> Option<Type> {
+        self.sema
+            .symbols
+            .values()
+            .find(|symbol| symbol.decl_node == stmt.id)
+            .map(|symbol| symbol.ty.clone())
+    }
+
+    fn expected_field_type(&self, expr: &Expression, field: &str) -> Option<Type> {
+        let inferred = self.sema.expr_types.get(&expr.id);
+        let owner = match self.expected_expression_type.as_ref().or(inferred) {
+            Some(Type::Struct(name) | Type::Class(name)) => name,
+            _ => return None,
+        };
+        self.sema
+            .type_members
+            .get(owner)
+            .and_then(|members| members.fields.iter().find(|member| member.name == field))
+            .map(|member| member.ty.clone())
+    }
+
+    fn interface_type_expr(&self, type_expr: Option<&TypeExpr>) -> Option<Type> {
+        let Some(TypeExpr {
+            kind: TypeExprKind::Named(name),
+            ..
+        }) = type_expr
+        else {
+            return None;
+        };
+        let mut current = name.as_str();
+        for _ in 0..32 {
+            if self.interface_methods.contains_key(current) {
+                return Some(Type::Interface(current.to_string()));
+            }
+            let alias = self.type_aliases.get(current)?;
+            current = alias;
+        }
+        None
+    }
+
+    /// Recover just enough of a declared type expression to preserve interface
+    /// positions through aggregate/optional/result return boundaries. Other
+    /// slots become `Any`, which is intentionally erased and never causes a
+    /// spurious interface box.
+    fn interface_adapted_type_expr(
+        &self,
+        type_expr: Option<&TypeExpr>,
+        owner_interface: Option<&str>,
+    ) -> Option<Type> {
+        let type_expr = type_expr?;
+        match &type_expr.kind {
+            TypeExprKind::Named(name) if name == "Self" => {
+                owner_interface.map(|owner| Type::Interface(owner.to_string()))
+            }
+            TypeExprKind::Named(name) => self.canonical_interface_name(name).map(Type::Interface),
+            TypeExprKind::Optional(inner) => self
+                .interface_adapted_type_expr(Some(inner), owner_interface)
+                .map(|ty| Type::Optional(Box::new(ty))),
+            TypeExprKind::Array(inner) => self
+                .interface_adapted_type_expr(Some(inner), owner_interface)
+                .map(|ty| Type::Array(Box::new(ty))),
+            TypeExprKind::Tuple(types) => {
+                let mut has_interface = false;
+                let adapted = types
+                    .iter()
+                    .map(|ty| {
+                        let adapted = self.interface_adapted_type_expr(Some(ty), owner_interface);
+                        has_interface |= adapted.is_some();
+                        adapted.unwrap_or(Type::Any)
+                    })
+                    .collect::<Vec<_>>();
+                has_interface.then_some(Type::Tuple(adapted))
+            }
+            TypeExprKind::Result { ok_type, err_type } => {
+                let ok = self.interface_adapted_type_expr(Some(ok_type), owner_interface);
+                let err = self.interface_adapted_type_expr(Some(err_type), owner_interface);
+                (ok.is_some() || err.is_some()).then_some(Type::Result {
+                    ok_type: Box::new(ok.unwrap_or(Type::Any)),
+                    err_type: Box::new(err.unwrap_or(Type::Any)),
+                })
+            }
+            _ => None,
+        }
+    }
+
+    fn generate_call_argument_as(&mut self, expr: &Expression, expected: Option<&Type>) {
+        self.generate_expression_as(expr, expected);
+        self.emit_copy_value();
+    }
+
+    fn interface_method_return_type(
+        &self,
+        interface_name: &str,
+        spec: &InterfaceMethodSpec,
+    ) -> Option<Type> {
+        self.interface_adapted_type_expr(spec.return_type.as_ref(), Some(interface_name))
+    }
+
+    /// Materialize the bytecode ABI value for a source expression of type
+    /// `void`. Effect opcodes consume their operands and do not push a VM
+    /// value themselves, but every lowered expression must leave exactly one
+    /// value so it composes safely inside blocks, matches, and selects.
+    fn emit_void_value(&mut self) {
+        let null_idx = self.add_constant(Constant::Null);
+        self.emit_opcode(Opcode::LoadConst);
+        self.emit_u16(null_idx);
+    }
+
+    /// Generate an object expression for a field lvalue without applying the
+    /// value-boundary copy used by ordinary field reads. This keeps a nested
+    /// mutable path (`outer.inner.field = v`) attached to its owning struct.
+    fn generate_lvalue_object(&mut self, expr: &Expression) {
+        match &expr.kind {
+            ExpressionKind::FieldAccess { object, field } => {
+                self.generate_lvalue_object(object);
+                let idx = self.add_constant(Constant::String(field.clone()));
+                self.emit_opcode(Opcode::GetField);
+                self.emit_u16(idx);
+            }
+            ExpressionKind::Index { object, index } => {
+                self.generate_lvalue_object(object);
+                self.generate_expression(index);
+                self.emit_opcode(Opcode::ArrayGet);
+            }
+            _ => self.generate_expression(expr),
+        }
+    }
+
+    fn generate_call_argument(&mut self, expr: &Expression) {
+        self.generate_expression(expr);
+        self.emit_copy_value();
+    }
+
     fn emit_u8(&mut self, value: u8) {
         self.code.push(value);
     }
 
-    /// Convert a type expression to a runtime type ID
-    /// 0=null, 1=bool, 2=int, 3=float, 4=string, 5=array, 6=object, 7=function
+    /// Convert a type expression to a runtime type ID.
+    /// 0=null, 1=bool, 2=int, 3=float, 4=string, 5=array, 6=object,
+    /// 7=function, 8=tuple, 9=channel.
     fn type_expr_to_id(&self, type_expr: &TypeExpr) -> u8 {
         match &type_expr.kind {
             TypeExprKind::Named(name) => match name.as_str() {
@@ -596,13 +1146,58 @@ impl CodeGenerator {
                 _ => 6, // Default to object for user-defined types
             },
             TypeExprKind::Array(_) => 5,
-            TypeExprKind::Tuple(_) => 5, // Tuples are arrays at runtime
+            TypeExprKind::Tuple(_) => 8,
             TypeExprKind::Function { .. } => 7,
             TypeExprKind::Optional(_) => 6, // Optional is object-like
-            TypeExprKind::Generic { .. } => 6,
+            TypeExprKind::Generic { name, .. } => match name.as_str() {
+                "Array" | "List" => 5,
+                "Channel" => 9,
+                _ => 6,
+            },
             TypeExprKind::Result { .. } => 6, // Result is object-like
             TypeExprKind::Path(_) => 6,       // Paths resolve to object types
             TypeExprKind::Infer => 6,         // Un-annotated: any/object at runtime
+        }
+    }
+
+    /// Convert a checker-resolved type to its coarse VM runtime tag.
+    ///
+    /// The VM intentionally checks only the outer representation.  In
+    /// particular, all integer widths and `char` are represented as `Int`,
+    /// while aliases and nominal aggregates must use the representation of
+    /// their resolved type rather than their source spelling.
+    fn resolved_type_to_id(ty: &Type) -> u8 {
+        match ty {
+            Type::Null => 0,
+            Type::Bool => 1,
+            Type::Int
+            | Type::Int8
+            | Type::Int16
+            | Type::Int32
+            | Type::Int64
+            | Type::UInt8
+            | Type::UInt16
+            | Type::UInt32
+            | Type::UInt64
+            | Type::Char => 2,
+            Type::Float => 3,
+            Type::String => 4,
+            Type::Array(_) => 5,
+            Type::Function { .. } => 7,
+            Type::Tuple(_) => 8,
+            Type::Channel(_) => 9,
+            Type::Map(_, _)
+            | Type::Optional(_)
+            | Type::Result { .. }
+            | Type::Class(_)
+            | Type::Struct(_)
+            | Type::Enum(_)
+            | Type::Interface(_)
+            | Type::Void
+            | Type::TypeVar(_)
+            | Type::Unknown
+            | Type::TypeParam(_)
+            | Type::Any => 6,
         }
     }
 
@@ -689,6 +1284,159 @@ impl CodeGenerator {
         None
     }
 
+    fn is_global_mutable(&self, name: &str) -> bool {
+        self.main_scope && self.locals.len() == 1 && self.global_mutables.contains(name)
+    }
+
+    fn is_global_mutable_slot(&self, name: &str, slot: u16) -> bool {
+        self.main_scope
+            && self.global_mutables.contains(name)
+            && self
+                .locals
+                .first()
+                .and_then(|scope| scope.get(name))
+                .copied()
+                == Some(slot)
+    }
+
+    fn emit_zero_index(&mut self) {
+        let index = self.add_constant(Constant::Int(0));
+        self.emit_opcode(Opcode::LoadConst);
+        self.emit_u16(index);
+    }
+
+    fn emit_global_cell_load(&mut self, slot: u16) {
+        self.emit_opcode(Opcode::LoadLocal);
+        self.emit_u16(slot);
+        self.emit_zero_index();
+        self.emit_opcode(Opcode::ArrayGet);
+    }
+
+    /// Replace the value on top of the stack with a one-element array cell.
+    /// The cell is shared by closures that capture the root mutable binding.
+    fn emit_new_global_cell(&mut self) {
+        let value_slot = self.alloc_temp();
+        self.store_temp(value_slot);
+
+        let count = self.add_constant(Constant::Int(1));
+        self.emit_opcode(Opcode::LoadConst);
+        self.emit_u16(count);
+        self.emit_opcode(Opcode::NewArray);
+        self.emit_opcode(Opcode::Dup);
+        self.emit_zero_index();
+        self.load_temp(value_slot);
+        self.emit_opcode(Opcode::ArraySet);
+    }
+
+    fn emit_global_cell_store(&mut self, slot: u16) {
+        let value_slot = self.alloc_temp();
+        self.store_temp(value_slot);
+        self.emit_opcode(Opcode::LoadLocal);
+        self.emit_u16(slot);
+        self.emit_zero_index();
+        self.load_temp(value_slot);
+        self.emit_opcode(Opcode::ArraySet);
+        self.load_temp(value_slot);
+    }
+
+    /// Store the value on top of the stack into a global cell while preserving
+    /// the values below it. Used by postfix increment/decrement, where the old
+    /// value below the computed new value is the expression result.
+    fn emit_global_cell_store_discard_result(&mut self, slot: u16) {
+        let value_slot = self.alloc_temp();
+        self.store_temp(value_slot);
+        self.emit_opcode(Opcode::LoadLocal);
+        self.emit_u16(slot);
+        self.emit_zero_index();
+        self.load_temp(value_slot);
+        self.emit_opcode(Opcode::ArraySet);
+    }
+
+    fn emit_capture_cell_load(&mut self, name: &str) -> bool {
+        let Some(capture_idx) = self.lookup_capture(name) else {
+            return false;
+        };
+        self.emit_opcode(Opcode::LoadCapture);
+        self.emit_u8(capture_idx);
+        self.emit_zero_index();
+        self.emit_opcode(Opcode::ArrayGet);
+        true
+    }
+
+    fn emit_capture_cell_store(&mut self, name: &str) -> bool {
+        let Some(capture_idx) = self.lookup_capture(name) else {
+            return false;
+        };
+        let value_slot = self.alloc_temp();
+        self.store_temp(value_slot);
+        self.emit_opcode(Opcode::LoadCapture);
+        self.emit_u8(capture_idx);
+        self.emit_zero_index();
+        self.load_temp(value_slot);
+        self.emit_opcode(Opcode::ArraySet);
+        self.load_temp(value_slot);
+        true
+    }
+
+    fn emit_function_reference(&mut self, name: &str) {
+        let Some(func) = self.functions.iter().find(|function| function.name == name) else {
+            self.errors.push(CodegenError::UndefinedVariable {
+                name: name.to_string(),
+            });
+            return;
+        };
+        let offset = func.code_offset;
+        let captures = self
+            .function_global_captures
+            .get(name)
+            .cloned()
+            .unwrap_or_default();
+        if captures.is_empty() {
+            let idx = self.add_constant_internal(Constant::Function(offset));
+            if offset == 0 {
+                self.pending_func_patches.push((idx, name.to_string()));
+            }
+            self.emit_opcode(Opcode::LoadConst);
+            self.emit_u16(idx);
+            return;
+        }
+        if captures.len() > u8::MAX as usize {
+            self.errors.push(CodegenError::GenericError {
+                message: format!(
+                    "Too many function captures: {} (maximum is {})",
+                    captures.len(),
+                    u8::MAX
+                ),
+            });
+            return;
+        }
+
+        for capture in &captures {
+            if let Some(slot) = self.resolve_local(capture) {
+                self.emit_opcode(Opcode::LoadLocal);
+                self.emit_u16(slot);
+            } else if let Some(capture_idx) = self.lookup_capture(capture) {
+                self.emit_opcode(Opcode::LoadCapture);
+                self.emit_u8(capture_idx);
+            } else {
+                self.errors.push(CodegenError::UndefinedVariable {
+                    name: capture.clone(),
+                });
+                let null_idx = self.add_constant(Constant::Null);
+                self.emit_opcode(Opcode::LoadConst);
+                self.emit_u16(null_idx);
+            }
+        }
+        self.emit_opcode(Opcode::MakeClosure);
+        let offset_operand = self.current_offset();
+        self.emit_checked_u16(offset, "function closure code offset");
+        if offset == 0 {
+            self.pending_closure_patches
+                .push((offset_operand, name.to_string()));
+        }
+        self.emit_u8(captures.len() as u8);
+    }
+
     /// Allocate a fresh local slot for a compiler-introduced temporary (e.g.
     /// staging the RHS of a field/element assignment). VM frames grow their
     /// locals on demand, so a temp just extends the high-water mark.
@@ -724,16 +1472,23 @@ impl CodeGenerator {
         callee: &Expression,
         args: &'a [Argument],
     ) -> Vec<Option<&'a Argument>> {
+        let param_names = match &callee.kind {
+            ExpressionKind::Identifier(name) => self.function_param_names.get(name),
+            _ => None,
+        };
+        self.order_call_args_with_names(args, param_names.map(Vec::as_slice))
+    }
+
+    fn order_call_args_with_names<'a>(
+        &self,
+        args: &'a [Argument],
+        param_names: Option<&[String]>,
+    ) -> Vec<Option<&'a Argument>> {
         // Nothing to reorder when there are no named arguments: keep source
         // order and let trailing-default appending handle the rest.
         if !args.iter().any(|a| a.name.is_some()) {
             return args.iter().map(Some).collect();
         }
-
-        let param_names = match &callee.kind {
-            ExpressionKind::Identifier(name) => self.function_param_names.get(name),
-            _ => None,
-        };
 
         let fallback = || args.iter().map(Some).collect::<Vec<_>>();
 
@@ -761,6 +1516,138 @@ impl CodeGenerator {
         }
 
         slots
+    }
+
+    fn method_params_for(&self, type_name: &str, method: &str) -> Option<&[Parameter]> {
+        if let Some(mangled) = self
+            .impl_methods_for(type_name)
+            .and_then(|methods| methods.get(method))
+        {
+            if let Some(params) = self.method_params.get(mangled) {
+                return Some(params);
+            }
+        }
+
+        let mut owner = self.canonical_impl_owner(type_name);
+        for _ in 0..32 {
+            let key = format!("{}_{}", owner, method);
+            if let Some(params) = self.method_params.get(&key) {
+                return Some(params);
+            }
+            let Some(parent) = self.class_parents.get(&owner).cloned().flatten() else {
+                break;
+            };
+            owner = parent;
+        }
+        None
+    }
+
+    fn spawn_method_params(
+        &self,
+        call: &Expression,
+        callee: &Expression,
+        is_static: bool,
+    ) -> Option<Vec<Parameter>> {
+        let ExpressionKind::FieldAccess { object, field } = &callee.kind else {
+            return None;
+        };
+
+        if let Some(interface_name) = self.interface_receiver_type(object) {
+            let params = self
+                .interface_specs(&interface_name)?
+                .iter()
+                .find(|method| method.name == *field)?
+                .params
+                .clone();
+            let skip_receiver = params
+                .first()
+                .is_some_and(|param| matches!(param.name.as_str(), "self" | "this"));
+            return Some(
+                params
+                    .into_iter()
+                    .skip(usize::from(skip_receiver))
+                    .collect(),
+            );
+        }
+
+        let resolved_type = match self.sema.call_resolution.get(&call.id) {
+            Some(
+                crate::sema::CallResolution::Method { type_name, .. }
+                | crate::sema::CallResolution::StaticMethod { type_name, .. },
+            ) => Some(type_name.clone()),
+            _ => self.expr_type_name(object),
+        }?;
+        let params = self.method_params_for(&resolved_type, field)?.to_vec();
+        Some(params.into_iter().skip(usize::from(!is_static)).collect())
+    }
+
+    /// Emit the explicit arguments of a method call in the callee's declared
+    /// parameter order, reordering named arguments and filling defaulted gaps.
+    /// The receiver is not emitted here; the caller pushes it separately.
+    ///
+    /// `declared` is the method's full declared parameter list including the
+    /// implicit receiver slot (when the method has one). `is_static` selects
+    /// whether to drop that receiver slot before matching argument names.
+    /// Returns the number of arguments emitted.
+    fn emit_ordered_method_args(
+        &mut self,
+        args: &[Argument],
+        declared: Option<&[Parameter]>,
+        is_static: bool,
+    ) -> usize {
+        let Some(declared) = declared else {
+            for arg in args {
+                self.generate_call_argument(&arg.value);
+            }
+            return args.len();
+        };
+        // The declared list includes `self` for instance methods; the caller
+        // already pushes the receiver, so the arguments line up against the
+        // explicit slots only.
+        let explicit: &[Parameter] = if is_static {
+            declared
+        } else {
+            declared.get(1..).unwrap_or(&[])
+        };
+        let names: Vec<String> = explicit
+            .iter()
+            .map(|param| param.name.clone())
+            .collect::<Vec<_>>();
+        let ordered_slots = if args.iter().any(|arg| arg.name.is_some()) {
+            self.order_call_args_with_names(args, Some(&names))
+        } else {
+            args.iter().map(Some).collect()
+        };
+        let defaults: Vec<(usize, Expression)> = explicit
+            .iter()
+            .enumerate()
+            .filter_map(|(index, param)| param.default.clone().map(|default| (index, default)))
+            .collect();
+
+        let mut total = 0;
+        for (index, slot) in ordered_slots.iter().enumerate() {
+            match slot {
+                Some(argument) => {
+                    self.generate_call_argument(&argument.value);
+                    total += 1;
+                }
+                None => {
+                    if let Some((_, default)) = defaults.iter().find(|(i, _)| *i == index) {
+                        self.generate_call_argument(default);
+                        total += 1;
+                    }
+                }
+            }
+        }
+        // Trailing defaults beyond the last supplied slot, mirroring the
+        // free-function call path.
+        for (param_index, default_expr) in &defaults {
+            if *param_index >= ordered_slots.len() && *param_index < explicit.len() {
+                self.generate_call_argument(default_expr);
+                total += 1;
+            }
+        }
+        total
     }
 
     fn define_local_type(&mut self, name: &str, type_name: &str) {
@@ -814,6 +1701,46 @@ impl CodeGenerator {
         }
     }
 
+    /// Canonical owner spelling shared by impl declarations and call sites.
+    /// Alias chains are bounded so malformed input cannot make codegen loop.
+    fn canonical_impl_owner(&self, type_name: &str) -> String {
+        fn canonical(generator: &CodeGenerator, name: &str, depth: usize) -> String {
+            if depth >= 32 {
+                return name.to_string();
+            }
+            if let (Some(inner), true) = (name.strip_prefix('['), name.ends_with(']')) {
+                return format!(
+                    "[{}]",
+                    canonical(generator, &inner[..inner.len() - 1], depth + 1)
+                );
+            }
+            if let Some(alias) = generator.type_aliases.get(name) {
+                return canonical(generator, alias, depth + 1);
+            }
+            match name {
+                "byte" => "uint8".to_string(),
+                _ => name.to_string(),
+            }
+        }
+        canonical(self, type_name, 0)
+    }
+
+    fn impl_methods_for(&self, type_name: &str) -> Option<&HashMap<String, String>> {
+        let owner = self.canonical_impl_owner(type_name);
+        self.impl_methods.get(&owner).or_else(|| {
+            if owner.starts_with('[') {
+                self.impl_methods.get("array")
+            } else {
+                None
+            }
+        })
+    }
+
+    fn struct_methods_for(&self, type_name: &str) -> Option<&HashMap<String, usize>> {
+        let owner = self.canonical_impl_owner(type_name);
+        self.struct_methods.get(&owner)
+    }
+
     /// Define local variables for all bindings in a pattern (without initializing)
     fn define_pattern_locals(&mut self, pattern: &Pattern) {
         match &pattern.kind {
@@ -843,7 +1770,9 @@ impl CodeGenerator {
         match &pattern.kind {
             PatternKind::Variable(name) => {
                 // Try to infer type from initializer for method dispatch
-                if let Some(inferred_type) = self.expr_type_name(init) {
+                if let Some(declared_type) = self.binding_type(pattern) {
+                    self.define_local_type(name, &declared_type.display_name());
+                } else if let Some(inferred_type) = self.expr_type_name(init) {
                     self.define_local_type(name, &inferred_type);
                 } else if let ExpressionKind::Call { callee, .. } = &init.kind {
                     if let ExpressionKind::FieldAccess { object, .. } = &callee.kind {
@@ -868,6 +1797,12 @@ impl CodeGenerator {
 
                 // Simple variable binding - store the value
                 let slot = self.define_local(name);
+                if self.is_global_mutable(name) {
+                    self.emit_copy_value();
+                    self.emit_new_global_cell();
+                } else {
+                    self.emit_copy_value();
+                }
                 self.emit_opcode(Opcode::StoreLocal);
                 self.emit_u16(slot);
             }
@@ -922,6 +1857,7 @@ impl CodeGenerator {
         match &pattern.kind {
             PatternKind::Variable(name) => {
                 let slot = self.define_local(name);
+                self.emit_copy_value();
                 self.emit_opcode(Opcode::StoreLocal);
                 self.emit_u16(slot);
             }
@@ -1014,10 +1950,14 @@ impl CodeGenerator {
                 // If not bound locally and not already captured, and exists in enclosing scope
                 if !bound.contains(name)
                     && !free.contains(name)
-                    && self.lookup_local(name).is_some()
+                    && (self.lookup_local(name).is_some()
+                        || self.lookup_capture(name).is_some()
+                        || self.global_mutables.contains(name)
+                        || (self.collecting_function_refs
+                            && self.functions.iter().any(|function| function.name == *name)))
                 => {
-                    free.push(name.clone());
-                }
+                free.push(name.clone());
+            }
             ExpressionKind::Binary { left, right, .. } => {
                 self.collect_free_vars(left, bound, free);
                 self.collect_free_vars(right, bound, free);
@@ -1034,6 +1974,9 @@ impl CodeGenerator {
             ExpressionKind::FieldAccess { object, .. } => {
                 self.collect_free_vars(object, bound, free);
             }
+            ExpressionKind::OptionalAccess { object, .. } => {
+                self.collect_free_vars(object, bound, free);
+            }
             ExpressionKind::Index { object, index } => {
                 self.collect_free_vars(object, bound, free);
                 self.collect_free_vars(index, bound, free);
@@ -1047,9 +1990,26 @@ impl CodeGenerator {
                 self.collect_free_vars(then_expr, bound, free);
                 self.collect_free_vars(else_expr, bound, free);
             }
+            ExpressionKind::Map(entries) => {
+                for (key, value) in entries {
+                    self.collect_free_vars(key, bound, free);
+                    self.collect_free_vars(value, bound, free);
+                }
+            }
+            ExpressionKind::Tuple(elements) => {
+                for element in elements {
+                    self.collect_free_vars(element, bound, free);
+                }
+            }
+            ExpressionKind::StructLiteral { fields, .. } => {
+                for (_, value) in fields {
+                    self.collect_free_vars(value, bound, free);
+                }
+            }
             ExpressionKind::Block(block) => {
+                let mut block_bound = bound.to_vec();
                 for stmt in &block.statements {
-                    self.collect_free_vars_stmt(stmt, bound, free);
+                    self.collect_free_vars_stmt(stmt, &mut block_bound, free);
                 }
             }
             ExpressionKind::Array(elements) => {
@@ -1077,6 +2037,53 @@ impl CodeGenerator {
                     self.collect_free_vars(&arm.body, &arm_bound, free);
                 }
             }
+            ExpressionKind::Range { start, end, .. } => {
+                if let Some(start) = start {
+                    self.collect_free_vars(start, bound, free);
+                }
+                if let Some(end) = end {
+                    self.collect_free_vars(end, bound, free);
+                }
+            }
+            ExpressionKind::Cast { expr, .. } | ExpressionKind::TypeCheck { expr, .. } => {
+                self.collect_free_vars(expr, bound, free);
+            }
+            ExpressionKind::Assign { target, value }
+            | ExpressionKind::CompoundAssign { target, value, .. } => {
+                self.collect_free_vars(target, bound, free);
+                self.collect_free_vars(value, bound, free);
+            }
+            ExpressionKind::Spawn(inner) | ExpressionKind::Try(inner) => {
+                self.collect_free_vars(inner, bound, free);
+            }
+            ExpressionKind::Select(arms) => {
+                for arm in arms {
+                    match &arm.kind {
+                        SelectArmKind::Recv { channel, variable } => {
+                            self.collect_free_vars(channel, bound, free);
+                            let mut arm_bound = bound.to_vec();
+                            if let Some(variable) = variable {
+                                arm_bound.push(variable.clone());
+                            }
+                            self.collect_free_vars(&arm.body, &arm_bound, free);
+                        }
+                        SelectArmKind::Send { channel, value } => {
+                            self.collect_free_vars(channel, bound, free);
+                            self.collect_free_vars(value, bound, free);
+                            self.collect_free_vars(&arm.body, bound, free);
+                        }
+                        SelectArmKind::Default => {
+                            self.collect_free_vars(&arm.body, bound, free);
+                        }
+                    }
+                }
+            }
+            ExpressionKind::MethodCall { receiver, args, .. } => {
+                self.collect_free_vars(receiver, bound, free);
+                for arg in args {
+                    self.collect_free_vars(&arg.value, bound, free);
+                }
+            }
             // Simple expressions with no variable references
             ExpressionKind::IntLiteral(_)
             | ExpressionKind::FloatLiteral(_)
@@ -1089,21 +2096,44 @@ impl CodeGenerator {
         }
     }
 
-    fn collect_free_vars_stmt(&self, stmt: &Statement, bound: &[String], free: &mut Vec<String>) {
+    fn collect_free_vars_stmt(
+        &self,
+        stmt: &Statement,
+        bound: &mut Vec<String>,
+        free: &mut Vec<String>,
+    ) {
         match &stmt.kind {
             StatementKind::Expression(expr) => {
                 self.collect_free_vars(expr, bound, free);
             }
             StatementKind::VarDecl {
+                pattern,
                 initializer: Some(init),
                 ..
             } => {
                 self.collect_free_vars(init, bound, free);
+                // A declaration shadows an enclosing binding from this point
+                // onward in the lexical block.  Keep the initializer's lookup
+                // against the enclosing scope, then add the new bindings.
+                self.collect_pattern_bindings(pattern, bound);
             }
             StatementKind::VarDecl {
-                initializer: None, ..
-            } => {}
+                pattern,
+                initializer: None,
+                ..
+            } => {
+                self.collect_pattern_bindings(pattern, bound);
+            }
+            StatementKind::ConstDecl {
+                name, initializer, ..
+            } => {
+                self.collect_free_vars(initializer, bound, free);
+                bound.push(name.clone());
+            }
             StatementKind::Return(Some(expr)) => {
+                self.collect_free_vars(expr, bound, free);
+            }
+            StatementKind::Break(Some(expr)) => {
                 self.collect_free_vars(expr, bound, free);
             }
             StatementKind::If {
@@ -1112,19 +2142,46 @@ impl CodeGenerator {
                 else_branch,
             } => {
                 self.collect_free_vars(condition, bound, free);
+                let mut then_bound = bound.clone();
                 for s in &then_branch.statements {
-                    self.collect_free_vars_stmt(s, bound, free);
+                    self.collect_free_vars_stmt(s, &mut then_bound, free);
                 }
                 if let Some(eb) = else_branch {
+                    let mut else_bound = bound.clone();
                     for s in &eb.statements {
-                        self.collect_free_vars_stmt(s, bound, free);
+                        self.collect_free_vars_stmt(s, &mut else_bound, free);
                     }
                 }
             }
             StatementKind::While { condition, body } => {
                 self.collect_free_vars(condition, bound, free);
+                let mut body_bound = bound.clone();
                 for s in &body.statements {
-                    self.collect_free_vars_stmt(s, bound, free);
+                    self.collect_free_vars_stmt(s, &mut body_bound, free);
+                }
+            }
+            StatementKind::For {
+                variable,
+                iterable,
+                body,
+            } => {
+                self.collect_free_vars(iterable, bound, free);
+                let mut body_bound = bound.clone();
+                body_bound.push(variable.clone());
+                for s in &body.statements {
+                    self.collect_free_vars_stmt(s, &mut body_bound, free);
+                }
+            }
+            StatementKind::Loop { body } => {
+                let mut body_bound = bound.clone();
+                for s in &body.statements {
+                    self.collect_free_vars_stmt(s, &mut body_bound, free);
+                }
+            }
+            StatementKind::Block(block) => {
+                let mut block_bound = bound.clone();
+                for s in &block.statements {
+                    self.collect_free_vars_stmt(s, &mut block_bound, free);
                 }
             }
             _ => {}
@@ -1136,10 +2193,24 @@ impl CodeGenerator {
             PatternKind::Variable(name) => {
                 bound.push(name.clone());
             }
+            PatternKind::Tuple(patterns) | PatternKind::Or(patterns) => {
+                for pattern in patterns {
+                    self.collect_pattern_bindings(pattern, bound);
+                }
+            }
+            PatternKind::Struct { fields, .. } => {
+                for (_, pattern) in fields {
+                    self.collect_pattern_bindings(pattern, bound);
+                }
+            }
             PatternKind::Constructor { fields, .. } => {
                 for field in fields {
                     self.collect_pattern_bindings(field, bound);
                 }
+            }
+            PatternKind::Binding { name, pattern } => {
+                bound.push(name.clone());
+                self.collect_pattern_bindings(pattern, bound);
             }
             _ => {}
         }
@@ -1173,17 +2244,8 @@ impl CodeGenerator {
                 self.generate_expression(expr);
                 self.emit_opcode(Opcode::Eq);
             }
-            PatternKind::Constructor { name, .. } => {
-                let variant_name = name
-                    .rfind("::")
-                    .map_or(name.as_str(), |pos| &name[pos + 2..]);
-                let variant_field = self.add_constant(Constant::String("__variant".to_string()));
-                self.emit_opcode(Opcode::GetField);
-                self.emit_u16(variant_field);
-                let expected = self.add_constant(Constant::String(variant_name.to_string()));
-                self.emit_opcode(Opcode::LoadConst);
-                self.emit_u16(expected);
-                self.emit_opcode(Opcode::Eq);
+            PatternKind::Constructor { .. } => {
+                self.generate_pattern_check(pattern);
             }
             PatternKind::Tuple(_) => {
                 // Nested tuple: reuse the full tuple check, which leaves a bool.
@@ -1231,7 +2293,7 @@ impl CodeGenerator {
                 self.emit_opcode(Opcode::Eq);
                 false // Needs runtime check
             }
-            PatternKind::Constructor { name, .. } => {
+            PatternKind::Constructor { name, fields } => {
                 // For enum variants, check the __variant field matches
                 // Pattern name is like "Color::Red" or "Option::Some" - extract variant name
                 let variant_name = if let Some(pos) = name.rfind("::") {
@@ -1240,8 +2302,28 @@ impl CodeGenerator {
                     name.as_str()
                 };
 
-                // Check __variant field matches (same for all variants)
-                // Stack has the subject (enum object)
+                // Keep the subject available for payload sub-pattern checks.
+                let subject_slot = self.alloc_temp();
+                self.store_temp(subject_slot);
+
+                // Optional enums use `null` for absence. Reject that path
+                // before reading `__variant`; `GetField` correctly diagnoses
+                // ordinary invalid programs, but a constructor pattern over an
+                // absent optional is a normal non-match. The same short-circuit
+                // prevents payload checks for a different variant from
+                // inspecting an incompatible `__data` shape.
+                let mut failure_patches = Vec::new();
+                self.load_temp(subject_slot);
+                let null = self.add_constant(Constant::Null);
+                self.emit_opcode(Opcode::LoadConst);
+                self.emit_u16(null);
+                self.emit_opcode(Opcode::Eq);
+                self.emit_opcode(Opcode::JumpIfTrue);
+                failure_patches.push(self.current_offset());
+                self.emit_i16(0);
+
+                // Check __variant field matches (same for all variants).
+                self.load_temp(subject_slot);
                 let variant_field = self.add_constant(Constant::String("__variant".to_string()));
                 self.emit_opcode(Opcode::GetField);
                 self.emit_u16(variant_field);
@@ -1251,8 +2333,48 @@ impl CodeGenerator {
                 self.emit_opcode(Opcode::LoadConst);
                 self.emit_u16(expected);
                 self.emit_opcode(Opcode::Eq);
-                // Stack now has bool - needs runtime check
-                // The match code will reload subject for binding if this succeeds
+                self.emit_opcode(Opcode::JumpIfFalse);
+                failure_patches.push(self.current_offset());
+                self.emit_i16(0);
+
+                for (index, field) in fields.iter().enumerate() {
+                    if !Self::pattern_needs_check(field) {
+                        continue;
+                    }
+                    self.load_temp(subject_slot);
+                    let data_field = self.add_constant(Constant::String("__data".to_string()));
+                    self.emit_opcode(Opcode::GetField);
+                    self.emit_u16(data_field);
+                    if fields.len() > 1 {
+                        let index = self.add_constant(Constant::Int(index as i64));
+                        self.emit_opcode(Opcode::LoadConst);
+                        self.emit_u16(index);
+                        self.emit_opcode(Opcode::ArrayGet);
+                    }
+                    self.generate_subpattern_test(field);
+                    self.emit_opcode(Opcode::JumpIfFalse);
+                    failure_patches.push(self.current_offset());
+                    self.emit_i16(0);
+                }
+
+                let matched = self.add_constant(Constant::Bool(true));
+                self.emit_opcode(Opcode::LoadConst);
+                self.emit_u16(matched);
+                self.emit_opcode(Opcode::Jump);
+                let end_patch = self.current_offset();
+                self.emit_i16(0);
+
+                let failure_offset = self.current_offset();
+                for patch in failure_patches {
+                    self.patch_jump(patch, failure_offset);
+                }
+                let missed = self.add_constant(Constant::Bool(false));
+                self.emit_opcode(Opcode::LoadConst);
+                self.emit_u16(missed);
+                self.patch_jump(end_patch, self.current_offset());
+
+                // Stack now has one boolean. The match code reloads the
+                // subject for binding only after it succeeds.
                 false
             }
             PatternKind::Tuple(patterns) => {
@@ -1516,13 +2638,21 @@ impl CodeGenerator {
         }
     }
 
-    /// Bind variables from a pattern to local slots.
-    /// Assumes the subject value is on top of the stack.
-    fn bind_pattern_variables(&mut self, pattern: &Pattern) {
+    /// Bind into predeclared slots when alternatives of an or-pattern converge
+    /// on one arm body. Ordinary patterns pass `None` and allocate their slots
+    /// while binding.
+    fn bind_pattern_variables_to(
+        &mut self,
+        pattern: &Pattern,
+        targets: Option<&HashMap<String, u16>>,
+    ) {
         match &pattern.kind {
             PatternKind::Variable(name) => {
                 // Bind the subject to this variable
-                let slot = self.define_local(name);
+                let slot = targets
+                    .and_then(|targets| targets.get(name).copied())
+                    .unwrap_or_else(|| self.define_local(name));
+                self.emit_copy_value();
                 self.emit_opcode(Opcode::StoreLocal);
                 self.emit_u16(slot);
             }
@@ -1535,12 +2665,19 @@ impl CodeGenerator {
                 self.emit_opcode(Opcode::Pop);
             }
             PatternKind::Binding { name, pattern } => {
-                // Bind to name and also check inner pattern
+                // Keep the original subject for the inner pattern, while the
+                // named whole value crosses the same value-semantic boundary
+                // as an ordinary variable binding. `Dup` alone aliases
+                // mutable structs, which makes `whole @ pattern` observably
+                // different from `let whole = subject`.
                 self.emit_opcode(Opcode::Dup);
-                let slot = self.define_local(name);
+                self.emit_copy_value();
+                let slot = targets
+                    .and_then(|targets| targets.get(name).copied())
+                    .unwrap_or_else(|| self.define_local(name));
                 self.emit_opcode(Opcode::StoreLocal);
                 self.emit_u16(slot);
-                self.bind_pattern_variables(pattern);
+                self.bind_pattern_variables_to(pattern, targets);
             }
             PatternKind::Constructor { fields, .. } => {
                 // For enum variants with data, extract from __data field
@@ -1554,7 +2691,7 @@ impl CodeGenerator {
                     self.emit_opcode(Opcode::GetField);
                     self.emit_u16(data_field);
                     // Bind the field pattern to this value
-                    self.bind_pattern_variables(&fields[0]);
+                    self.bind_pattern_variables_to(&fields[0], targets);
                 } else {
                     // Multiple fields - __data is an array
                     let data_field = self.add_constant(Constant::String("__data".to_string()));
@@ -1567,7 +2704,7 @@ impl CodeGenerator {
                         self.emit_opcode(Opcode::LoadConst);
                         self.emit_u16(idx);
                         self.emit_opcode(Opcode::ArrayGet);
-                        self.bind_pattern_variables(field);
+                        self.bind_pattern_variables_to(field, targets);
                     }
                     // Pop the data array
                     self.emit_opcode(Opcode::Pop);
@@ -1586,7 +2723,7 @@ impl CodeGenerator {
                     // Get element at index
                     self.emit_opcode(Opcode::ArrayGet);
                     // Recursively bind this element's pattern
-                    self.bind_pattern_variables(pat);
+                    self.bind_pattern_variables_to(pat, targets);
                 }
                 // Pop the original tuple
                 self.emit_opcode(Opcode::Pop);
@@ -1598,16 +2735,17 @@ impl CodeGenerator {
                     let field_idx = self.add_constant(Constant::String(field_name.clone()));
                     self.emit_opcode(Opcode::GetField);
                     self.emit_u16(field_idx);
-                    self.bind_pattern_variables(pat);
+                    self.bind_pattern_variables_to(pat, targets);
                 }
                 // Pop the original struct
                 self.emit_opcode(Opcode::Pop);
             }
             PatternKind::Or(patterns) => {
                 // Or-pattern: bind variables from the first arm (the checker
-                // ensures all arms bind the same variables).
+                // ensures all arms bind the same variables). Match lowering
+                // expands ORs before reaching this fallback.
                 if let Some(first) = patterns.first() {
-                    self.bind_pattern_variables(first);
+                    self.bind_pattern_variables_to(first, targets);
                 } else {
                     self.emit_opcode(Opcode::Pop);
                 }
@@ -1633,13 +2771,28 @@ impl CodeGenerator {
             } => {
                 if let Some(init) = initializer {
                     // Generate the initializer value
-                    self.generate_expression(init);
+                    let expected = self.binding_type(pattern);
+                    self.generate_expression_as(init, expected.as_ref());
 
                     // Bind the pattern (handles both simple variables and destructuring)
                     self.generate_pattern_binding(pattern, init);
                 } else {
                     // No initializer - just define the variable slots
-                    self.define_pattern_locals(pattern);
+                    if let PatternKind::Variable(name) = &pattern.kind {
+                        if self.is_global_mutable(name) {
+                            let slot = self.define_local(name);
+                            let null_idx = self.add_constant(Constant::Null);
+                            self.emit_opcode(Opcode::LoadConst);
+                            self.emit_u16(null_idx);
+                            self.emit_new_global_cell();
+                            self.emit_opcode(Opcode::StoreLocal);
+                            self.emit_u16(slot);
+                        } else {
+                            self.define_pattern_locals(pattern);
+                        }
+                    } else {
+                        self.define_pattern_locals(pattern);
+                    }
                 }
             }
 
@@ -1647,13 +2800,21 @@ impl CodeGenerator {
                 name, initializer, ..
             } => {
                 let slot = self.define_local(name);
-                self.generate_expression(initializer);
+                let expected = self.const_binding_type(stmt);
+                if let Some(expected_type) = expected.as_ref() {
+                    self.define_local_type(name, &expected_type.display_name());
+                }
+                self.generate_expression_as(initializer, expected.as_ref());
                 self.emit_opcode(Opcode::StoreLocal);
                 self.emit_u16(slot);
             }
 
             StatementKind::FnDecl {
-                name, params, body, ..
+                name,
+                params,
+                return_type,
+                body,
+                ..
             } => {
                 // Find function index
                 let func_idx = self
@@ -1665,8 +2826,21 @@ impl CodeGenerator {
                 // Save state
                 let prev_locals = std::mem::take(&mut self.locals);
                 let prev_next_local = self.next_local;
+                let prev_captures = std::mem::take(&mut self.captures);
+                let prev_capture_globals = std::mem::take(&mut self.capture_global_mutables);
+                let prev_main_scope = self.main_scope;
+                let prev_return_type = self.current_return_type.take();
                 self.locals = vec![HashMap::new()];
                 self.next_local = 0;
+                self.captures = self
+                    .function_global_captures
+                    .get(name)
+                    .cloned()
+                    .unwrap_or_default();
+                self.capture_global_mutables = self.captures.iter().cloned().collect();
+                self.main_scope = false;
+                self.current_return_type =
+                    self.interface_adapted_type_expr(return_type.as_ref(), None);
 
                 // Record function offset
                 let func_offset = self.current_offset();
@@ -1683,13 +2857,18 @@ impl CodeGenerator {
                 }
 
                 // Generate body
-                self.generate_block(body);
+                let has_tail_return = self.generate_function_body(body);
 
-                // Implicit return if no explicit return
-                self.emit_opcode(Opcode::LoadConst);
-                let null_idx = self.add_constant(Constant::Null);
-                self.emit_u16(null_idx);
-                self.emit_opcode(Opcode::Return);
+                // Effect-only bodies and bodies whose final statement is not a
+                // value expression fall through to the bytecode ABI's null
+                // return.  A value-producing tail already emitted Return (or
+                // TailCall) and must not be popped or returned a second time.
+                if !has_tail_return {
+                    self.emit_opcode(Opcode::LoadConst);
+                    let null_idx = self.add_constant(Constant::Null);
+                    self.emit_u16(null_idx);
+                    self.emit_opcode(Opcode::Return);
+                }
 
                 // Record local count
                 self.functions[func_idx].local_count = self.next_local;
@@ -1697,17 +2876,22 @@ impl CodeGenerator {
                 // Restore state
                 self.locals = prev_locals;
                 self.next_local = prev_next_local;
+                self.captures = prev_captures;
+                self.capture_global_mutables = prev_capture_globals;
+                self.main_scope = prev_main_scope;
+                self.current_return_type = prev_return_type;
             }
 
             StatementKind::Expression(expr) => {
                 self.generate_expression(expr);
-                self.emit_opcode(Opcode::Pop); // Discard result
+                self.emit_opcode(Opcode::Pop); // Discard the expression result
             }
 
             StatementKind::Return(value) => {
                 if let Some(expr) = value {
                     let before = self.code.len();
-                    self.generate_expression(expr);
+                    let expected = self.current_return_type.clone();
+                    self.generate_expression_as(expr, expected.as_ref());
                     // Tail-call optimisation: if the return value lowered to a
                     // call as its final instruction, rewrite that `Call n` into
                     // `TailCall n` and omit the `Return` opcode. `trailing_call`
@@ -1716,13 +2900,16 @@ impl CodeGenerator {
                     // last. Scanning raw bytes is unsound: an operand byte of
                     // the final instruction (e.g. the low byte of a LoadConst
                     // index) can equal the `Call` opcode value.
-                    match self.trailing_call {
+                    let direct_tail_call = match self.trailing_call {
                         Some(off) if off >= before && self.code.len() == off + 2 => {
                             self.code[off] = Opcode::TailCall as u8;
+                            true
                         }
-                        _ => {
-                            self.emit_opcode(Opcode::Return);
-                        }
+                        _ => false,
+                    };
+                    if !direct_tail_call {
+                        self.emit_copy_value();
+                        self.emit_opcode(Opcode::Return);
                     }
                 } else {
                     self.emit_opcode(Opcode::LoadConst);
@@ -1827,11 +3014,159 @@ impl CodeGenerator {
 
                 self.push_scope();
 
+                // Built-in ranges are compiler-private nominal values. Lower
+                // them as counted loops so a stored range does not fall
+                // through to the array opcodes, while a user `struct Range`
+                // remains distinguishable by its checked type.
+                let iterates_range = self
+                    .sema
+                    .expr_types
+                    .get(&iterable.id)
+                    .is_some_and(Type::is_builtin_range);
+                if iterates_range || matches!(&iterable.kind, ExpressionKind::Range { .. }) {
+                    self.generate_range_loop(variable, iterable, body);
+                    self.pop_scope();
+                    self.record_line_info(start_offset, line, column);
+                    return;
+                }
+
+                // Strings iterate over Unicode scalar values, not UTF-8 bytes.
+                // `len(string)` intentionally remains byte-based, so use the
+                // existing `str_char_code` syscall as the loop bound instead
+                // of ArrayLen + ArrayGet (which would otherwise run past the
+                // scalar count for multi-byte strings).
+                let iterates_any =
+                    matches!(self.sema.expr_types.get(&iterable.id), Some(Type::Any));
+                let mut preloaded_iterable_slot = None;
+                let mut dynamic_string_exit_jump = None;
+                let iterates_string =
+                    matches!(self.sema.expr_types.get(&iterable.id), Some(Type::String))
+                        || self.expr_type_name(iterable).as_deref() == Some("string");
+                if iterates_string || iterates_any {
+                    self.generate_expression(iterable);
+                    let string_slot = self.define_local(&format!("__str_{}", self.next_local));
+                    self.emit_opcode(Opcode::StoreLocal);
+                    self.emit_u16(string_slot);
+
+                    // An erased value may be either a string or an array /
+                    // tuple. Keep the value in one local and select the
+                    // Unicode-scalar path only after checking its run-time
+                    // outer type; the fallback is the descriptor-aware
+                    // aggregate path below.
+                    let dynamic_fallback_jump = if iterates_any {
+                        self.emit_opcode(Opcode::LoadLocal);
+                        self.emit_u16(string_slot);
+                        self.emit_opcode(Opcode::TypeIs);
+                        self.emit_u8(4); // string
+                        self.emit_opcode(Opcode::JumpIfFalse);
+                        let jump = self.current_offset();
+                        self.emit_i16(0);
+                        Some(jump)
+                    } else {
+                        None
+                    };
+
+                    let zero_idx = self.add_constant(Constant::Int(0));
+                    self.emit_opcode(Opcode::LoadConst);
+                    self.emit_u16(zero_idx);
+                    let idx_slot = self.define_local(&format!("__str_idx_{}", self.next_local));
+                    self.emit_opcode(Opcode::StoreLocal);
+                    self.emit_u16(idx_slot);
+
+                    let var_slot = self.define_local(variable);
+                    let loop_start = self.current_offset();
+
+                    self.emit_opcode(Opcode::LoadLocal);
+                    self.emit_u16(string_slot);
+                    self.emit_opcode(Opcode::LoadLocal);
+                    self.emit_u16(idx_slot);
+                    self.emit_opcode(Opcode::Syscall);
+                    self.emit_u8(30); // str_char_code(string, scalar_index)
+                    self.emit_opcode(Opcode::StoreLocal);
+                    self.emit_u16(var_slot);
+
+                    self.emit_opcode(Opcode::LoadLocal);
+                    self.emit_u16(var_slot);
+                    self.emit_opcode(Opcode::LoadConst);
+                    self.emit_u16(zero_idx);
+                    self.emit_opcode(Opcode::IGe);
+
+                    self.emit_opcode(Opcode::JumpIfFalse);
+                    let exit_jump = self.current_offset();
+                    self.emit_i16(0);
+
+                    self.loop_stack.push(LoopContext {
+                        start_offset: loop_start,
+                        continue_target: None,
+                        break_patches: Vec::new(),
+                        continue_patches: Vec::new(),
+                    });
+                    self.generate_block(body);
+
+                    let increment_start = self.current_offset();
+                    let continue_patches: Vec<usize> = self
+                        .loop_stack
+                        .last()
+                        .map(|ctx| ctx.continue_patches.clone())
+                        .unwrap_or_default();
+                    for cont_offset in continue_patches {
+                        self.patch_jump(cont_offset, increment_start);
+                    }
+
+                    self.emit_opcode(Opcode::LoadLocal);
+                    self.emit_u16(idx_slot);
+                    let one_idx = self.add_constant(Constant::Int(1));
+                    self.emit_opcode(Opcode::LoadConst);
+                    self.emit_u16(one_idx);
+                    self.emit_opcode(Opcode::IAdd);
+                    self.emit_opcode(Opcode::StoreLocal);
+                    self.emit_u16(idx_slot);
+
+                    self.emit_opcode(Opcode::Jump);
+                    let delta = (loop_start as i16) - (self.current_offset() as i16) - 2;
+                    self.emit_i16(delta);
+
+                    let string_exit_target = self.current_offset();
+                    self.patch_jump(exit_jump, string_exit_target);
+                    let loop_ctx = self
+                        .loop_stack
+                        .pop()
+                        .expect("string loop stack should have context");
+                    dynamic_string_exit_jump = if iterates_any {
+                        self.emit_opcode(Opcode::Jump);
+                        let jump = self.current_offset();
+                        self.emit_i16(0);
+                        Some(jump)
+                    } else {
+                        None
+                    };
+                    for break_offset in loop_ctx.break_patches {
+                        self.patch_jump(break_offset, string_exit_target);
+                    }
+                    if let Some(jump) = dynamic_fallback_jump {
+                        self.patch_jump(jump, self.current_offset());
+                        preloaded_iterable_slot = Some(string_slot);
+                        // The string sentinel and string-path breaks both
+                        // leave the complete `for` statement, skipping the
+                        // aggregate fallback emitted below.
+                    } else {
+                        self.pop_scope();
+                        self.record_line_info(start_offset, line, column);
+                        return;
+                    }
+                }
+
                 // Evaluate iterable and store in hidden local __arr
-                self.generate_expression(iterable);
-                let arr_slot = self.define_local(&format!("__arr_{}", self.next_local));
-                self.emit_opcode(Opcode::StoreLocal);
-                self.emit_u16(arr_slot);
+                let arr_slot = match preloaded_iterable_slot {
+                    Some(slot) => slot,
+                    None => {
+                        self.generate_expression(iterable);
+                        let slot = self.define_local(&format!("__arr_{}", self.next_local));
+                        self.emit_opcode(Opcode::StoreLocal);
+                        self.emit_u16(slot);
+                        slot
+                    }
+                };
 
                 // Initialize index to 0
                 let zero_idx = self.add_constant(Constant::Int(0));
@@ -1867,6 +3202,7 @@ impl CodeGenerator {
                 self.emit_opcode(Opcode::LoadLocal);
                 self.emit_u16(idx_slot);
                 self.emit_opcode(Opcode::ArrayGet);
+                self.emit_copy_value();
 
                 // Store in loop variable
                 let var_slot = self.define_local(variable);
@@ -1920,6 +3256,9 @@ impl CodeGenerator {
                 for break_offset in loop_ctx.break_patches {
                     self.patch_jump(break_offset, self.current_offset());
                 }
+                if let Some(exit_jump) = dynamic_string_exit_jump {
+                    self.patch_jump(exit_jump, self.current_offset());
+                }
 
                 self.pop_scope();
             }
@@ -1952,7 +3291,15 @@ impl CodeGenerator {
                 }
             }
 
-            StatementKind::Break(_) => {
+            StatementKind::Break(value) => {
+                // Loops are statement-valued: evaluate a break expression for
+                // its side effects, then discard any value before jumping out.
+                if let Some(value) = value {
+                    self.generate_expression(value);
+                    if !matches!(self.sema.expr_types.get(&value.id), Some(Type::Void)) {
+                        self.emit_opcode(Opcode::Pop);
+                    }
+                }
                 self.emit_opcode(Opcode::Jump);
                 let break_offset = self.current_offset();
                 self.emit_i16(0);
@@ -1994,6 +3341,7 @@ impl CodeGenerator {
                     if let StatementKind::FnDecl {
                         name: method_name,
                         params,
+                        return_type,
                         body,
                         ..
                     } = &method.kind
@@ -2020,9 +3368,12 @@ impl CodeGenerator {
 
                         // Push scope for method body
                         let prev_locals = std::mem::take(&mut self.locals);
+                        let prev_return_type = self.current_return_type.take();
                         let prev_next_local = self.next_local;
                         self.locals = vec![HashMap::new()];
                         self.next_local = 0;
+                        self.current_return_type =
+                            self.interface_adapted_type_expr(return_type.as_ref(), Some(name));
 
                         // Add parameters as locals (self is first parameter)
                         for param in params {
@@ -2030,34 +3381,39 @@ impl CodeGenerator {
                         }
 
                         // Generate method body
-                        self.generate_block(body);
+                        let has_tail_return = self.generate_function_body(body);
 
-                        // Ensure there's a return (push null and return)
-                        let null_idx = self.add_constant(Constant::Null);
-                        self.emit_opcode(Opcode::LoadConst);
-                        self.emit_u16(null_idx);
-                        self.emit_opcode(Opcode::Return);
+                        // Ensure effect-only methods still return the ABI null.
+                        if !has_tail_return {
+                            let null_idx = self.add_constant(Constant::Null);
+                            self.emit_opcode(Opcode::LoadConst);
+                            self.emit_u16(null_idx);
+                            self.emit_opcode(Opcode::Return);
+                        }
 
                         // Restore locals
                         self.locals = prev_locals;
                         self.next_local = prev_next_local;
+                        self.current_return_type = prev_return_type;
                     }
                 }
             }
             StatementKind::ImplDecl {
                 type_name, methods, ..
             } => {
+                let owner = self.canonical_impl_owner(type_name);
                 // Generate code for each method in the impl block
                 // Methods are stored with mangled names: TypeName_methodName
                 for method in methods {
                     if let StatementKind::FnDecl {
                         name: method_name,
                         params,
+                        return_type,
                         body,
                         ..
                     } = &method.kind
                     {
-                        let mangled_name = format!("{}_{}", type_name, method_name);
+                        let mangled_name = format!("{}_{}", owner, method_name);
 
                         // Find the function index and update its code offset
                         let func_offset = self.current_offset();
@@ -2074,36 +3430,41 @@ impl CodeGenerator {
 
                         // Store the struct method mapping for method dispatch
                         self.struct_methods
-                            .entry(type_name.clone())
+                            .entry(owner.clone())
                             .or_default()
                             .insert(method_name.clone(), func_offset);
 
                         // Push scope for method body
                         let prev_locals = std::mem::take(&mut self.locals);
                         let prev_local_types = std::mem::take(&mut self.local_types);
+                        let prev_return_type = self.current_return_type.take();
                         let prev_next_local = self.next_local;
                         self.locals = vec![HashMap::new()];
                         self.local_types = vec![HashMap::new()];
                         self.next_local = 0;
+                        self.current_return_type =
+                            self.interface_adapted_type_expr(return_type.as_ref(), Some(&owner));
 
                         // Add parameters as locals (self is first parameter if present)
                         for param in params {
                             self.define_local(&param.name);
                             // Track self parameter's type for method dispatch within impl methods
                             if param.name == "self" {
-                                self.define_local_type("self", type_name);
-                                self.define_local_type("this", type_name);
+                                self.define_local_type("self", &owner);
+                                self.define_local_type("this", &owner);
                             }
                         }
 
                         // Generate method body
-                        self.generate_block(body);
+                        let has_tail_return = self.generate_function_body(body);
 
-                        // Ensure there's a return (push null and return)
-                        let null_idx = self.add_constant(Constant::Null);
-                        self.emit_opcode(Opcode::LoadConst);
-                        self.emit_u16(null_idx);
-                        self.emit_opcode(Opcode::Return);
+                        // Ensure effect-only methods still return the ABI null.
+                        if !has_tail_return {
+                            let null_idx = self.add_constant(Constant::Null);
+                            self.emit_opcode(Opcode::LoadConst);
+                            self.emit_u16(null_idx);
+                            self.emit_opcode(Opcode::Return);
+                        }
 
                         // Record local count
                         self.functions[func_idx].local_count = self.next_local;
@@ -2112,6 +3473,7 @@ impl CodeGenerator {
                         self.locals = prev_locals;
                         self.local_types = prev_local_types;
                         self.next_local = prev_next_local;
+                        self.current_return_type = prev_return_type;
                     }
                 }
             }
@@ -2129,6 +3491,7 @@ impl CodeGenerator {
                     if let StatementKind::FnDecl {
                         name: method_name,
                         params,
+                        return_type,
                         body,
                         ..
                     } = &method.kind
@@ -2161,10 +3524,12 @@ impl CodeGenerator {
                         // Fresh local frame for the method body.
                         let prev_locals = std::mem::take(&mut self.locals);
                         let prev_local_types = std::mem::take(&mut self.local_types);
+                        let prev_return_type = self.current_return_type.take();
                         let prev_next_local = self.next_local;
                         self.locals = vec![HashMap::new()];
                         self.local_types = vec![HashMap::new()];
                         self.next_local = 0;
+                        self.current_return_type = self.interface_type_expr(return_type.as_ref());
 
                         for param in params {
                             self.define_local(&param.name);
@@ -2174,19 +3539,22 @@ impl CodeGenerator {
                             }
                         }
 
-                        self.generate_block(body);
+                        let has_tail_return = self.generate_function_body(body);
 
-                        // Implicit `return null` fallthrough.
-                        let null_idx = self.add_constant(Constant::Null);
-                        self.emit_opcode(Opcode::LoadConst);
-                        self.emit_u16(null_idx);
-                        self.emit_opcode(Opcode::Return);
+                        // Effect-only methods fall through to the ABI null.
+                        if !has_tail_return {
+                            let null_idx = self.add_constant(Constant::Null);
+                            self.emit_opcode(Opcode::LoadConst);
+                            self.emit_u16(null_idx);
+                            self.emit_opcode(Opcode::Return);
+                        }
 
                         self.functions[func_idx].local_count = self.next_local;
 
                         self.locals = prev_locals;
                         self.local_types = prev_local_types;
                         self.next_local = prev_next_local;
+                        self.current_return_type = prev_return_type;
                     }
                 }
                 self.current_class_name = prev_class;
@@ -2207,6 +3575,568 @@ impl CodeGenerator {
         for stmt in &block.statements {
             self.generate_statement(stmt);
         }
+    }
+
+    /// Generate a function body, preserving the value of a trailing expression.
+    ///
+    /// Blocks used as expressions already have this behavior in
+    /// [`generate_expression`], but function bodies are represented as a list
+    /// of statements.  Treating every statement as an effect (the old behavior)
+    /// discarded a final `match`, `if` expression, or call before the function's
+    /// implicit null return ran.  The checker records `Void` for effect-only
+    /// builtins such as `println`; those remain discard-only and fall through to
+    /// the ABI's null return.
+    ///
+    /// The return value indicates whether this body has a value-producing tail
+    /// or a control-flow shape with no fall-through.  Explicit returns and
+    /// fully-returning branches therefore do not receive a second unreachable
+    /// return, while partial/effect-only bodies retain the ABI null fallback.
+    fn generate_function_body(&mut self, block: &Block) -> bool {
+        let Some((last, preceding)) = block.statements.split_last() else {
+            return false;
+        };
+
+        for stmt in preceding {
+            self.generate_statement(stmt);
+        }
+
+        let StatementKind::Expression(expr) = &last.kind else {
+            let terminates = Self::statement_always_terminates(last);
+            self.generate_statement(last);
+            return terminates;
+        };
+
+        let before = self.code.len();
+        let expected = self.current_return_type.clone();
+        self.generate_expression_as(expr, expected.as_ref());
+
+        if matches!(self.sema.expr_types.get(&expr.id), Some(Type::Void)) {
+            self.emit_opcode(Opcode::Pop);
+            return false;
+        }
+
+        // Preserve tail calls only when the callee's own return boundary will
+        // provide the struct copy. Other implicit return expressions must copy
+        // before returning, including a local struct identifier.
+        let direct_tail_call = match self.trailing_call {
+            Some(off) if off >= before && self.code.len() == off + 2 => {
+                self.code[off] = Opcode::TailCall as u8;
+                true
+            }
+            _ => false,
+        };
+        if !direct_tail_call {
+            self.emit_copy_value();
+            self.emit_opcode(Opcode::Return);
+        }
+        true
+    }
+
+    fn has_declared_function(&self, name: &str) -> bool {
+        self.functions.iter().any(|function| function.name == name)
+    }
+
+    /// Whether a statement has no fall-through path at the bytecode level.
+    ///
+    /// This is deliberately conservative: loops may contain a break, and
+    /// expression statements may only return from an expression's internal
+    /// branch.  Recognizing explicit returns and fully-returning if/block
+    /// structures is enough to avoid appending an unreachable second return
+    /// while retaining the null fallback for all other bodies.
+    fn statement_always_terminates(stmt: &Statement) -> bool {
+        match &stmt.kind {
+            StatementKind::Return(_) => true,
+            StatementKind::Block(block) => Self::block_always_terminates(block),
+            StatementKind::If {
+                then_branch,
+                else_branch: Some(else_branch),
+                ..
+            } => {
+                Self::block_always_terminates(then_branch)
+                    && Self::block_always_terminates(else_branch)
+            }
+            _ => false,
+        }
+    }
+
+    fn block_always_terminates(block: &Block) -> bool {
+        block
+            .statements
+            .last()
+            .is_some_and(Self::statement_always_terminates)
+    }
+
+    /// Emit a closure using the same capture layout as a source lambda. The
+    /// helper is also used by `spawn`: its operand becomes a zero-argument
+    /// closure, so all evaluation that must happen in the parent can be
+    /// staged into locals before this method is called. Spawn's staged-call
+    /// mode captures those locals immediately, preserving snapshot timing.
+    fn generate_lambda_closure(
+        &mut self,
+        params: &[Parameter],
+        body: &Expression,
+        copy_captures: bool,
+    ) {
+        let param_names: Vec<_> = params.iter().map(|param| param.name.clone()).collect();
+        let free_vars = self.find_free_variables(body, &param_names);
+
+        if free_vars.len() > u8::MAX as usize {
+            self.errors.push(CodegenError::GenericError {
+                message: format!(
+                    "Too many closure captures: {} (maximum is {})",
+                    free_vars.len(),
+                    u8::MAX
+                ),
+            });
+            return;
+        }
+
+        // Capture values in traversal order. Root mutable cells are captured
+        // as cells, not dereferenced payloads, so existing closure semantics
+        // remain intact.
+        for var_name in &free_vars {
+            if let Some(slot) = self.resolve_local(var_name) {
+                self.emit_opcode(Opcode::LoadLocal);
+                self.emit_u16(slot);
+                if copy_captures {
+                    self.emit_copy_value();
+                }
+            } else if let Some(capture_idx) = self.lookup_capture(var_name) {
+                self.emit_opcode(Opcode::LoadCapture);
+                self.emit_u8(capture_idx);
+                if copy_captures {
+                    self.emit_copy_value();
+                }
+            } else {
+                // Keep bytecode structurally valid while reporting the
+                // unresolved capture through the normal codegen error path.
+                let null_idx = self.add_constant(Constant::Null);
+                self.emit_opcode(Opcode::LoadConst);
+                self.emit_u16(null_idx);
+            }
+        }
+
+        self.emit_opcode(Opcode::Jump);
+        let skip_jump = self.current_offset();
+        self.emit_i16(0);
+        let lambda_start = self.current_offset();
+
+        let captured_global_mutables: HashSet<String> = free_vars
+            .iter()
+            .filter(|name| {
+                self.resolve_local(name).is_some_and(|slot| {
+                    self.main_scope
+                        && self.global_mutables.contains(*name)
+                        && self
+                            .locals
+                            .first()
+                            .and_then(|scope| scope.get(*name))
+                            .copied()
+                            == Some(slot)
+                }) || self.capture_global_mutables.contains(*name)
+            })
+            .cloned()
+            .collect();
+
+        let prev_locals = std::mem::take(&mut self.locals);
+        let prev_next_local = self.next_local;
+        let prev_captures = std::mem::take(&mut self.captures);
+        let prev_capture_globals = std::mem::take(&mut self.capture_global_mutables);
+        let prev_main_scope = self.main_scope;
+        self.locals = vec![HashMap::new()];
+        self.next_local = 0;
+        self.captures = free_vars.clone();
+        self.capture_global_mutables = captured_global_mutables;
+        self.main_scope = false;
+
+        for param in params {
+            self.define_local(&param.name);
+        }
+
+        self.generate_expression(body);
+        self.emit_opcode(Opcode::Return);
+
+        self.locals = prev_locals;
+        self.next_local = prev_next_local;
+        self.captures = prev_captures;
+        self.capture_global_mutables = prev_capture_globals;
+        self.main_scope = prev_main_scope;
+
+        self.patch_jump(skip_jump, self.current_offset());
+
+        if free_vars.is_empty() {
+            let func_idx = self.add_constant(Constant::Function(lambda_start));
+            self.emit_opcode(Opcode::LoadConst);
+            self.emit_u16(func_idx);
+        } else {
+            self.emit_opcode(Opcode::MakeClosure);
+            self.emit_checked_u16(lambda_start, "closure code offset");
+            self.emit_u8(free_vars.len() as u8);
+        }
+    }
+
+    fn emit_checked_u16(&mut self, value: usize, description: &str) {
+        match u16::try_from(value) {
+            Ok(value) => self.emit_u16(value),
+            Err(_) => {
+                self.errors.push(CodegenError::GenericError {
+                    message: format!(
+                        "{} {} exceeds the bytecode limit of {}",
+                        description,
+                        value,
+                        u16::MAX
+                    ),
+                });
+                // Keep the instruction stream parseable; compilation returns
+                // the diagnostic and never exposes this placeholder.
+                self.emit_u16(0);
+            }
+        }
+    }
+
+    fn fresh_spawn_temp_name(&self) -> String {
+        let mut candidate = self.next_local;
+        loop {
+            let name = format!("__lira_spawn_{}", candidate);
+            if self.lookup_local(&name).is_none() {
+                return name;
+            }
+            candidate += 1;
+        }
+    }
+
+    fn stage_spawn_value(&mut self, expression: &Expression) -> String {
+        self.stage_spawn_value_as(expression, None)
+    }
+
+    fn stage_spawn_value_as(&mut self, expression: &Expression, expected: Option<&Type>) -> String {
+        // The closure capture below is the snapshot boundary. The ordinary
+        // child-call argument path may copy once more, but retaining that
+        // existing boundary keeps value/reference ABI behavior unchanged.
+        self.generate_expression_as(expression, expected);
+        let name = self.fresh_spawn_temp_name();
+        let slot = self.define_local(&name);
+        self.emit_opcode(Opcode::StoreLocal);
+        self.emit_u16(slot);
+        name
+    }
+
+    fn is_codegen_builtin(&self, name: &str) -> bool {
+        if self.has_declared_function(name)
+            || self.lookup_local(name).is_some()
+            || self.lookup_capture(name).is_some()
+            || self.global_mutables.contains(name)
+        {
+            return false;
+        }
+
+        matches!(
+            name,
+            "print"
+                | "println"
+                | "assert"
+                | "chan"
+                | "send"
+                | "recv"
+                | "close"
+                | "fiber_yield"
+                | "fiber_id"
+                | "len"
+                | "push"
+                | "pop"
+                | "collect"
+        ) || SYSCALL_BUILTINS
+            .iter()
+            .any(|(builtin, _, _)| *builtin == name)
+    }
+
+    /// Stage a direct call's operands in the parent and turn the call into a
+    /// positional dynamic call inside a zero-argument closure. This preserves
+    /// normal named/default argument binding while retaining direct-spawn's
+    /// existing argument-evaluation timing.
+    fn generate_spawn_call_closure(
+        &mut self,
+        inner: &Expression,
+        callee: &Expression,
+        args: &[Argument],
+    ) -> bool {
+        if args.len() > u8::MAX as usize {
+            self.errors.push(CodegenError::GenericError {
+                message: format!(
+                    "Too many spawn call arguments: {} (maximum is {})",
+                    args.len(),
+                    u8::MAX
+                ),
+            });
+            return false;
+        }
+
+        let is_static_method = matches!(
+            self.sema.call_resolution.get(&inner.id),
+            Some(crate::sema::CallResolution::StaticMethod { .. })
+        );
+        let method_params = self.spawn_method_params(inner, callee, is_static_method);
+        let method_param_names = method_params.as_ref().map(|params| {
+            params
+                .iter()
+                .map(|param| param.name.clone())
+                .collect::<Vec<_>>()
+        });
+        let ordered_slots = if let Some(param_names) = method_param_names.as_deref() {
+            self.order_call_args_with_names(args, Some(param_names))
+        } else {
+            self.order_call_args(callee, args)
+        };
+        let defaults = method_params
+            .as_ref()
+            .map(|params| {
+                params
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, param)| {
+                        param.default.clone().map(|default| (index, default))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .filter(|defaults| !defaults.is_empty())
+            .or_else(|| match &callee.kind {
+                ExpressionKind::Identifier(name) => self.function_defaults.get(name).cloned(),
+                _ => None,
+            });
+        let expected_params = match self.sema.expr_types.get(&callee.id) {
+            Some(Type::Function { params, .. })
+                if matches!(callee.kind, ExpressionKind::FieldAccess { .. })
+                    && !is_static_method =>
+            {
+                // Method function types include their synthetic receiver in
+                // slot zero. Spawn stages only the explicit arguments here;
+                // the receiver is staged separately above.
+                Some(params.iter().skip(1).cloned().collect())
+            }
+            Some(Type::Function { params, .. }) => Some(params.clone()),
+            _ => None,
+        };
+        let mut values = Vec::with_capacity(args.len());
+
+        // A method callee is not itself a callable field value for all Lira
+        // method ABIs. Ordinary call lowering supplies the receiver as an
+        // extra argument (static/impl methods) or performs virtual field
+        // dispatch (classes). Stage the receiver and retain the original
+        // method shape so the normal call lowering is reused in the child.
+        let body_callee = if let ExpressionKind::FieldAccess { object, field } = &callee.kind {
+            if is_static_method {
+                callee.clone()
+            } else {
+                let receiver_name = self.stage_spawn_value(object);
+                if let Some(receiver_type) =
+                    self.expr_type_name(object).or_else(|| match &object.kind {
+                        ExpressionKind::Identifier(name) => self.lookup_local_type(name).cloned(),
+                        _ => None,
+                    })
+                {
+                    self.define_local_type(&receiver_name, &receiver_type);
+                }
+                Expression {
+                    id: NodeId::new(0),
+                    kind: ExpressionKind::FieldAccess {
+                        object: Box::new(Expression {
+                            id: NodeId::new(0),
+                            kind: ExpressionKind::Identifier(receiver_name),
+                            span: object.span.clone(),
+                        }),
+                        field: field.clone(),
+                    },
+                    span: callee.span.clone(),
+                }
+            }
+        } else {
+            callee.clone()
+        };
+
+        for (idx, slot) in ordered_slots.iter().enumerate() {
+            let expression = match slot {
+                Some(argument) => argument.value.clone(),
+                None => {
+                    let Some(default) = defaults.as_ref().and_then(|defaults| {
+                        defaults
+                            .iter()
+                            .find(|(default_idx, _)| *default_idx == idx)
+                            .map(|(_, expression)| expression.clone())
+                    }) else {
+                        self.errors.push(CodegenError::GenericError {
+                            message: "Missing default expression for spawn argument".to_string(),
+                        });
+                        return false;
+                    };
+                    default
+                }
+            };
+            values.push(self.stage_spawn_value_as(
+                &expression,
+                expected_params.as_ref().and_then(|params| params.get(idx)),
+            ));
+        }
+
+        let mut total_args = values.len();
+        let expected_param_count = method_params.as_ref().map(Vec::len).or_else(|| {
+            let ExpressionKind::Identifier(function_name) = &callee.kind else {
+                return None;
+            };
+            self.functions
+                .iter()
+                .find(|function| function.name == *function_name)
+                .map(|function| function.param_count as usize)
+        });
+        if let (Some(defaults), Some(expected_param_count)) =
+            (defaults.clone(), expected_param_count)
+        {
+            for (param_idx, default_expr) in defaults {
+                if param_idx >= ordered_slots.len() && param_idx < expected_param_count {
+                    values.push(
+                        self.stage_spawn_value_as(
+                            &default_expr,
+                            expected_params
+                                .as_ref()
+                                .and_then(|params| params.get(param_idx)),
+                        ),
+                    );
+                    total_args += 1;
+                }
+            }
+        }
+
+        if total_args > u8::MAX as usize {
+            self.errors.push(CodegenError::GenericError {
+                message: format!(
+                    "Too many spawn call arguments after defaults: {} (maximum is {})",
+                    total_args,
+                    u8::MAX
+                ),
+            });
+            return false;
+        }
+
+        let body_callee = if matches!(&body_callee.kind, ExpressionKind::FieldAccess { .. }) {
+            body_callee
+        } else {
+            let use_builtin_callee = matches!(&callee.kind, ExpressionKind::Identifier(name) if self.is_codegen_builtin(name));
+            if use_builtin_callee {
+                callee.clone()
+            } else {
+                let name = self.stage_spawn_value(callee);
+                Expression {
+                    id: NodeId::new(0),
+                    kind: ExpressionKind::Identifier(name),
+                    span: callee.span.clone(),
+                }
+            }
+        };
+        let body_args = values
+            .into_iter()
+            .map(|name| Argument {
+                name: None,
+                value: Expression {
+                    id: NodeId::new(0),
+                    kind: ExpressionKind::Identifier(name),
+                    span: inner.span.clone(),
+                },
+                span: inner.span.clone(),
+            })
+            .collect();
+        let body = Expression {
+            id: NodeId::new(0),
+            kind: ExpressionKind::Call {
+                callee: Box::new(body_callee),
+                type_args: Vec::new(),
+                args: body_args,
+            },
+            span: inner.span.clone(),
+        };
+        // Capture staged values at spawn time. The child call may run after
+        // the parent mutates a value-semantic receiver or argument, so the
+        // closure capture must take the snapshot before the Spawn opcode.
+        self.generate_lambda_closure(&[], &body, true);
+        true
+    }
+
+    fn emit_spawn_wrapper(&mut self, line: usize, column: usize) -> Option<usize> {
+        let wrapper_offset = self.current_offset();
+        if wrapper_offset > u16::MAX as usize {
+            self.errors.push(CodegenError::GenericError {
+                message: format!(
+                    "spawn wrapper code offset {} exceeds the bytecode limit of {}",
+                    wrapper_offset,
+                    u16::MAX
+                ),
+            });
+            return None;
+        }
+        let name = format!("__spawn_wrapper_{}", wrapper_offset);
+        self.functions.push(FunctionInfo {
+            name: name.clone(),
+            code_offset: wrapper_offset,
+            param_count: 1,
+            local_count: 1,
+        });
+        self.debug_info
+            .add_function_symbol(wrapper_offset as u32, name);
+        self.emit_opcode(Opcode::LoadLocal);
+        self.emit_u16(0);
+        self.emit_opcode(Opcode::Call);
+        self.emit_u8(0);
+        self.emit_opcode(Opcode::Return);
+        self.record_line_info(wrapper_offset, line as u32, column as u32);
+        Some(wrapper_offset)
+    }
+
+    fn generate_spawn(&mut self, inner: &Expression) {
+        let closure_generated = match &inner.kind {
+            ExpressionKind::Call { callee, args, .. } => {
+                self.generate_spawn_call_closure(inner, callee, args)
+            }
+            _ => {
+                self.generate_lambda_closure(&[], inner, true);
+                true
+            }
+        };
+        if !closure_generated {
+            let null_idx = self.add_constant(Constant::Null);
+            self.emit_opcode(Opcode::LoadConst);
+            self.emit_u16(null_idx);
+            return;
+        }
+
+        // Spawn takes one argument: the closure. Its wrapper is emitted after
+        // a parent jump so ordinary execution cannot fall through into either
+        // synthetic body.
+        // Spawn is four bytes (opcode + u16 offset + u8 arity), followed by
+        // the three-byte parent jump.
+        let wrapper_offset = self.current_offset() + 7;
+        if wrapper_offset > u16::MAX as usize {
+            self.errors.push(CodegenError::GenericError {
+                message: format!(
+                    "spawn wrapper code offset {} exceeds the bytecode limit of {}",
+                    wrapper_offset,
+                    u16::MAX
+                ),
+            });
+            self.emit_opcode(Opcode::Pop);
+            return;
+        }
+        self.emit_opcode(Opcode::Spawn);
+        self.emit_checked_u16(wrapper_offset, "spawn code offset");
+        self.emit_u8(1);
+
+        self.emit_opcode(Opcode::Jump);
+        let skip_wrapper = self.current_offset();
+        self.emit_i16(0);
+        let Some(actual_wrapper_offset) =
+            self.emit_spawn_wrapper(inner.span.line, inner.span.column)
+        else {
+            return;
+        };
+        self.patch_jump(skip_wrapper, self.current_offset());
+        debug_assert_eq!(actual_wrapper_offset, wrapper_offset);
     }
 
     fn generate_expression(&mut self, expr: &Expression) {
@@ -2263,35 +4193,27 @@ impl CodeGenerator {
                     return;
                 }
                 if let Some(slot) = self.lookup_local(name) {
-                    self.emit_opcode(Opcode::LoadLocal);
-                    self.emit_u16(slot);
+                    if self.is_global_mutable_slot(name, slot) {
+                        self.emit_global_cell_load(slot);
+                    } else {
+                        self.emit_opcode(Opcode::LoadLocal);
+                        self.emit_u16(slot);
+                    }
                 } else if let Some(capture_idx) = self.lookup_capture(name) {
                     // Load from closure captures
-                    self.emit_opcode(Opcode::LoadCapture);
-                    self.emit_u8(capture_idx);
+                    if self.capture_global_mutables.contains(name) {
+                        let _ = self.emit_capture_cell_load(name);
+                    } else {
+                        self.emit_opcode(Opcode::LoadCapture);
+                        self.emit_u8(capture_idx);
+                    }
                 } else if let Some(&const_idx) = self.module_consts.get(name) {
                     // Load module-level constant
                     self.emit_opcode(Opcode::LoadConst);
                     self.emit_u16(const_idx);
                 } else {
                     // Check if it's a function reference
-                    let func_info = self.functions.iter().find(|f| f.name == *name);
-
-                    if let Some(func) = func_info {
-                        let offset = func.code_offset;
-                        // Add function constant - may need patching if offset is 0
-                        let idx = self.add_constant_internal(Constant::Function(offset));
-                        if offset == 0 {
-                            // Function not yet generated - record for patching
-                            self.pending_func_patches.push((idx, name.clone()));
-                        }
-                        self.emit_opcode(Opcode::LoadConst);
-                        self.emit_u16(idx);
-                    } else {
-                        // Could be a global - for now, error
-                        self.errors
-                            .push(CodegenError::UndefinedVariable { name: name.clone() });
-                    }
+                    self.emit_function_reference(name);
                 }
             }
 
@@ -2299,7 +4221,8 @@ impl CodeGenerator {
                 // Special handling for null coalescing (short-circuit evaluation)
                 if *op == BinaryOp::NullCoalesce {
                     // a ?? b: if a is null, evaluate b; otherwise use a
-                    self.generate_expression(left);
+                    let result_type = self.sema.expr_types.get(&expr.id).cloned();
+                    self.generate_expression_as(left, result_type.as_ref());
                     // Duplicate the left value for the null check
                     self.emit_opcode(Opcode::Dup);
                     // Push null constant
@@ -2311,11 +4234,11 @@ impl CodeGenerator {
                     // If NOT null (comparison is false), jump to end
                     self.emit_opcode(Opcode::JumpIfFalse);
                     let end_jump = self.current_offset();
-                    self.emit_i16(0); // Placeholder
-                                      // Left was null - pop the null value
+                    self.emit_i16(0);
+                    // Left was null - pop the null value.
                     self.emit_opcode(Opcode::Pop);
                     // Evaluate right side
-                    self.generate_expression(right);
+                    self.generate_expression_as(right, result_type.as_ref());
                     // Patch the jump to here
                     self.patch_jump(end_jump, self.current_offset());
                     return;
@@ -2473,8 +4396,12 @@ impl CodeGenerator {
                         if let ExpressionKind::Identifier(name) = &operand.kind {
                             if let Some(slot) = self.lookup_local(name) {
                                 // Load current value
-                                self.emit_opcode(Opcode::LoadLocal);
-                                self.emit_u16(slot);
+                                if self.is_global_mutable_slot(name, slot) {
+                                    self.emit_global_cell_load(slot);
+                                } else {
+                                    self.emit_opcode(Opcode::LoadLocal);
+                                    self.emit_u16(slot);
+                                }
                                 // Push 1
                                 let one = if self.checked_is_float(operand) {
                                     Constant::Float(1.0)
@@ -2501,11 +4428,15 @@ impl CodeGenerator {
                                 } else {
                                     self.emit_opcode(Opcode::Sub);
                                 }
-                                // Duplicate the result (new value stays on stack)
-                                self.emit_opcode(Opcode::Dup);
-                                // Store back
-                                self.emit_opcode(Opcode::StoreLocal);
-                                self.emit_u16(slot);
+                                if self.is_global_mutable_slot(name, slot) {
+                                    self.emit_global_cell_store(slot);
+                                } else {
+                                    // Duplicate the result (new value stays on stack)
+                                    self.emit_opcode(Opcode::Dup);
+                                    // Store back
+                                    self.emit_opcode(Opcode::StoreLocal);
+                                    self.emit_u16(slot);
+                                }
                             }
                         } else {
                             self.errors.push(CodegenError::GenericError {
@@ -2518,8 +4449,12 @@ impl CodeGenerator {
                         if let ExpressionKind::Identifier(name) = &operand.kind {
                             if let Some(slot) = self.lookup_local(name) {
                                 // Load current value (this will be the result)
-                                self.emit_opcode(Opcode::LoadLocal);
-                                self.emit_u16(slot);
+                                if self.is_global_mutable_slot(name, slot) {
+                                    self.emit_global_cell_load(slot);
+                                } else {
+                                    self.emit_opcode(Opcode::LoadLocal);
+                                    self.emit_u16(slot);
+                                }
                                 // Duplicate it (one for result, one for computation)
                                 self.emit_opcode(Opcode::Dup);
                                 // Push 1
@@ -2548,8 +4483,12 @@ impl CodeGenerator {
                                     self.emit_opcode(Opcode::Sub);
                                 }
                                 // Store back (new value)
-                                self.emit_opcode(Opcode::StoreLocal);
-                                self.emit_u16(slot);
+                                if self.is_global_mutable_slot(name, slot) {
+                                    self.emit_global_cell_store_discard_result(slot);
+                                } else {
+                                    self.emit_opcode(Opcode::StoreLocal);
+                                    self.emit_u16(slot);
+                                }
                                 // The old value is left on the stack from the first Dup
                             }
                         } else {
@@ -2564,150 +4503,199 @@ impl CodeGenerator {
             ExpressionKind::Call { callee, args, .. } => {
                 // Special handling for built-in functions
                 if let ExpressionKind::Identifier(name) = &callee.kind {
-                    match name.as_str() {
-                        "print" | "println" => {
-                            for arg in args {
-                                self.generate_expression(&arg.value);
-                            }
-                            self.emit_opcode(Opcode::Print);
-                            return;
-                        }
-                        "chan" => {
-                            // chan() creates unbuffered channel
-                            // chan(n) creates buffered channel with capacity n
-                            if args.is_empty() {
-                                let idx = self.add_constant(Constant::Int(0));
-                                self.emit_opcode(Opcode::LoadConst);
-                                self.emit_u16(idx);
-                            } else {
-                                self.generate_expression(&args[0].value);
-                            }
-                            self.emit_opcode(Opcode::ChanNew);
-                            return;
-                        }
-                        "send" => {
-                            // send(channel, value)
-                            if args.len() >= 2 {
-                                self.generate_expression(&args[0].value); // channel
-                                self.generate_expression(&args[1].value); // value
-                                self.emit_opcode(Opcode::ChanSend);
-                            } else {
-                                self.errors.push(CodegenError::GenericError {
-                                    message: "send() requires 2 arguments".to_string(),
+                    if self.is_codegen_builtin(name) {
+                        match name.as_str() {
+                            "print" | "println" => {
+                                for arg in args {
+                                    self.generate_call_argument(&arg.value);
+                                }
+                                self.emit_opcode(if name == "print" {
+                                    Opcode::Print
+                                } else {
+                                    Opcode::Println
                                 });
+                                self.emit_void_value();
+                                return;
                             }
-                            return;
-                        }
-                        "recv" => {
-                            // recv(channel) -> (value, ok)
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::ChanRecv);
-                            } else {
-                                self.errors.push(CodegenError::GenericError {
-                                    message: "recv() requires 1 argument".to_string(),
-                                });
+                            "assert" => {
+                                if let Some(argument) = args.first() {
+                                    self.generate_call_argument(&argument.value);
+                                    self.emit_opcode(Opcode::Assert);
+                                    self.emit_void_value();
+                                } else {
+                                    self.errors.push(CodegenError::GenericError {
+                                        message: "assert requires one argument".to_string(),
+                                    });
+                                }
+                                return;
                             }
-                            return;
-                        }
-                        "close" => {
-                            // close(channel)
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::ChanClose);
-                            } else {
-                                self.errors.push(CodegenError::GenericError {
-                                    message: "close() requires 1 argument".to_string(),
-                                });
+                            "chan" => {
+                                // chan() creates unbuffered channel
+                                // chan(n) creates buffered channel with capacity n
+                                if args.len() > 1 {
+                                    self.errors.push(CodegenError::GenericError {
+                                        message: format!(
+                                            "chan() accepts at most 1 argument, got {}",
+                                            args.len()
+                                        ),
+                                    });
+                                    self.emit_void_value();
+                                } else if args.is_empty() {
+                                    let idx = self.add_constant(Constant::Int(0));
+                                    self.emit_opcode(Opcode::LoadConst);
+                                    self.emit_u16(idx);
+                                } else {
+                                    self.generate_expression(&args[0].value);
+                                }
+                                if args.len() <= 1 {
+                                    self.emit_opcode(Opcode::ChanNew);
+                                }
+                                return;
                             }
-                            return;
-                        }
-                        "fiber_yield" => {
-                            // fiber_yield() - yield current fiber
-                            self.emit_opcode(Opcode::Yield);
-                            return;
-                        }
-                        "collect" => {
-                            // collect() - force a garbage collection of cyclic
-                            // heap values. Takes no arguments; the VM pushes null
-                            // so it composes as a normal expression.
-                            self.emit_opcode(Opcode::Collect);
-                            return;
-                        }
-                        "fiber_id" => {
-                            // fiber_id() - get current fiber ID
-                            self.emit_opcode(Opcode::FiberId);
-                            return;
-                        }
-                        "len" => {
-                            // len(array_or_string)
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::ArrayLen);
-                            } else {
-                                self.errors.push(CodegenError::GenericError {
-                                    message: "len() requires 1 argument".to_string(),
-                                });
+                            "send" => {
+                                // send(channel, value)
+                                if args.len() >= 2 {
+                                    self.generate_expression(&args[0].value); // channel
+                                    self.generate_call_argument(&args[1].value); // value
+                                    self.emit_opcode(Opcode::ChanSend);
+                                    self.emit_void_value();
+                                } else {
+                                    self.errors.push(CodegenError::GenericError {
+                                        message: "send() requires 2 arguments".to_string(),
+                                    });
+                                }
+                                return;
                             }
-                            return;
-                        }
-                        "push" => {
-                            // push(array, value)
-                            if args.len() >= 2 {
-                                self.generate_expression(&args[0].value); // array
-                                self.generate_expression(&args[1].value); // value
-                                self.emit_opcode(Opcode::ArrayPush);
-                            } else {
-                                self.errors.push(CodegenError::GenericError {
-                                    message: "push() requires 2 arguments".to_string(),
-                                });
+                            "recv" => {
+                                // ChanRecv has an internal pair ABI so the scheduler
+                                // can represent closed channels. The language-level
+                                // recv contract returns only the payload; a closed
+                                // channel therefore leaves null.
+                                if !args.is_empty() {
+                                    self.generate_expression(&args[0].value);
+                                    self.emit_opcode(Opcode::ChanRecv);
+                                    self.emit_opcode(Opcode::Pop);
+                                } else {
+                                    self.errors.push(CodegenError::GenericError {
+                                        message: "recv() requires 1 argument".to_string(),
+                                    });
+                                }
+                                return;
                             }
-                            return;
-                        }
-                        "pop" => {
-                            // pop(array)
-                            if !args.is_empty() {
-                                self.generate_expression(&args[0].value);
-                                self.emit_opcode(Opcode::ArrayPop);
-                            } else {
-                                self.errors.push(CodegenError::GenericError {
-                                    message: "pop() requires 1 argument".to_string(),
-                                });
+                            "close" => {
+                                // close(channel)
+                                if !args.is_empty() {
+                                    self.generate_expression(&args[0].value);
+                                    self.emit_opcode(Opcode::ChanClose);
+                                    self.emit_void_value();
+                                } else {
+                                    self.errors.push(CodegenError::GenericError {
+                                        message: "close() requires 1 argument".to_string(),
+                                    });
+                                }
+                                return;
                             }
-                            return;
+                            "fiber_yield" => {
+                                // fiber_yield() - yield current fiber
+                                self.emit_opcode(Opcode::Yield);
+                                self.emit_void_value();
+                                return;
+                            }
+                            "collect" => {
+                                // collect() - force a garbage collection of cyclic
+                                // heap values. Takes no arguments; the VM pushes null
+                                // so it composes as a normal expression.
+                                self.emit_opcode(Opcode::Collect);
+                                return;
+                            }
+                            "fiber_id" => {
+                                // fiber_id() - get current fiber ID
+                                self.emit_opcode(Opcode::FiberId);
+                                return;
+                            }
+                            "len" => {
+                                // len(array_or_string)
+                                if !args.is_empty() {
+                                    self.generate_expression(&args[0].value);
+                                    self.emit_opcode(Opcode::ArrayLen);
+                                } else {
+                                    self.errors.push(CodegenError::GenericError {
+                                        message: "len() requires 1 argument".to_string(),
+                                    });
+                                }
+                                return;
+                            }
+                            "push" => {
+                                // push(array, value)
+                                if args.len() >= 2 {
+                                    self.generate_expression(&args[0].value); // array
+                                    self.generate_call_argument(&args[1].value); // value
+                                    self.emit_opcode(Opcode::ArrayPush);
+                                    self.emit_void_value();
+                                } else {
+                                    self.errors.push(CodegenError::GenericError {
+                                        message: "push() requires 2 arguments".to_string(),
+                                    });
+                                }
+                                return;
+                            }
+                            "pop" => {
+                                // pop(array)
+                                if !args.is_empty() {
+                                    self.generate_expression(&args[0].value);
+                                    self.emit_opcode(Opcode::ArrayPop);
+                                } else {
+                                    self.errors.push(CodegenError::GenericError {
+                                        message: "pop() requires 1 argument".to_string(),
+                                    });
+                                }
+                                return;
+                            }
+
+                            _ => {}
                         }
 
-                        _ => {}
-                    }
-
-                    // Syscall table lookup for builtins that use the generic syscall dispatch
-                    if let Some((_, syscall_num, required_args)) = SYSCALL_BUILTINS
-                        .iter()
-                        .copied()
-                        .find(|(n, _, _)| *n == name.as_str())
-                    {
-                        if args.len() >= required_args {
-                            for arg in args {
-                                self.generate_expression(&arg.value);
+                        // Syscall table lookup for builtins that use the generic syscall dispatch
+                        if let Some((_, syscall_num, required_args)) = SYSCALL_BUILTINS
+                            .iter()
+                            .copied()
+                            .find(|(n, _, _)| *n == name.as_str())
+                        {
+                            if args.len() >= required_args {
+                                for arg in args {
+                                    self.generate_call_argument(&arg.value);
+                                }
+                                self.emit_opcode(Opcode::Syscall);
+                                self.emit_u8(syscall_num);
+                            } else {
+                                self.errors.push(CodegenError::GenericError {
+                                    message: format!(
+                                        "{}() requires {} argument{}",
+                                        name,
+                                        required_args,
+                                        if required_args == 1 { "" } else { "s" }
+                                    ),
+                                });
                             }
-                            self.emit_opcode(Opcode::Syscall);
-                            self.emit_u8(syscall_num);
-                        } else {
-                            self.errors.push(CodegenError::GenericError {
-                                message: format!(
-                                    "{}() requires {} argument{}",
-                                    name,
-                                    required_args,
-                                    if required_args == 1 { "" } else { "s" }
-                                ),
-                            });
+                            return;
                         }
-                        return;
                     }
                 }
 
                 // Check for method call (obj.method(args))
                 if let ExpressionKind::FieldAccess { object, field } = &callee.kind {
+                    if self.generate_interface_method_call(object, field, args) {
+                        return;
+                    }
+                    // Collection builtins are represented by dedicated opcodes
+                    // in the bytecode VM.  They are still parsed as ordinary
+                    // field calls (`xs.pop()`), so handle the statically
+                    // recorded array/Any receiver before the generic method
+                    // and object-field fallback below.
+                    if self.generate_collection_method(object, field, args) {
+                        return;
+                    }
+
                     // Check if this is a static method call on a type (e.g., Counter.new())
                     if let ExpressionKind::Identifier(type_name) = &object.kind {
                         // super.method() — direct call to parent's method, bypassing
@@ -2730,10 +4718,16 @@ impl CodeGenerator {
                                     // Push receiver (self = slot 0) as first arg
                                     self.emit_opcode(Opcode::LoadLocal);
                                     self.emit_u16(0);
-                                    // Push additional arguments
-                                    for arg in args {
-                                        self.generate_expression(&arg.value);
-                                    }
+                                    // Push additional arguments, reordered by
+                                    // name and defaulted gaps filled.
+                                    let declared = self
+                                        .method_params_for(&parent_class, field)
+                                        .map(<[Parameter]>::to_vec);
+                                    let arg_count = self.emit_ordered_method_args(
+                                        args,
+                                        declared.as_deref(),
+                                        false,
+                                    );
                                     let idx = self
                                         .add_constant_internal(Constant::Function(parent_offset));
                                     if parent_offset == 0 {
@@ -2743,7 +4737,7 @@ impl CodeGenerator {
                                     self.emit_opcode(Opcode::LoadConst);
                                     self.emit_u16(idx);
                                     self.emit_opcode(Opcode::Call);
-                                    self.emit_u8((args.len() + 1) as u8);
+                                    self.emit_u8((arg_count + 1) as u8);
                                     return;
                                 } else {
                                     self.errors.push(CodegenError::GenericError {
@@ -2765,19 +4759,22 @@ impl CodeGenerator {
 
                         // Check if there's a method in struct_methods for this type
                         let has_static_method = self
-                            .struct_methods
-                            .get(type_name)
+                            .struct_methods_for(type_name)
                             .map(|methods| methods.contains_key(field))
                             .unwrap_or(false);
 
                         if has_static_method {
                             // Static method call - call mangled function directly
-                            let mangled_name = format!("{}_{}", type_name, field);
+                            let mangled_name =
+                                format!("{}_{}", self.canonical_impl_owner(type_name), field);
 
-                            // Push arguments
-                            for arg in args {
-                                self.generate_expression(&arg.value);
-                            }
+                            // Push arguments, reordered by name and defaulted
+                            // gaps filled (static methods carry no receiver).
+                            let declared = self
+                                .method_params_for(type_name, field)
+                                .map(<[Parameter]>::to_vec);
+                            let arg_count =
+                                self.emit_ordered_method_args(args, declared.as_deref(), true);
 
                             // Look up the function
                             if let Some(func) =
@@ -2791,7 +4788,7 @@ impl CodeGenerator {
                                 self.emit_opcode(Opcode::LoadConst);
                                 self.emit_u16(idx);
                                 self.emit_opcode(Opcode::Call);
-                                self.emit_u8(args.len() as u8);
+                                self.emit_u8(arg_count as u8);
                             } else {
                                 self.errors.push(CodegenError::GenericError {
                                     message: format!("Method not found: {}", mangled_name),
@@ -2811,22 +4808,31 @@ impl CodeGenerator {
                                 // declared the method. Structs keep static dispatch.
                                 let has_method = !self.class_parents.contains_key(obj_type)
                                     && self
-                                        .struct_methods
-                                        .get(obj_type)
+                                        .struct_methods_for(obj_type)
                                         .map(|methods| methods.contains_key(field))
                                         .unwrap_or(false);
 
                                 if has_method {
                                     // Instance method call - call mangled function with self as first arg
-                                    let mangled_name = format!("{}_{}", obj_type, field);
+                                    let mangled_name = format!(
+                                        "{}_{}",
+                                        self.canonical_impl_owner(obj_type),
+                                        field
+                                    );
 
                                     // Push object as self (first argument)
                                     self.generate_expression(object);
 
-                                    // Push additional arguments
-                                    for arg in args {
-                                        self.generate_expression(&arg.value);
-                                    }
+                                    // Push additional arguments, reordered by
+                                    // name and defaulted gaps filled.
+                                    let declared = self
+                                        .method_params_for(obj_type, field)
+                                        .map(<[Parameter]>::to_vec);
+                                    let arg_count = self.emit_ordered_method_args(
+                                        args,
+                                        declared.as_deref(),
+                                        false,
+                                    );
 
                                     // Look up and call the function
                                     if let Some(func) =
@@ -2841,7 +4847,7 @@ impl CodeGenerator {
                                         self.emit_opcode(Opcode::LoadConst);
                                         self.emit_u16(idx);
                                         self.emit_opcode(Opcode::Call);
-                                        self.emit_u8((args.len() + 1) as u8); // +1 for self
+                                        self.emit_u8((arg_count + 1) as u8); // +1 for self
                                     } else {
                                         self.errors.push(CodegenError::GenericError {
                                             message: format!("Method not found: {}", mangled_name),
@@ -2849,7 +4855,7 @@ impl CodeGenerator {
                                     }
                                 } else {
                                     // Check for impl methods (works for all types, not just primitives)
-                                    if let Some(methods) = self.impl_methods.get(obj_type) {
+                                    if let Some(methods) = self.impl_methods_for(obj_type) {
                                         if let Some(mangled_name) = methods.get(field).cloned() {
                                             // Get function offset before mutable borrow
                                             let func_offset = self
@@ -2860,10 +4866,16 @@ impl CodeGenerator {
                                             if let Some(offset) = func_offset {
                                                 // Push self first
                                                 self.generate_expression(object);
-                                                // Push arguments
-                                                for arg in args {
-                                                    self.generate_expression(&arg.value);
-                                                }
+                                                // Push arguments, reordered by
+                                                // name and defaulted gaps filled.
+                                                let declared = self
+                                                    .method_params_for(obj_type, field)
+                                                    .map(<[Parameter]>::to_vec);
+                                                let arg_count = self.emit_ordered_method_args(
+                                                    args,
+                                                    declared.as_deref(),
+                                                    false,
+                                                );
                                                 // Then load function and call
                                                 let idx = self.add_constant_internal(
                                                     Constant::Function(offset),
@@ -2875,28 +4887,37 @@ impl CodeGenerator {
                                                 self.emit_opcode(Opcode::LoadConst);
                                                 self.emit_u16(idx);
                                                 self.emit_opcode(Opcode::Call);
-                                                self.emit_u8((args.len() + 1) as u8);
+                                                self.emit_u8((arg_count + 1) as u8);
                                                 return;
                                             }
                                         }
                                     }
                                     // No matching method, fall back to field access
                                     self.generate_expression(object);
-                                    for arg in args {
-                                        self.generate_expression(&arg.value);
-                                    }
+                                    // The method is stored as a bound function
+                                    // value carrying the receiver; reorder the
+                                    // explicit arguments by name and fill
+                                    // defaulted gaps before the dynamic call.
+                                    let declared = self
+                                        .method_params_for(obj_type, field)
+                                        .map(<[Parameter]>::to_vec);
+                                    let arg_count = self.emit_ordered_method_args(
+                                        args,
+                                        declared.as_deref(),
+                                        false,
+                                    );
                                     self.generate_expression(object);
                                     let idx = self.add_constant(Constant::String(field.clone()));
                                     self.emit_opcode(Opcode::GetField);
                                     self.emit_u16(idx);
                                     self.emit_opcode(Opcode::Call);
-                                    self.emit_u8((args.len() + 1) as u8);
+                                    self.emit_u8((arg_count + 1) as u8);
                                 }
                             } else {
                                 // No type info - check for primitive impl methods
                                 let receiver_type = self.expr_type_name(object);
                                 if let Some(ref type_name) = receiver_type {
-                                    if let Some(methods) = self.impl_methods.get(type_name) {
+                                    if let Some(methods) = self.impl_methods_for(type_name) {
                                         if let Some(mangled_name) = methods.get(field).cloned() {
                                             // Get function offset before mutable borrow
                                             let func_offset = self
@@ -2907,10 +4928,16 @@ impl CodeGenerator {
                                             if let Some(offset) = func_offset {
                                                 // Push self first
                                                 self.generate_expression(object);
-                                                // Push arguments
-                                                for arg in args {
-                                                    self.generate_expression(&arg.value);
-                                                }
+                                                // Push arguments, reordered by
+                                                // name and defaulted gaps filled.
+                                                let declared = self
+                                                    .method_params_for(type_name, field)
+                                                    .map(<[Parameter]>::to_vec);
+                                                let arg_count = self.emit_ordered_method_args(
+                                                    args,
+                                                    declared.as_deref(),
+                                                    false,
+                                                );
                                                 // Then load function and call
                                                 let idx = self.add_constant_internal(
                                                     Constant::Function(offset),
@@ -2922,7 +4949,7 @@ impl CodeGenerator {
                                                 self.emit_opcode(Opcode::LoadConst);
                                                 self.emit_u16(idx);
                                                 self.emit_opcode(Opcode::Call);
-                                                self.emit_u8((args.len() + 1) as u8);
+                                                self.emit_u8((arg_count + 1) as u8);
                                                 return;
                                             }
                                         }
@@ -2930,15 +4957,17 @@ impl CodeGenerator {
                                 }
                                 // Fall back to field access approach
                                 self.generate_expression(object);
-                                for arg in args {
-                                    self.generate_expression(&arg.value);
-                                }
+                                let declared = self
+                                    .method_params_for(type_name, field)
+                                    .map(<[Parameter]>::to_vec);
+                                let arg_count =
+                                    self.emit_ordered_method_args(args, declared.as_deref(), false);
                                 self.generate_expression(object);
                                 let idx = self.add_constant(Constant::String(field.clone()));
                                 self.emit_opcode(Opcode::GetField);
                                 self.emit_u16(idx);
                                 self.emit_opcode(Opcode::Call);
-                                self.emit_u8((args.len() + 1) as u8);
+                                self.emit_u8((arg_count + 1) as u8);
                             }
                         }
                     } else {
@@ -2947,7 +4976,7 @@ impl CodeGenerator {
 
                         if let Some(ref type_name) = receiver_type {
                             // Check if this is a primitive impl method
-                            if let Some(methods) = self.impl_methods.get(type_name) {
+                            if let Some(methods) = self.impl_methods_for(type_name) {
                                 if let Some(mangled_name) = methods.get(field).cloned() {
                                     // Get function offset before mutable borrow
                                     let func_offset = self
@@ -2959,10 +4988,16 @@ impl CodeGenerator {
                                         // Push self first
                                         self.generate_expression(object);
 
-                                        // Push arguments
-                                        for arg in args {
-                                            self.generate_expression(&arg.value);
-                                        }
+                                        // Push arguments, reordered by name and
+                                        // defaulted gaps filled.
+                                        let declared = self
+                                            .method_params_for(type_name, field)
+                                            .map(<[Parameter]>::to_vec);
+                                        let arg_count = self.emit_ordered_method_args(
+                                            args,
+                                            declared.as_deref(),
+                                            false,
+                                        );
 
                                         // Then load function and call
                                         let idx =
@@ -2973,7 +5008,7 @@ impl CodeGenerator {
                                         self.emit_opcode(Opcode::LoadConst);
                                         self.emit_u16(idx);
                                         self.emit_opcode(Opcode::Call);
-                                        self.emit_u8((args.len() + 1) as u8);
+                                        self.emit_u8((arg_count + 1) as u8);
                                         return;
                                     }
                                 }
@@ -2983,9 +5018,12 @@ impl CodeGenerator {
                         // Fall back to field access approach for non-primitive objects
                         self.generate_expression(object);
 
-                        for arg in args {
-                            self.generate_expression(&arg.value);
-                        }
+                        let declared = self
+                            .expr_type_name(object)
+                            .and_then(|receiver_type| self.method_params_for(&receiver_type, field))
+                            .map(<[Parameter]>::to_vec);
+                        let arg_count =
+                            self.emit_ordered_method_args(args, declared.as_deref(), false);
 
                         self.generate_expression(object);
                         let idx = self.add_constant(Constant::String(field.clone()));
@@ -2993,7 +5031,7 @@ impl CodeGenerator {
                         self.emit_u16(idx);
 
                         self.emit_opcode(Opcode::Call);
-                        self.emit_u8((args.len() + 1) as u8);
+                        self.emit_u8((arg_count + 1) as u8);
                     }
                 } else if let ExpressionKind::EnumVariant {
                     enum_name,
@@ -3026,9 +5064,21 @@ impl CodeGenerator {
                     // Set __data field with the arguments
                     if !args.is_empty() {
                         self.emit_opcode(Opcode::Dup);
+                        let expected_payload = match self.expected_expression_type.as_ref() {
+                            Some(Type::Result { ok_type, .. }) if variant_name == "Ok" => {
+                                Some(ok_type.as_ref().clone())
+                            }
+                            Some(Type::Result { err_type, .. }) if variant_name == "Err" => {
+                                Some(err_type.as_ref().clone())
+                            }
+                            _ => None,
+                        };
                         if args.len() == 1 {
                             // Single argument - store directly
-                            self.generate_expression(&args[0].value);
+                            self.generate_call_argument_as(
+                                &args[0].value,
+                                expected_payload.as_ref(),
+                            );
                         } else {
                             // Multiple arguments - store as an array.
                             // NewArray pops the size off the stack, so push the
@@ -3042,7 +5092,7 @@ impl CodeGenerator {
                                 let idx = self.add_constant(Constant::Int(i as i64));
                                 self.emit_opcode(Opcode::LoadConst);
                                 self.emit_u16(idx);
-                                self.generate_expression(&arg.value);
+                                self.generate_call_argument_as(&arg.value, None);
                                 self.emit_opcode(Opcode::ArraySet);
                             }
                         }
@@ -3069,12 +5119,19 @@ impl CodeGenerator {
                         }
                         _ => None,
                     };
+                    let expected_params = match self.sema.expr_types.get(&callee.id) {
+                        Some(Type::Function { params, .. }) => Some(params.clone()),
+                        _ => None,
+                    };
 
                     // Push arguments in parameter order, filling each skipped
                     // (defaulted) middle slot with that parameter's default.
                     for (idx, slot) in ordered_slots.iter().enumerate() {
                         match slot {
-                            Some(arg) => self.generate_expression(&arg.value),
+                            Some(arg) => self.generate_call_argument_as(
+                                &arg.value,
+                                expected_params.as_ref().and_then(|params| params.get(idx)),
+                            ),
                             None => {
                                 let default_expr = defaults
                                     .as_ref()
@@ -3084,7 +5141,10 @@ impl CodeGenerator {
                                     .expect(
                                         "checker guarantees a skipped slot has a default value",
                                     );
-                                self.generate_expression(&default_expr);
+                                self.generate_call_argument_as(
+                                    &default_expr,
+                                    expected_params.as_ref().and_then(|params| params.get(idx)),
+                                );
                             }
                         }
                     }
@@ -3096,13 +5156,18 @@ impl CodeGenerator {
                         if let Some(defaults) = self.function_defaults.get(fn_name).cloned() {
                             // Find the expected param count
                             if let Some(func) = self.functions.iter().find(|f| &f.name == fn_name) {
-                                let expected_params = func.param_count as usize;
+                                let expected_param_count = func.param_count as usize;
                                 // Generate code for missing default values
                                 for (param_idx, default_expr) in defaults {
                                     if param_idx >= ordered_slots.len()
-                                        && param_idx < expected_params
+                                        && param_idx < expected_param_count
                                     {
-                                        self.generate_expression(&default_expr);
+                                        self.generate_call_argument_as(
+                                            &default_expr,
+                                            expected_params
+                                                .as_ref()
+                                                .and_then(|params| params.get(param_idx)),
+                                        );
                                         total_args += 1;
                                     }
                                 }
@@ -3123,15 +5188,21 @@ impl CodeGenerator {
                 let idx = self.add_constant(Constant::String(field.clone()));
                 self.emit_opcode(Opcode::GetField);
                 self.emit_u16(idx);
+                self.emit_copy_value();
             }
 
             ExpressionKind::Index { object, index } => {
                 self.generate_expression(object);
                 self.generate_expression(index);
                 self.emit_opcode(Opcode::ArrayGet);
+                self.emit_copy_value();
             }
 
             ExpressionKind::Array(elements) => {
+                let element_expected = match self.expected_expression_type.as_ref() {
+                    Some(Type::Array(element)) => Some(element.as_ref().clone()),
+                    _ => None,
+                };
                 // Push element count
                 let count_idx = self.add_constant(Constant::Int(elements.len() as i64));
                 self.emit_opcode(Opcode::LoadConst);
@@ -3144,18 +5215,24 @@ impl CodeGenerator {
                     let idx = self.add_constant(Constant::Int(i as i64));
                     self.emit_opcode(Opcode::LoadConst);
                     self.emit_u16(idx);
-                    self.generate_expression(elem);
+                    self.generate_expression_as(elem, element_expected.as_ref());
+                    self.emit_copy_value();
                     self.emit_opcode(Opcode::ArraySet);
                 }
             }
 
             ExpressionKind::Tuple(elements) => {
-                // Compile as array (same as Array expression)
-                // First create the array
+                let tuple_expected = match self.expected_expression_type.as_ref() {
+                    Some(Type::Tuple(types)) => Some(types.clone()),
+                    _ => None,
+                };
+                // Tuples have a distinct runtime representation. Their
+                // element values are copied at construction so nested
+                // value-semantic aggregates do not alias the source.
                 let count_idx = self.add_constant(Constant::Int(elements.len() as i64));
                 self.emit_opcode(Opcode::LoadConst);
                 self.emit_u16(count_idx);
-                self.emit_opcode(Opcode::NewArray);
+                self.emit_opcode(Opcode::NewTuple);
 
                 // Set elements
                 for (i, elem) in elements.iter().enumerate() {
@@ -3163,19 +5240,42 @@ impl CodeGenerator {
                     let idx = self.add_constant(Constant::Int(i as i64));
                     self.emit_opcode(Opcode::LoadConst);
                     self.emit_u16(idx);
-                    self.generate_expression(elem);
-                    self.emit_opcode(Opcode::ArraySet);
+                    self.generate_expression_as(
+                        elem,
+                        tuple_expected.as_ref().and_then(|types| types.get(i)),
+                    );
+                    self.emit_copy_value();
+                    self.emit_opcode(Opcode::TupleSet);
                 }
             }
 
             ExpressionKind::Assign { target, value } => match &target.kind {
                 ExpressionKind::Identifier(name) => {
-                    self.generate_expression(value);
-                    // Duplicate value so assignment expression has a result
-                    self.emit_opcode(Opcode::Dup);
+                    let expected = self
+                        .sema
+                        .symbol_refs
+                        .get(&target.id)
+                        .and_then(|symbol| self.sema.symbols.get(symbol))
+                        .map(|symbol| symbol.ty.clone());
+                    self.generate_expression_as(value, expected.as_ref());
+                    self.emit_copy_value();
                     if let Some(slot) = self.lookup_local(name) {
-                        self.emit_opcode(Opcode::StoreLocal);
-                        self.emit_u16(slot);
+                        if self.is_global_mutable_slot(name, slot) {
+                            self.emit_global_cell_store(slot);
+                        } else {
+                            // Duplicate value so assignment expression has a result
+                            self.emit_opcode(Opcode::Dup);
+                            self.emit_opcode(Opcode::StoreLocal);
+                            self.emit_u16(slot);
+                        }
+                    } else if self.capture_global_mutables.contains(name) {
+                        if !self.emit_capture_cell_store(name) {
+                            self.errors
+                                .push(CodegenError::UndefinedVariable { name: name.clone() });
+                        }
+                    } else {
+                        self.errors
+                            .push(CodegenError::UndefinedVariable { name: name.clone() });
                     }
                     // Stack now has the assigned value as the expression result
                 }
@@ -3184,9 +5284,15 @@ impl CodeGenerator {
                 // temp so the assignment expression still yields the value.
                 ExpressionKind::FieldAccess { object, field } => {
                     let tmp = self.alloc_temp();
-                    self.generate_expression(value);
+                    let expected = self
+                        .sema
+                        .field_resolution
+                        .get(&target.id)
+                        .map(|resolution| resolution.resolved_type.clone());
+                    self.generate_expression_as(value, expected.as_ref());
+                    self.emit_copy_value();
                     self.store_temp(tmp);
-                    self.generate_expression(object);
+                    self.generate_lvalue_object(object);
                     self.load_temp(tmp);
                     let idx = self.add_constant(Constant::String(field.clone()));
                     self.emit_opcode(Opcode::SetField);
@@ -3195,10 +5301,22 @@ impl CodeGenerator {
                 }
                 // `arr[index] = value` — same shape, via ArraySet.
                 ExpressionKind::Index { object, index } => {
+                    if self.reject_tuple_index_assignment(object) {
+                        return;
+                    }
                     let tmp = self.alloc_temp();
-                    self.generate_expression(value);
+                    let expected = self
+                        .sema
+                        .expr_types
+                        .get(&object.id)
+                        .and_then(|ty| match ty {
+                            Type::Array(element) => Some(element.as_ref().clone()),
+                            _ => None,
+                        });
+                    self.generate_expression_as(value, expected.as_ref());
+                    self.emit_copy_value();
                     self.store_temp(tmp);
-                    self.generate_expression(object);
+                    self.generate_lvalue_object(object);
                     self.generate_expression(index);
                     self.load_temp(tmp);
                     self.emit_opcode(Opcode::ArraySet);
@@ -3279,11 +5397,23 @@ impl CodeGenerator {
                         self.generate_expression(target);
                         self.generate_expression(value);
                         self.emit_opcode(opcode);
-                        // Duplicate so the compound-assign expression has a result
-                        self.emit_opcode(Opcode::Dup);
                         if let Some(slot) = self.lookup_local(name) {
-                            self.emit_opcode(Opcode::StoreLocal);
-                            self.emit_u16(slot);
+                            if self.is_global_mutable_slot(name, slot) {
+                                self.emit_global_cell_store(slot);
+                            } else {
+                                // Duplicate so the compound-assign expression has a result
+                                self.emit_opcode(Opcode::Dup);
+                                self.emit_opcode(Opcode::StoreLocal);
+                                self.emit_u16(slot);
+                            }
+                        } else if self.capture_global_mutables.contains(name) {
+                            if !self.emit_capture_cell_store(name) {
+                                self.errors
+                                    .push(CodegenError::UndefinedVariable { name: name.clone() });
+                            }
+                        } else {
+                            self.errors
+                                .push(CodegenError::UndefinedVariable { name: name.clone() });
                         }
                     }
                     // `obj.field op= value` — evaluate the object once, read the
@@ -3309,6 +5439,9 @@ impl CodeGenerator {
                     }
                     // `arr[index] op= value` — evaluate array and index once.
                     ExpressionKind::Index { object, index } => {
+                        if self.reject_tuple_index_assignment(object) {
+                            return;
+                        }
                         let arr_slot = self.alloc_temp();
                         let idx_slot = self.alloc_temp();
                         let new_slot = self.alloc_temp();
@@ -3347,7 +5480,8 @@ impl CodeGenerator {
                         if i == stmt_count - 1 {
                             // Last statement: if it's an expression, leave value on stack
                             if let StatementKind::Expression(expr) = &stmt.kind {
-                                self.generate_expression(expr);
+                                let expected = self.expected_expression_type.clone();
+                                self.generate_expression_as(expr, expected.as_ref());
                                 // Don't pop - this is the block's value
                             } else {
                                 // Not an expression, just generate normally and push null
@@ -3380,16 +5514,25 @@ impl CodeGenerator {
                 let else_jump = self.current_offset();
                 self.emit_i16(0);
 
-                self.generate_expression(then_expr);
+                let expected = self.expected_expression_type.clone();
+                self.generate_expression_as(then_expr, expected.as_ref());
 
                 self.emit_opcode(Opcode::Jump);
                 let end_jump = self.current_offset();
                 self.emit_i16(0);
 
                 self.patch_jump(else_jump, self.current_offset());
-                self.generate_expression(else_expr);
+                self.generate_expression_as(else_expr, expected.as_ref());
 
                 self.patch_jump(end_jump, self.current_offset());
+
+                // A call nested in the final branch is not the return
+                // expression itself: both branches converge here and the
+                // enclosing return must still run.  Keep the direct-tail-call
+                // marker from leaking out of the conditional, otherwise the
+                // final branch is rewritten to `TailCall` while the first
+                // branch jumps into the caller's following code.
+                self.trailing_call = None;
             }
 
             ExpressionKind::Match { subject, arms } => {
@@ -3412,24 +5555,73 @@ impl CodeGenerator {
                     // Create scope for this arm's pattern bindings
                     self.push_scope();
 
-                    // Load subject for pattern matching
-                    self.emit_opcode(Opcode::LoadLocal);
-                    self.emit_u16(subject_slot);
+                    let alternatives = match expand_or_pattern(&arm.pattern) {
+                        Ok(alternatives) if !alternatives.is_empty() => alternatives,
+                        Ok(_) => {
+                            self.errors.push(CodegenError::GenericError {
+                                message: "or-pattern has no alternatives".to_string(),
+                            });
+                            vec![arm.pattern.clone()]
+                        }
+                        Err(message) => {
+                            self.errors.push(CodegenError::GenericError { message });
+                            vec![arm.pattern.clone()]
+                        }
+                    };
 
-                    // Generate pattern check
-                    let matches = self.generate_pattern_check(&arm.pattern);
-
-                    if !matches {
-                        // Pattern needs runtime check - if no match, jump to next arm
-                        self.emit_opcode(Opcode::JumpIfFalse);
-                        next_arm_patches.push(self.current_offset());
-                        self.emit_i16(0);
+                    // Every alternative is checked to bind the same names. Give
+                    // those names one canonical set of slots so the shared guard
+                    // and body read whichever alternative actually matched.
+                    let mut binding_names = Vec::new();
+                    self.collect_pattern_bindings(&alternatives[0], &mut binding_names);
+                    let mut binding_slots = HashMap::new();
+                    for name in binding_names {
+                        binding_slots
+                            .entry(name.clone())
+                            .or_insert_with(|| self.define_local(&name));
                     }
 
-                    // Bind pattern variables
-                    self.emit_opcode(Opcode::LoadLocal);
-                    self.emit_u16(subject_slot);
-                    self.bind_pattern_variables(&arm.pattern);
+                    let mut success_patches = Vec::new();
+                    let mut pending_failure = None;
+                    for (alternative_index, alternative) in alternatives.iter().enumerate() {
+                        if let Some(patch) = pending_failure.take() {
+                            self.patch_jump(patch, self.current_offset());
+                        }
+
+                        self.emit_opcode(Opcode::LoadLocal);
+                        self.emit_u16(subject_slot);
+                        let always_matches = self.generate_pattern_check(alternative);
+                        let failure_patch = if always_matches {
+                            None
+                        } else {
+                            self.emit_opcode(Opcode::JumpIfFalse);
+                            let patch = self.current_offset();
+                            self.emit_i16(0);
+                            Some(patch)
+                        };
+
+                        self.emit_opcode(Opcode::LoadLocal);
+                        self.emit_u16(subject_slot);
+                        self.bind_pattern_variables_to(alternative, Some(&binding_slots));
+
+                        let has_later_alternative =
+                            !always_matches && alternative_index + 1 < alternatives.len();
+                        if has_later_alternative {
+                            self.emit_opcode(Opcode::Jump);
+                            success_patches.push(self.current_offset());
+                            self.emit_i16(0);
+                            pending_failure = failure_patch;
+                        } else {
+                            if let Some(patch) = failure_patch {
+                                next_arm_patches.push(patch);
+                            }
+                            break;
+                        }
+                    }
+                    let matched_offset = self.current_offset();
+                    for patch in success_patches {
+                        self.patch_jump(patch, matched_offset);
+                    }
 
                     // Handle guard if present
                     if let Some(guard) = &arm.guard {
@@ -3440,7 +5632,8 @@ impl CodeGenerator {
                     }
 
                     // Generate arm body
-                    self.generate_expression(&arm.body);
+                    let expected = self.expected_expression_type.clone();
+                    self.generate_expression_as(&arm.body, expected.as_ref());
 
                     // Pop the arm scope
                     self.pop_scope();
@@ -3480,58 +5673,15 @@ impl CodeGenerator {
                 for jump in end_jumps {
                     self.patch_jump(jump, end);
                 }
+
+                // As with `if`, an arm body may end in a call, but a match
+                // expression has multiple control-flow paths that merge at
+                // `end`; its caller must emit the single return boundary.
+                self.trailing_call = None;
             }
 
             ExpressionKind::Spawn(inner) => {
-                // Spawn creates a new fiber to execute the given expression
-                // The spawned expression is typically a function call
-                match &inner.kind {
-                    ExpressionKind::Call { callee, args, .. } => {
-                        // Push arguments first
-                        for arg in args {
-                            self.generate_expression(&arg.value);
-                        }
-
-                        // Get the function's code offset
-                        // For now, we look up the function name
-                        if let ExpressionKind::Identifier(name) = &callee.kind {
-                            // Find function in our table
-                            let func_offset = self
-                                .functions
-                                .iter()
-                                .find(|f| f.name == *name)
-                                .map(|f| f.code_offset);
-
-                            if let Some(offset) = func_offset {
-                                self.emit_opcode(Opcode::Spawn);
-                                self.emit_u16(offset as u16);
-                                self.emit_u8(args.len() as u8);
-                            } else {
-                                self.errors.push(CodegenError::GenericError {
-                                    message: format!("Unknown function in spawn: {}", name),
-                                });
-                            }
-                        } else {
-                            // For non-identifier callees, emit the callee and use dynamic spawn
-                            self.generate_expression(callee);
-                            self.emit_opcode(Opcode::Spawn);
-                            self.emit_u16(0); // Dynamic lookup at runtime
-                            self.emit_u8(args.len() as u8);
-                        }
-                    }
-                    _ => {
-                        // For non-call expressions, wrap in a thunk
-                        // Generate the expression at current position, emit spawn with offset 0
-                        let spawn_offset = self.current_offset();
-                        self.generate_expression(inner);
-                        self.emit_opcode(Opcode::Return);
-
-                        // Emit spawn instruction pointing to the thunk
-                        self.emit_opcode(Opcode::Spawn);
-                        self.emit_u16(spawn_offset as u16);
-                        self.emit_u8(0);
-                    }
-                }
+                self.generate_spawn(inner);
             }
 
             ExpressionKind::Select(arms) => {
@@ -3556,7 +5706,7 @@ impl CodeGenerator {
                         }
                         SelectArmKind::Send { channel, value } => {
                             self.generate_expression(channel);
-                            self.generate_expression(value);
+                            self.generate_call_argument(value);
                         }
                         SelectArmKind::Default => {}
                     }
@@ -3595,6 +5745,7 @@ impl CodeGenerator {
                     } = &arm.kind
                     {
                         let slot = self.define_local(var);
+                        self.emit_copy_value();
                         self.emit_opcode(Opcode::StoreLocal);
                         self.emit_u16(slot);
                     } else if let SelectArmKind::Recv { variable: None, .. } = &arm.kind {
@@ -3621,11 +5772,24 @@ impl CodeGenerator {
                 for jump in end_jumps {
                     self.patch_jump(jump, end);
                 }
+
+                // Select arms also converge after their bodies.  Do not let
+                // the last arm's call masquerade as a direct tail call of the
+                // whole expression.
+                self.trailing_call = None;
             }
 
             ExpressionKind::StructLiteral { name, fields } => {
-                // Create a new object
-                self.emit_opcode(Opcode::NewObject);
+                // Classes retain reference identity; all other named and
+                // anonymous struct literals are value-semantic aggregates.
+                if name
+                    .as_ref()
+                    .is_some_and(|type_name| self.class_parents.contains_key(type_name))
+                {
+                    self.emit_opcode(Opcode::NewObject);
+                } else {
+                    self.emit_opcode(Opcode::NewStruct);
+                }
 
                 // Set each field
                 for (field_name, value) in fields {
@@ -3633,7 +5797,9 @@ impl CodeGenerator {
                     self.emit_opcode(Opcode::Dup);
 
                     // Generate the value expression
-                    self.generate_expression(value);
+                    let expected = self.expected_field_type(expr, field_name);
+                    self.generate_expression_as(value, expected.as_ref());
+                    self.emit_copy_value();
 
                     // Set the field
                     let idx = self.add_constant(Constant::String(field_name.clone()));
@@ -3671,70 +5837,7 @@ impl CodeGenerator {
 
             // Unimplemented expressions
             ExpressionKind::Lambda { params, body } => {
-                // Find free variables (captured from enclosing scope)
-                let param_names: Vec<_> = params.iter().map(|p| p.name.clone()).collect();
-                let free_vars = self.find_free_variables(body, &param_names);
-
-                // Push captured values onto stack (before jumping over lambda code)
-                for var_name in &free_vars {
-                    if let Some(slot) = self.resolve_local(var_name) {
-                        self.emit_opcode(Opcode::LoadLocal);
-                        self.emit_u16(slot);
-                    } else {
-                        // Variable not found - will be an error, push null
-                        let null_idx = self.add_constant(Constant::Null);
-                        self.emit_opcode(Opcode::LoadConst);
-                        self.emit_u16(null_idx);
-                    }
-                }
-
-                // Emit a jump to skip over the lambda code
-                self.emit_opcode(Opcode::Jump);
-                let skip_jump = self.current_offset();
-                self.emit_i16(0);
-
-                // Record lambda function start
-                let lambda_start = self.current_offset();
-
-                // Save current state and create new scope for lambda
-                let prev_locals = std::mem::take(&mut self.locals);
-                let prev_next_local = self.next_local;
-                let prev_captures = std::mem::take(&mut self.captures);
-                self.locals = vec![HashMap::new()];
-                self.next_local = 0;
-                self.captures = free_vars.clone();
-
-                // Add parameters as locals
-                for param in params {
-                    self.define_local(&param.name);
-                }
-
-                // Generate lambda body
-                self.generate_expression(body);
-
-                // Return the result
-                self.emit_opcode(Opcode::Return);
-
-                // Restore state
-                self.locals = prev_locals;
-                self.next_local = prev_next_local;
-                self.captures = prev_captures;
-
-                // Patch the skip jump
-                self.patch_jump(skip_jump, self.current_offset());
-
-                // Create closure with captured values
-                if free_vars.is_empty() {
-                    // No captures - just push function constant
-                    let func_idx = self.add_constant(Constant::Function(lambda_start));
-                    self.emit_opcode(Opcode::LoadConst);
-                    self.emit_u16(func_idx);
-                } else {
-                    // Create closure with captures
-                    self.emit_opcode(Opcode::MakeClosure);
-                    self.emit_u16(lambda_start as u16);
-                    self.emit_u8(free_vars.len() as u8);
-                }
+                self.generate_lambda_closure(params, body, true);
             }
 
             ExpressionKind::EnumVariant {
@@ -3767,14 +5870,41 @@ impl CodeGenerator {
 
             ExpressionKind::TypeCheck {
                 expr: inner,
-                type_expr,
+                type_expr: _,
             } => {
                 // Evaluate the expression
                 self.generate_expression(inner);
-                // Emit TypeIs opcode with type id
-                let type_id = self.type_expr_to_id(type_expr);
-                self.emit_opcode(Opcode::TypeIs);
-                self.emit_u8(type_id);
+                // `any` is a checker-level universal target, not a VM runtime
+                // category. Still evaluate the operand exactly once so calls,
+                // assignments, and other side effects retain their semantics.
+                match self.sema.type_check_targets.get(&expr.id).cloned() {
+                    Some(Type::Any) => {
+                        self.emit_opcode(Opcode::Pop);
+                        let true_idx = self.add_constant(Constant::Bool(true));
+                        self.emit_opcode(Opcode::LoadConst);
+                        self.emit_u16(true_idx);
+                    }
+                    Some(Type::Interface(interface_name)) => {
+                        let source = self.sema.expr_types.get(&inner.id).cloned();
+                        self.emit_interface_is(&interface_name, source.as_ref());
+                    }
+                    Some(target) => {
+                        self.emit_opcode(Opcode::TypeIs);
+                        self.emit_u8(Self::resolved_type_to_id(&target));
+                    }
+                    None => {
+                        self.errors.push(CodegenError::GenericError {
+                            message: format!(
+                                "Missing resolved type-check target for expression {}",
+                                expr.id
+                            ),
+                        });
+                        self.emit_opcode(Opcode::Pop);
+                        let false_idx = self.add_constant(Constant::Bool(false));
+                        self.emit_opcode(Opcode::LoadConst);
+                        self.emit_u16(false_idx);
+                    }
+                }
             }
 
             ExpressionKind::Cast {
@@ -3782,7 +5912,11 @@ impl CodeGenerator {
                 type_expr,
             } => {
                 // Evaluate the expression
-                self.generate_expression(inner);
+                let expected = self.interface_type_expr(Some(type_expr));
+                self.generate_expression_as(inner, expected.as_ref());
+                if expected.is_some() {
+                    return;
+                }
                 // Emit Cast opcode with type id
                 let type_id = self.type_expr_to_id(type_expr);
                 self.emit_opcode(Opcode::Cast);
@@ -3808,6 +5942,7 @@ impl CodeGenerator {
                 let field_idx = self.add_constant(Constant::String(field.clone()));
                 self.emit_opcode(Opcode::GetField);
                 self.emit_u16(field_idx);
+                self.emit_copy_value();
                 // Jump over null case
                 self.emit_opcode(Opcode::Jump);
                 let end_jump = self.current_offset();
@@ -3862,6 +5997,7 @@ impl CodeGenerator {
                         ExpressionKind::StringLiteral(s) => {
                             self.emit_opcode(Opcode::Dup);
                             self.generate_expression(value);
+                            self.emit_copy_value();
                             let key_idx = self.add_constant(Constant::String(s.clone()));
                             self.emit_opcode(Opcode::SetField);
                             self.emit_u16(key_idx);
@@ -3967,6 +6103,7 @@ impl CodeGenerator {
                 let data_field = self.add_constant(Constant::String("__data".to_string()));
                 self.emit_opcode(Opcode::GetField);
                 self.emit_u16(data_field);
+                self.emit_copy_value();
                 // Stack: [unwrapped_value]
 
                 self.emit_opcode(Opcode::Jump);
@@ -3987,12 +6124,15 @@ impl CodeGenerator {
                 args,
                 type_args: _, // Type-erased at runtime (monomorphization deferred, ROADMAP T7.6)
             } => {
+                if self.generate_interface_method_call(receiver, method, args) {
+                    return;
+                }
                 // Check if this is a method call on a primitive type
                 let receiver_type = self.expr_type_name(receiver);
 
                 if let Some(type_name) = receiver_type {
                     // Check if this is a primitive impl method
-                    if let Some(methods) = self.impl_methods.get(&type_name) {
+                    if let Some(methods) = self.impl_methods_for(&type_name) {
                         if let Some(mangled_name) = methods.get(method).cloned() {
                             // Get function offset before mutable borrow
                             let func_offset = self
@@ -4004,10 +6144,13 @@ impl CodeGenerator {
                                 // Push self first
                                 self.generate_expression(receiver);
 
-                                // Push arguments
-                                for arg in args {
-                                    self.generate_expression(&arg.value);
-                                }
+                                // Push arguments, reordered by name and
+                                // defaulted gaps filled.
+                                let declared = self
+                                    .method_params_for(&type_name, method)
+                                    .map(<[Parameter]>::to_vec);
+                                let arg_count =
+                                    self.emit_ordered_method_args(args, declared.as_deref(), false);
 
                                 // Then load function and call
                                 let idx = self.add_constant_internal(Constant::Function(offset));
@@ -4017,7 +6160,7 @@ impl CodeGenerator {
                                 self.emit_opcode(Opcode::LoadConst);
                                 self.emit_u16(idx);
                                 self.emit_opcode(Opcode::Call);
-                                self.emit_u8((args.len() + 1) as u8);
+                                self.emit_u8((arg_count + 1) as u8);
                                 return;
                             }
                         }
@@ -4030,13 +6173,286 @@ impl CodeGenerator {
                 let method_idx = self.add_constant(Constant::String(method.clone()));
                 self.emit_opcode(Opcode::GetField);
                 self.emit_u16(method_idx);
-                for arg in args {
-                    self.generate_expression(&arg.value);
-                }
+                let declared = self
+                    .expr_type_name(receiver)
+                    .and_then(|receiver_type| self.method_params_for(&receiver_type, method))
+                    .map(<[Parameter]>::to_vec);
+                let arg_count = self.emit_ordered_method_args(args, declared.as_deref(), false);
                 self.emit_opcode(Opcode::Call);
-                self.emit_u8((args.len() + 1) as u8);
+                self.emit_u8((arg_count + 1) as u8);
             }
         }
+    }
+
+    /// Generate a range loop using integer locals and the same ascending
+    /// bounds semantics as the native backend (`i < end`, or `i <= end` for
+    /// an inclusive range). Stored ranges are unpacked once before entering
+    /// the loop, so body mutations cannot change the iteration bounds.
+    fn generate_range_loop(&mut self, variable: &str, iterable: &Expression, body: &Block) {
+        let (start_slot, end_slot, inclusive_slot) = if let ExpressionKind::Range {
+            start,
+            end,
+            inclusive,
+        } = &iterable.kind
+        {
+            let (Some(start), Some(end)) = (start, end) else {
+                self.errors.push(CodegenError::GenericError {
+                    message: "Cannot iterate an open-ended range".to_string(),
+                });
+                return;
+            };
+
+            self.generate_expression(start);
+            let start_slot = self.define_local(&format!("__range_start_{}", self.next_local));
+            self.emit_opcode(Opcode::StoreLocal);
+            self.emit_u16(start_slot);
+
+            self.generate_expression(end);
+            let end_slot = self.define_local(&format!("__range_end_{}", self.next_local));
+            self.emit_opcode(Opcode::StoreLocal);
+            self.emit_u16(end_slot);
+
+            let inclusive_idx = self.add_constant(Constant::Bool(*inclusive));
+            self.emit_opcode(Opcode::LoadConst);
+            self.emit_u16(inclusive_idx);
+            let inclusive_slot =
+                self.define_local(&format!("__range_inclusive_{}", self.next_local));
+            self.emit_opcode(Opcode::StoreLocal);
+            self.emit_u16(inclusive_slot);
+            (start_slot, end_slot, inclusive_slot)
+        } else {
+            self.generate_expression(iterable);
+            let range_slot = self.define_local(&format!("__range_{}", self.next_local));
+            self.emit_opcode(Opcode::StoreLocal);
+            self.emit_u16(range_slot);
+
+            let load_field = |generator: &mut Self, field: &str| {
+                generator.emit_opcode(Opcode::LoadLocal);
+                generator.emit_u16(range_slot);
+                let field_idx = generator.add_constant(Constant::String(field.to_string()));
+                generator.emit_opcode(Opcode::GetField);
+                generator.emit_u16(field_idx);
+            };
+
+            load_field(self, "start");
+            let start_slot = self.define_local(&format!("__range_start_{}", self.next_local));
+            self.emit_opcode(Opcode::StoreLocal);
+            self.emit_u16(start_slot);
+
+            load_field(self, "end");
+            let end_slot = self.define_local(&format!("__range_end_{}", self.next_local));
+            self.emit_opcode(Opcode::StoreLocal);
+            self.emit_u16(end_slot);
+
+            load_field(self, "inclusive");
+            let inclusive_slot =
+                self.define_local(&format!("__range_inclusive_{}", self.next_local));
+            self.emit_opcode(Opcode::StoreLocal);
+            self.emit_u16(inclusive_slot);
+            (start_slot, end_slot, inclusive_slot)
+        };
+
+        let counter_slot = self.define_local(variable);
+        self.emit_opcode(Opcode::LoadLocal);
+        self.emit_u16(start_slot);
+        self.emit_opcode(Opcode::StoreLocal);
+        self.emit_u16(counter_slot);
+
+        let loop_start = self.current_offset();
+        self.emit_opcode(Opcode::LoadLocal);
+        self.emit_u16(counter_slot);
+        self.emit_opcode(Opcode::LoadLocal);
+        self.emit_u16(end_slot);
+        self.emit_opcode(Opcode::ILt);
+        self.emit_opcode(Opcode::LoadLocal);
+        self.emit_u16(counter_slot);
+        self.emit_opcode(Opcode::LoadLocal);
+        self.emit_u16(end_slot);
+        self.emit_opcode(Opcode::IEq);
+        self.emit_opcode(Opcode::LoadLocal);
+        self.emit_u16(inclusive_slot);
+        self.emit_opcode(Opcode::And);
+        self.emit_opcode(Opcode::Or);
+
+        self.emit_opcode(Opcode::JumpIfFalse);
+        let exit_jump = self.current_offset();
+        self.emit_i16(0);
+
+        self.loop_stack.push(LoopContext {
+            start_offset: loop_start,
+            continue_target: None,
+            break_patches: Vec::new(),
+            continue_patches: Vec::new(),
+        });
+        self.generate_block(body);
+
+        let increment_start = self.current_offset();
+        let continue_patches: Vec<usize> = self
+            .loop_stack
+            .last()
+            .map(|ctx| ctx.continue_patches.clone())
+            .unwrap_or_default();
+        for cont_offset in continue_patches {
+            self.patch_jump(cont_offset, increment_start);
+        }
+
+        self.emit_opcode(Opcode::LoadLocal);
+        self.emit_u16(counter_slot);
+        let one_idx = self.add_constant(Constant::Int(1));
+        self.emit_opcode(Opcode::LoadConst);
+        self.emit_u16(one_idx);
+        self.emit_opcode(Opcode::IAdd);
+        self.emit_opcode(Opcode::StoreLocal);
+        self.emit_u16(counter_slot);
+
+        self.emit_opcode(Opcode::Jump);
+        let delta = (loop_start as i16) - (self.current_offset() as i16) - 2;
+        self.emit_i16(delta);
+
+        self.patch_jump(exit_jump, self.current_offset());
+        let loop_ctx = self
+            .loop_stack
+            .pop()
+            .expect("range loop stack should have context");
+        for break_offset in loop_ctx.break_patches {
+            self.patch_jump(break_offset, self.current_offset());
+        }
+    }
+
+    /// Emit a dedicated opcode for `len`, `push`, and `pop` on a collection.
+    /// Returning `false` lets user-defined impl methods and ordinary object
+    /// methods continue through the normal dispatch logic.
+    fn generate_collection_method(
+        &mut self,
+        object: &Expression,
+        field: &str,
+        args: &[Argument],
+    ) -> bool {
+        let Some(receiver_ty) = self.sema.expr_types.get(&object.id) else {
+            return false;
+        };
+        let is_collection = matches!(receiver_ty, Type::Array(_) | Type::Any);
+        if !is_collection || !matches!(field, "len" | "push" | "pop") {
+            return false;
+        }
+
+        // An explicit impl method takes precedence over the intrinsic
+        // collection operation, matching checker field resolution.
+        if matches!(receiver_ty, Type::Array(_)) {
+            let type_name = receiver_ty.display_name();
+            if self
+                .impl_methods
+                .get(&type_name)
+                .is_some_and(|methods| methods.contains_key(field))
+                || self
+                    .impl_methods
+                    .get("array")
+                    .is_some_and(|methods| methods.contains_key(field))
+            {
+                return false;
+            }
+        }
+
+        match field {
+            "len" if args.is_empty() => {
+                self.generate_expression(object);
+                self.emit_opcode(Opcode::ArrayLen);
+            }
+            "push" if args.len() == 1 => {
+                self.generate_expression(object);
+                self.generate_call_argument(&args[0].value);
+                self.emit_opcode(Opcode::ArrayPush);
+                self.emit_void_value();
+            }
+            "pop" if args.is_empty() => {
+                self.generate_expression(object);
+                self.emit_opcode(Opcode::ArrayPop);
+            }
+            "len" => self.errors.push(CodegenError::GenericError {
+                message: "len() takes no method arguments".to_string(),
+            }),
+            "push" => self.errors.push(CodegenError::GenericError {
+                message: "push() requires 1 method argument".to_string(),
+            }),
+            "pop" => self.errors.push(CodegenError::GenericError {
+                message: "pop() takes no method arguments".to_string(),
+            }),
+            _ => unreachable!("collection method was checked above"),
+        }
+        true
+    }
+
+    fn generate_interface_method_call(
+        &mut self,
+        object: &Expression,
+        field: &str,
+        args: &[Argument],
+    ) -> bool {
+        let Some(interface_name) = self.interface_receiver_type(object) else {
+            return false;
+        };
+        let interface_name = self
+            .canonical_interface_name(&interface_name)
+            .unwrap_or(interface_name);
+        let Some(spec) = self
+            .interface_specs(&interface_name)
+            .and_then(|methods| methods.iter().find(|method| method.name == field))
+            .cloned()
+        else {
+            return false;
+        };
+        let has_self = spec
+            .params
+            .first()
+            .is_some_and(|param| param.name == "self");
+        let params = &spec.params[usize::from(has_self)..];
+        let mut slots: Vec<Option<&Argument>> = vec![None; params.len()];
+        for (position, arg) in args.iter().enumerate() {
+            let index = arg
+                .name
+                .as_ref()
+                .and_then(|name| params.iter().position(|param| param.name == *name))
+                .unwrap_or(position);
+            if index >= slots.len() || slots[index].is_some() {
+                self.errors.push(CodegenError::GenericError {
+                    message: format!("invalid arguments for interface method '{field}'"),
+                });
+                return true;
+            }
+            slots[index] = Some(arg);
+        }
+        self.generate_expression(object);
+        for (index, arg) in slots.into_iter().enumerate() {
+            let expected = self.interface_type_expr(Some(&params[index].type_ann));
+            if let Some(arg) = arg {
+                self.generate_call_argument_as(&arg.value, expected.as_ref());
+            } else if let Some(default) = params[index].default.as_ref() {
+                self.generate_call_argument_as(default, expected.as_ref());
+            } else {
+                self.errors.push(CodegenError::GenericError {
+                    message: format!("missing argument for interface method '{field}'"),
+                });
+                return true;
+            }
+        }
+        let method_idx = self.add_constant(Constant::String(field.to_string()));
+        self.emit_opcode(Opcode::InterfaceCall);
+        self.emit_u16(method_idx);
+        self.emit_u8(params.len() as u8);
+        if let Some(return_type) = self.interface_method_return_type(&interface_name, &spec) {
+            let return_interface = match return_type {
+                Type::Interface(name) => Some(name),
+                Type::Optional(inner) => match *inner {
+                    Type::Interface(name) => Some(name),
+                    _ => None,
+                },
+                _ => None,
+            };
+            if let Some(return_interface) = return_interface {
+                self.emit_interface_box(&return_interface, &Type::Unknown);
+            }
+        }
+        true
     }
 
     /// The full method table to attach to an instance of `type_name`: the
@@ -4090,6 +6506,21 @@ impl CodeGenerator {
             return matches!(ty, Type::Float);
         }
         matches!(&expr.kind, ExpressionKind::FloatLiteral(_))
+    }
+
+    /// Keep tuple element assignment out of the bytecode even if a caller
+    /// invokes code generation with a partially checked program. The checker
+    /// is the primary diagnostic layer; this guard prevents a stale or custom
+    /// semantic table from lowering an immutable tuple target to ArraySet.
+    fn reject_tuple_index_assignment(&mut self, object: &Expression) -> bool {
+        if matches!(self.sema.expr_types.get(&object.id), Some(Type::Tuple(_))) {
+            self.errors.push(CodegenError::GenericError {
+                message: "cannot assign to tuple index: tuples are immutable".to_string(),
+            });
+            true
+        } else {
+            false
+        }
     }
 
     /// Get the display name of an expression's type for method dispatch.
@@ -4346,26 +6777,6 @@ mod tests {
         assert!(find_opcode(&bytecode, Opcode::Ge));
         assert!(find_opcode(&bytecode, Opcode::Lt));
         assert!(find_opcode(&bytecode, Opcode::And));
-    }
-
-    #[test]
-    fn match_or_pattern_generates_or_opcode() {
-        let bytecode = compile_source(
-            r#"
-            enum Color { Red, Green, Blue }
-            fn test(c: Color) -> string {
-                return match c {
-                    Color::Red | Color::Green => "warm",
-                    _ => "other"
-                }
-            }
-        "#,
-        )
-        .unwrap();
-        assert!(
-            find_opcode(&bytecode, Opcode::Or),
-            "Or-pattern must emit Or opcode"
-        );
     }
 
     #[test]
@@ -5135,7 +7546,7 @@ mod tests {
     }
 
     #[test]
-    fn test_struct_literal_emits_newobject() {
+    fn test_struct_literal_emits_newstruct() {
         let bytecode = compile_source(
             r#"
             struct Point {
@@ -5146,7 +7557,23 @@ mod tests {
         "#,
         )
         .unwrap();
+        assert!(find_opcode(&bytecode, Opcode::NewStruct));
+        assert!(!find_opcode(&bytecode, Opcode::NewObject));
+    }
+
+    #[test]
+    fn test_class_literal_emits_newobject() {
+        let bytecode = compile_source(
+            r#"
+            class Counter {
+                value: int
+            }
+            let c = Counter { value: 0 }
+        "#,
+        )
+        .unwrap();
         assert!(find_opcode(&bytecode, Opcode::NewObject));
+        assert!(!find_opcode(&bytecode, Opcode::NewStruct));
     }
 
     #[test]
@@ -5334,6 +7761,22 @@ mod tests {
         "#,
         )
         .unwrap();
+        assert!(find_opcode(&bytecode, Opcode::ArrayPop));
+    }
+
+    #[test]
+    fn collection_method_calls_emit_intrinsic_opcodes() {
+        let bytecode = compile_source(
+            r#"
+            let arr = [1]
+            arr.push(2)
+            let size = arr.len()
+            let last = arr.pop()
+            "#,
+        )
+        .unwrap();
+        assert!(find_opcode(&bytecode, Opcode::ArrayPush));
+        assert!(find_opcode(&bytecode, Opcode::ArrayLen));
         assert!(find_opcode(&bytecode, Opcode::ArrayPop));
     }
 
@@ -5712,8 +8155,9 @@ mod tests {
         "#,
         )
         .unwrap();
-        // Static method creates struct
-        assert!(find_opcode(&bytecode, Opcode::NewObject));
+        // Static method creates a value-semantic struct.
+        assert!(find_opcode(&bytecode, Opcode::NewStruct));
+        assert!(!find_opcode(&bytecode, Opcode::NewObject));
     }
 
     // ==========================================================================

@@ -16,6 +16,7 @@ export function ValueDisplay({ value, showType = true }: ValueDisplayProps) {
       case 'Float': return 'value-float';
       case 'String': return 'value-string';
       case 'Array': return 'value-array';
+      case 'Tuple': return 'value-tuple';
       case 'Object': return 'value-object';
       case 'Function': return 'value-function';
       case 'Closure': return 'value-function';
@@ -38,6 +39,8 @@ export function ValueDisplay({ value, showType = true }: ValueDisplayProps) {
         return `"${value.value}"`;
       case 'Array':
         return `[${value.elements.length} elements]`;
+      case 'Tuple':
+        return `(${value.elements.length} elements)`;
       case 'Object':
         return `{${Object.keys(value.fields).length} fields}`;
       case 'Function':

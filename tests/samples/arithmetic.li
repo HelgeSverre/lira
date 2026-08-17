@@ -4,15 +4,15 @@ fn main() {
     let x = 10
     let y = 20
     let result = x + y
-    print(result)
+    println(result)
 
     // More operations
     let a = 100 - 30
     let b = 7 * 8
     let c = 144 / 12
-    print(a)
-    print(b)
-    print(c)
+    println(a)
+    println(b)
+    println(c)
 }
 
 // @expect: 30
