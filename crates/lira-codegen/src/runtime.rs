@@ -50,6 +50,9 @@ pub enum Sig {
     StrArray,
     /// `[int]`
     IntArray,
+    /// The uniform native array returned by HTTP builtins. Tuple typing keeps
+    /// the status and body slots statically distinct at each literal index.
+    HttpResponse,
     /// An opaque handle — a channel, or a value the backend does not model.
     Any,
     Void,
@@ -65,6 +68,7 @@ impl Sig {
             Sig::Str => Type::String,
             Sig::StrArray => Type::Array(Box::new(Type::String)),
             Sig::IntArray => Type::Array(Box::new(Type::Int)),
+            Sig::HttpResponse => Type::Tuple(vec![Type::Int, Type::String]),
             Sig::Any => Type::Any,
             Sig::Void => Type::Void,
         }
@@ -75,7 +79,7 @@ impl Sig {
             Sig::Int => Some(Ty::I64),
             Sig::Float => Some(Ty::F64),
             Sig::Bool => Some(Ty::I8),
-            Sig::Str | Sig::StrArray | Sig::IntArray | Sig::Any => Some(Ty::P),
+            Sig::Str | Sig::StrArray | Sig::IntArray | Sig::HttpResponse | Sig::Any => Some(Ty::P),
             Sig::Void => None,
         }
     }
@@ -197,6 +201,16 @@ builtins! {
     ("rename", "lira_rt_rename", [Str, Str], Bool),
     ("copy", "lira_rt_copy", [Str, Str], Bool),
 
+    // ---- Regular expressions -------------------------------------------
+    ("regex_match", "lira_rt_regex_match", [Str, Str], Bool),
+    ("regex_find", "lira_rt_regex_find", [Str, Str], Str),
+    ("regex_find_all", "lira_rt_regex_find_all", [Str, Str], StrArray),
+    ("regex_replace", "lira_rt_regex_replace", [Str, Str, Str], Str),
+    ("regex_replace_all", "lira_rt_regex_replace_all", [Str, Str, Str], Str),
+    ("regex_split", "lira_rt_regex_split", [Str, Str], StrArray),
+    ("regex_captures", "lira_rt_regex_captures", [Str, Str], StrArray),
+    ("regex_is_valid", "lira_rt_regex_is_valid", [Str], Bool),
+
     // ---- Encoding -------------------------------------------------------
     ("base64_encode", "lira_rt_base64_encode", [Str], Str),
     ("base64_decode", "lira_rt_base64_decode", [Str], Str),
@@ -223,6 +237,16 @@ builtins! {
     ("tcp_read", "lira_rt_tcp_read", [Int, Int], Str),
     ("tcp_close", "lira_rt_tcp_close", [Int], Bool),
     ("dns_lookup", "lira_rt_dns_lookup", [Str], Str),
+
+    // ---- JSON ----------------------------------------------------------
+    ("json_parse", "lira_rt_json_parse", [Str], Any),
+    ("json_stringify", "lira_rt_json_stringify", [Any], Str),
+    ("json_pretty", "lira_rt_json_stringify_pretty", [Any], Str),
+
+    // ---- HTTP ----------------------------------------------------------
+    ("http_get", "lira_rt_http_get", [Str], HttpResponse),
+    ("http_post", "lira_rt_http_post", [Str, Str, Str], HttpResponse),
+    ("http_request", "lira_rt_http_request", [Str, Str, Str, Str], HttpResponse),
 }
 
 /// Look up a built-in by the name it has in Lira source.
@@ -235,15 +259,117 @@ pub fn builtin(name: &str) -> Option<&'static Builtin> {
 const RUNTIME: &[(&str, &[Ty], Option<Ty>)] = &[
     ("lira_rt_alloc", &[Ty::I64, Ty::I32], Some(Ty::P)),
     ("lira_rt_abort", &[Ty::P], None),
+    // Struct value copies share one context across all generated layout
+    // helpers. The context memoizes source and destination pointers so
+    // recursive values preserve cycles instead of recursing forever.
+    ("lira_rt_copy_ctx_new", &[], Some(Ty::P)),
+    ("lira_rt_copy_ctx_free", &[Ty::P], None),
+    ("lira_rt_copy_ctx_lookup", &[Ty::P, Ty::P], Some(Ty::P)),
+    ("lira_rt_copy_ctx_insert", &[Ty::P, Ty::P, Ty::P], None),
     // Strings
     ("lira_rt_str_new", &[Ty::P, Ty::I64], Some(Ty::P)),
     ("lira_rt_str_concat", &[Ty::P, Ty::P], Some(Ty::P)),
     ("lira_rt_str_len", &[Ty::P], Some(Ty::I64)),
+    ("lira_rt_str_index", &[Ty::P, Ty::I64], Some(Ty::P)),
     ("lira_rt_str_eq", &[Ty::P, Ty::P], Some(Ty::I8)),
     ("lira_rt_str_cmp", &[Ty::P, Ty::P], Some(Ty::I64)),
     ("lira_rt_int_to_str", &[Ty::I64], Some(Ty::P)),
+    ("lira_rt_str_to_int", &[Ty::P], Some(Ty::I64)),
     ("lira_rt_float_to_str", &[Ty::F64], Some(Ty::P)),
     ("lira_rt_bool_to_str", &[Ty::I8], Some(Ty::P)),
+    // Uniformly boxed dynamic values (`Any`).
+    ("lira_rt_any_null", &[], Some(Ty::P)),
+    ("lira_rt_any_box_bool", &[Ty::I8], Some(Ty::P)),
+    ("lira_rt_any_box_int", &[Ty::I64], Some(Ty::P)),
+    ("lira_rt_any_box_float", &[Ty::F64], Some(Ty::P)),
+    ("lira_rt_any_box_string", &[Ty::P], Some(Ty::P)),
+    ("lira_rt_any_box_array", &[Ty::P], Some(Ty::P)),
+    ("lira_rt_any_box_array_typed", &[Ty::P, Ty::P], Some(Ty::P)),
+    ("lira_rt_any_box_map", &[Ty::P], Some(Ty::P)),
+    ("lira_rt_any_box_map_typed", &[Ty::P, Ty::P], Some(Ty::P)),
+    ("lira_rt_any_box_object", &[Ty::P], Some(Ty::P)),
+    ("lira_rt_any_box_object_typed", &[Ty::P, Ty::P], Some(Ty::P)),
+    ("lira_rt_any_box_function", &[Ty::P], Some(Ty::P)),
+    (
+        "lira_rt_any_box_function_typed",
+        &[Ty::P, Ty::P],
+        Some(Ty::P),
+    ),
+    ("lira_rt_any_box_channel", &[Ty::P], Some(Ty::P)),
+    (
+        "lira_rt_any_box_channel_typed",
+        &[Ty::P, Ty::P],
+        Some(Ty::P),
+    ),
+    ("lira_rt_any_box_fiber", &[Ty::I64], Some(Ty::P)),
+    ("lira_rt_any_box_ref", &[Ty::P], Some(Ty::P)),
+    ("lira_rt_any_box_optional", &[Ty::P, Ty::P], Some(Ty::P)),
+    ("lira_rt_interface_new", &[Ty::I64, Ty::P], Some(Ty::P)),
+    ("lira_rt_interface_is", &[Ty::P, Ty::P], Some(Ty::I8)),
+    ("lira_rt_interface_spec", &[Ty::P], Some(Ty::P)),
+    (
+        "lira_rt_interface_payload",
+        &[Ty::P, Ty::I32],
+        Some(Ty::I64),
+    ),
+    (
+        "lira_rt_interface_method_slot",
+        &[Ty::P, Ty::I32],
+        Some(Ty::P),
+    ),
+    ("lira_rt_any_box_interface", &[Ty::P], Some(Ty::P)),
+    ("lira_rt_any_unbox_interface", &[Ty::P, Ty::P], Some(Ty::P)),
+    ("lira_rt_any_from_slot", &[Ty::I64], Some(Ty::P)),
+    ("lira_rt_any_copy", &[Ty::P], Some(Ty::P)),
+    ("lira_rt_any_unbox_bool", &[Ty::P], Some(Ty::I8)),
+    ("lira_rt_any_unbox_int", &[Ty::P], Some(Ty::I64)),
+    ("lira_rt_any_unbox_float", &[Ty::P], Some(Ty::F64)),
+    ("lira_rt_any_unbox_string", &[Ty::P], Some(Ty::P)),
+    ("lira_rt_any_unbox_array", &[Ty::P], Some(Ty::P)),
+    ("lira_rt_any_unbox_map", &[Ty::P, Ty::P], Some(Ty::P)),
+    ("lira_rt_any_unbox_ref", &[Ty::P], Some(Ty::P)),
+    ("lira_rt_any_unbox_function", &[Ty::P], Some(Ty::P)),
+    (
+        "lira_rt_any_unbox_function_typed",
+        &[Ty::P, Ty::P],
+        Some(Ty::P),
+    ),
+    ("lira_rt_any_unbox_channel", &[Ty::P], Some(Ty::P)),
+    (
+        "lira_rt_any_unbox_channel_typed",
+        &[Ty::P, Ty::P],
+        Some(Ty::P),
+    ),
+    (
+        "lira_rt_any_unbox_object_typed",
+        &[Ty::P, Ty::P],
+        Some(Ty::P),
+    ),
+    ("lira_rt_any_unbox_optional", &[Ty::P, Ty::P], Some(Ty::P)),
+    ("lira_rt_any_cast_int", &[Ty::P], Some(Ty::I64)),
+    ("lira_rt_any_cast_float", &[Ty::P], Some(Ty::F64)),
+    ("lira_rt_any_cast_bool", &[Ty::P], Some(Ty::I8)),
+    ("lira_rt_any_truthy", &[Ty::P], Some(Ty::I8)),
+    ("lira_rt_any_to_string", &[Ty::P], Some(Ty::P)),
+    ("lira_rt_any_len", &[Ty::P], Some(Ty::I64)),
+    ("lira_rt_any_object_len", &[Ty::P], Some(Ty::I64)),
+    ("lira_rt_any_object_key_at", &[Ty::P, Ty::I64], Some(Ty::P)),
+    ("lira_rt_any_index", &[Ty::P, Ty::P], Some(Ty::P)),
+    ("lira_rt_any_array_at", &[Ty::P, Ty::I64], Some(Ty::P)),
+    ("lira_rt_any_object_at", &[Ty::P, Ty::P], Some(Ty::P)),
+    ("lira_rt_any_set", &[Ty::P, Ty::P, Ty::P], None),
+    ("lira_rt_any_push", &[Ty::P, Ty::P], None),
+    ("lira_rt_any_pop", &[Ty::P], Some(Ty::P)),
+    ("lira_rt_any_binary", &[Ty::I64, Ty::P, Ty::P], Some(Ty::P)),
+    (
+        "lira_rt_any_compare",
+        &[Ty::I64, Ty::P, Ty::P],
+        Some(Ty::I8),
+    ),
+    ("lira_rt_any_neg", &[Ty::P], Some(Ty::P)),
+    ("lira_rt_any_bit_not", &[Ty::P], Some(Ty::P)),
+    ("lira_rt_any_is", &[Ty::P, Ty::I64], Some(Ty::I8)),
+    ("lira_rt_any_is_typed", &[Ty::P, Ty::P], Some(Ty::I8)),
     // Printing
     ("lira_rt_print_str", &[Ty::P], None),
     ("lira_rt_println_str", &[Ty::P], None),
@@ -271,6 +397,7 @@ const RUNTIME: &[(&str, &[Ty], Option<Ty>)] = &[
     ("lira_rt_idiv", &[Ty::I64, Ty::I64], Some(Ty::I64)),
     ("lira_rt_imod", &[Ty::I64, Ty::I64], Some(Ty::I64)),
     ("lira_rt_ipow", &[Ty::I64, Ty::I64], Some(Ty::I64)),
+    ("lira_rt_math_fmod", &[Ty::F64, Ty::F64], Some(Ty::F64)),
     // Fibers and channels
     ("lira_rt_boot", &[Ty::P, Ty::P], Some(Ty::I32)),
     // Handed argc/argv by the generated `main` so `env_args` can report them.
@@ -278,6 +405,7 @@ const RUNTIME: &[(&str, &[Ty], Option<Ty>)] = &[
     ("lira_rt_spawn", &[Ty::P, Ty::P], Some(Ty::I64)),
     ("lira_rt_yield", &[], None),
     ("lira_rt_select_block", &[], None),
+    ("lira_rt_select", &[Ty::P, Ty::I64, Ty::P], Some(Ty::I64)),
     ("lira_rt_fiber_id", &[], Some(Ty::I64)),
     ("lira_rt_chan_new", &[Ty::I64], Some(Ty::P)),
     ("lira_rt_chan_send", &[Ty::P, Ty::I64], None),
@@ -286,6 +414,9 @@ const RUNTIME: &[(&str, &[Ty], Option<Ty>)] = &[
     // Non-blocking forms, used by `select`.
     ("lira_rt_chan_try_recv", &[Ty::P, Ty::P], Some(Ty::I8)),
     ("lira_rt_chan_try_send", &[Ty::P, Ty::I64], Some(Ty::I8)),
+    ("lira_rt_collect", &[], None),
+    ("lira_gc_register_root_slot", &[Ty::P], None),
+    ("lira_gc_unregister_all_root_slots", &[], None),
 ];
 
 /// Build the Cranelift signature of a runtime symbol.

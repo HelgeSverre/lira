@@ -62,13 +62,15 @@ pub fn repr_of(ty: &Type) -> CodegenResult<Repr> {
         Type::Void => Repr::Void,
         Type::String
         | Type::Array(_)
+        | Type::Channel(_)
         | Type::Map(_, _)
         | Type::Struct(_)
         | Type::Class(_)
         | Type::Enum(_)
         | Type::Null => Repr::Ref,
-        // A channel handle comes back from the checker as `Any`, and so does an
-        // erased generic. Both are pointer-shaped at runtime.
+        // Dynamic values are uniformly boxed.  The payload may be scalar or a
+        // reference, but an `Any` register itself is always a pointer to the
+        // runtime tag-and-payload object.
         Type::Any | Type::TypeParam(_) | Type::Interface(_) => Repr::Ref,
         // `T?` is always a nullable pointer. When `T` is already pointer-shaped
         // that is the pointer itself; a scalar has no bit pattern to spare for

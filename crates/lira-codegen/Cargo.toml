@@ -2,6 +2,7 @@
 name = "lira-codegen"
 version = "0.1.0"
 edition = "2021"
+rust-version.workspace = true
 description = "Native code generation backend for Lira, built on Cranelift"
 license = "MIT"
 build = "build.rs"
@@ -20,6 +21,10 @@ cranelift-jit = "0.134"
 cranelift-object = "0.134"
 cranelift-native = "0.134"
 target-lexicon = "0.13"
+# The normal edge links the exported Rust runtime symbols into the JIT host.
+lira-native-runtime = { path = "../lira-native-runtime" }
+# Process isolation uses Unix process groups, resource limits, and flock.
+libc = "0.2"
 
 [dev-dependencies]
 # The parity tests run each example on both backends and compare the output.
@@ -27,3 +32,8 @@ liravm = { path = "../liravm" }
 
 [build-dependencies]
 cc = "1"
+# Stable Cargo runs this build script before it emits a normal dependency's
+# `staticlib`. The build edge forces that archive to exist before build.rs
+# validates and embeds it for standalone AOT executables. Marker and ABI
+# validation in build.rs make the duplicate Cargo unit deterministic.
+lira-native-runtime = { path = "../lira-native-runtime" }

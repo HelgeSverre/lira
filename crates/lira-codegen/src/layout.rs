@@ -12,7 +12,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use lirac::ast::{Field, Program, Statement, StatementKind, TypeExpr, TypeParam};
+use lirac::ast::{Expression, Field, Program, Statement, StatementKind, TypeExpr, TypeParam};
 use lirac::checker::Type;
 
 use crate::error::{CodegenError, CodegenResult};
@@ -121,9 +121,55 @@ impl EnumLayout {
     }
 }
 
+/// A parameter in an interface method's normalized signature.
+///
+/// The first parameter is always the synthetic interface receiver. Its name
+/// is `self`, its default is `None`, and its type is the containing interface.
+/// Remaining parameters retain their source names and default expressions so
+/// native call lowering can fill omitted arguments from the declaration.
+#[derive(Debug, Clone)]
+pub struct InterfaceParamLayout {
+    pub name: String,
+    pub ty: Type,
+    pub default: Option<Expression>,
+}
+
+/// One interface method in declaration order.
+#[derive(Debug, Clone)]
+pub struct InterfaceMethodLayout {
+    pub name: String,
+    /// The normalized checker signature, including the receiver at parameter
+    /// slot zero.
+    pub signature: Type,
+    pub params: Vec<InterfaceParamLayout>,
+    /// Stable zero-based ordinal in the containing interface.
+    pub slot: usize,
+}
+
+/// Native metadata for an interface declaration.
+#[derive(Debug, Clone)]
+pub struct InterfaceLayout {
+    pub name: String,
+    pub methods: Vec<InterfaceMethodLayout>,
+}
+
+impl InterfaceLayout {
+    pub fn method(&self, name: &str) -> Option<&InterfaceMethodLayout> {
+        self.methods.iter().find(|method| method.name == name)
+    }
+
+    pub fn method_slot(&self, name: &str) -> Option<usize> {
+        self.method(name).map(|method| method.slot)
+    }
+}
+
 /// The built-in struct a `a..b` expression evaluates to, mirroring the object
 /// the bytecode backend builds. Iterating a range reads these fields back.
-pub const RANGE_TYPE: &str = "Range";
+///
+/// The dollar sign cannot occur in a Lira source identifier, so this backend
+/// name cannot collide with a user-declared `struct Range` (or any other
+/// source-level aggregate).
+pub const RANGE_TYPE: &str = lirac::checker::BUILTIN_RANGE_TYPE;
 
 /// A generic aggregate declaration, kept as a template until a concrete use
 /// demands an instantiation.
@@ -146,6 +192,7 @@ pub struct GenericAggregate {
 pub struct LayoutMap {
     pub structs: HashMap<String, StructLayout>,
     pub enums: HashMap<String, EnumLayout>,
+    pub interfaces: HashMap<String, InterfaceLayout>,
     /// `type Name = ...` declarations, unresolved.
     pub aliases: HashMap<String, Type>,
     /// Generic struct and enum templates, by their unparameterised name.
@@ -171,21 +218,32 @@ pub fn mangle(name: &str, args: &[Type]) -> String {
 
 /// Turn a mangled name into something a linker will accept as a symbol.
 pub fn sanitise_symbol(name: &str) -> String {
-    name.chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-        .collect()
+    let mut symbol = String::with_capacity(name.len());
+    for character in name.chars() {
+        if character.is_ascii_alphanumeric() {
+            symbol.push(character);
+        } else if character == '_' {
+            symbol.push_str("_u");
+        } else {
+            use std::fmt::Write as _;
+            write!(symbol, "_x{:x}_", character as u32).expect("writing to a String cannot fail");
+        }
+    }
+    symbol
 }
 
 impl LayoutMap {
-    /// Walk the program and compute a layout for every struct, class and enum.
+    /// Walk the program and compute a layout for every struct, class, enum, and
+    /// interface.
     ///
     /// Field types never need a layout of their own to be sized: an aggregate
     /// field is a pointer, so recursive and mutually recursive types fall out
     /// for free and declaration order does not matter.
     pub fn build(program: &Program) -> CodegenResult<Self> {
         let mut map = LayoutMap::default();
-        // Seeded first so a user declaration of the same name replaces it and
-        // `range_layout_is_usable` can then report the clash.
+        // Keep the compiler-created range layout under a name that source code
+        // cannot spell. A user `struct Range` is therefore an independent
+        // source-visible layout, not a replacement for this one.
         map.structs.insert(
             RANGE_TYPE.to_string(),
             layout_fields(
@@ -197,13 +255,14 @@ impl LayoutMap {
                 ],
             ),
         );
+        collect_interface_names(&program.statements, &mut map.interfaces);
+        collect_aliases(&program.statements, &mut map.aliases);
         collect(&program.statements, &mut map)?;
         Ok(map)
     }
 
-    /// Whether the `Range` layout is still the built-in one. A program that
-    /// declares its own `struct Range` shadows it, and `a..b` can no longer be
-    /// lowered against it.
+    /// Whether the compiler-created `Range` layout is present and well formed.
+    /// The private key means a source `struct Range` cannot shadow it.
     pub fn range_layout_is_usable(&self) -> bool {
         self.structs.get(RANGE_TYPE).is_some_and(|layout| {
             layout
@@ -235,8 +294,60 @@ impl LayoutMap {
         None
     }
 
+    /// Canonical owner spelling used by native impl registration and calls.
+    /// Aliases are transparent, including aliases nested inside array owners.
+    pub fn canonical_impl_owner(&self, name: &str) -> String {
+        fn canonical(map: &LayoutMap, ty: Type, seen: &mut HashSet<String>) -> Type {
+            match ty {
+                Type::Array(inner) => Type::Array(Box::new(canonical(map, *inner, seen))),
+                Type::Struct(alias) | Type::Class(alias) | Type::Enum(alias) => {
+                    if seen.insert(alias.clone()) {
+                        if let Some(target) = map.aliases.get(&alias) {
+                            return canonical(map, target.clone(), seen);
+                        }
+                    }
+                    Type::Struct(alias)
+                }
+                other => other,
+            }
+        }
+
+        let ty = if let Some(inner) = name.strip_prefix('[').and_then(|n| n.strip_suffix(']')) {
+            Type::Array(Box::new(canonical(
+                self,
+                self.aliases
+                    .get(inner)
+                    .cloned()
+                    .unwrap_or_else(|| named_type(inner)),
+                &mut HashSet::new(),
+            )))
+        } else {
+            self.aliases
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| named_type(name))
+        };
+        canonical(self, ty, &mut HashSet::new()).display_name()
+    }
+
     pub fn is_aggregate(&self, name: &str) -> bool {
         self.structs.contains_key(name) || self.enums.contains_key(name)
+    }
+
+    pub fn interface(&self, name: &str) -> Option<&InterfaceLayout> {
+        self.interfaces.get(name)
+    }
+
+    pub fn interface_method(
+        &self,
+        interface: &str,
+        method: &str,
+    ) -> Option<&InterfaceMethodLayout> {
+        self.interface(interface)?.method(method)
+    }
+
+    pub fn interface_method_slot(&self, interface: &str, method: &str) -> Option<usize> {
+        self.interface(interface)?.method_slot(method)
     }
 }
 
@@ -249,10 +360,214 @@ struct ClassDecl {
     methods: Vec<String>,
 }
 
+fn interface_method_layout(
+    layouts: &LayoutMap,
+    interface_name: &str,
+    method: &lirac::ast::InterfaceMethod,
+    slot: usize,
+) -> InterfaceMethodLayout {
+    let has_explicit_receiver = method
+        .params
+        .first()
+        .is_some_and(|param| param.name == "self");
+    let explicit_params = method
+        .params
+        .iter()
+        .skip(usize::from(has_explicit_receiver));
+    let explicit_layouts: Vec<_> = explicit_params
+        .map(|param| InterfaceParamLayout {
+            name: param.name.clone(),
+            ty: interface_type_of_ann(layouts, &param.type_ann, interface_name),
+            default: param.default.clone(),
+        })
+        .collect();
+    let required_params = 1 + explicit_layouts
+        .iter()
+        .filter(|param| param.default.is_none())
+        .count();
+    let mut params = Vec::with_capacity(explicit_layouts.len() + 1);
+    params.push(InterfaceParamLayout {
+        name: "self".to_string(),
+        ty: Type::Interface(interface_name.to_string()),
+        default: None,
+    });
+    params.extend(explicit_layouts);
+    let signature = Type::Function {
+        params: params.iter().map(|param| param.ty.clone()).collect(),
+        return_type: Box::new(
+            method
+                .return_type
+                .as_ref()
+                .map(|ann| interface_type_of_ann(layouts, ann, interface_name))
+                .unwrap_or(Type::Any),
+        ),
+        required_params,
+    };
+    InterfaceMethodLayout {
+        name: method.name.clone(),
+        signature,
+        params,
+        slot,
+    }
+}
+
+/// Resolve an interface annotation with the checker's `Self` behavior.
+///
+/// `type_of_ann` is deliberately owner-independent because it is also used by
+/// aggregate layouts. Interface signatures need one small owner-aware layer so
+/// `Self` and nested occurrences of `Self` become the interface nominal type.
+fn interface_type_of_ann(layouts: &LayoutMap, ann: &TypeExpr, interface_name: &str) -> Type {
+    use lirac::ast::TypeExprKind;
+
+    let recur = |inner: &TypeExpr| interface_type_of_ann(layouts, inner, interface_name);
+    match &ann.kind {
+        TypeExprKind::Named(name) if name == "Self" => Type::Interface(interface_name.to_string()),
+        TypeExprKind::Path(segments) if segments.last().is_some_and(|name| name == "Self") => {
+            Type::Interface(interface_name.to_string())
+        }
+        TypeExprKind::Named(name) if layouts.interfaces.contains_key(name) => {
+            Type::Interface(name.clone())
+        }
+        TypeExprKind::Named(name) => layouts
+            .aliases
+            .get(name)
+            .cloned()
+            .map(|ty| resolve_interface_alias(layouts, ty, &mut HashSet::new()))
+            .unwrap_or_else(|| type_of_ann(ann)),
+        TypeExprKind::Path(segments) => segments
+            .last()
+            .and_then(|name| layouts.aliases.get(name))
+            .cloned()
+            .map(|ty| resolve_interface_alias(layouts, ty, &mut HashSet::new()))
+            .unwrap_or_else(|| type_of_ann(ann)),
+        TypeExprKind::Infer => type_of_ann(ann),
+        TypeExprKind::Generic { name, args } => {
+            let arguments: Vec<Type> = args.iter().map(&recur).collect();
+            match name.as_str() {
+                "Array" | "List" if arguments.len() == 1 => {
+                    Type::Array(Box::new(arguments[0].clone()))
+                }
+                "Channel" if arguments.len() == 1 => Type::Channel(Box::new(arguments[0].clone())),
+                "Map" if arguments.len() == 2 => Type::Map(
+                    Box::new(arguments[0].clone()),
+                    Box::new(arguments[1].clone()),
+                ),
+                RESULT_TYPE if arguments.len() == 2 => Type::Result {
+                    ok_type: Box::new(arguments[0].clone()),
+                    err_type: Box::new(arguments[1].clone()),
+                },
+                _ => named_type(&mangle(name, &arguments)),
+            }
+        }
+        TypeExprKind::Optional(inner) => Type::Optional(Box::new(recur(inner))),
+        TypeExprKind::Array(inner) => Type::Array(Box::new(recur(inner))),
+        TypeExprKind::Tuple(items) => Type::Tuple(items.iter().map(&recur).collect()),
+        TypeExprKind::Function {
+            params,
+            return_type,
+        } => Type::Function {
+            params: params.iter().map(&recur).collect(),
+            return_type: Box::new(recur(return_type)),
+            required_params: params.len(),
+        },
+        TypeExprKind::Result { ok_type, err_type } => Type::Result {
+            ok_type: Box::new(recur(ok_type)),
+            err_type: Box::new(recur(err_type)),
+        },
+    }
+}
+
+fn resolve_interface_alias(layouts: &LayoutMap, ty: Type, seen: &mut HashSet<String>) -> Type {
+    match ty {
+        Type::Struct(name) | Type::Class(name) | Type::Enum(name)
+            if seen.insert(name.clone()) && layouts.aliases.contains_key(&name) =>
+        {
+            let resolved = resolve_interface_alias(
+                layouts,
+                layouts
+                    .aliases
+                    .get(&name)
+                    .cloned()
+                    .expect("alias existence was checked"),
+                seen,
+            );
+            seen.remove(&name);
+            resolved
+        }
+        Type::Struct(name) if layouts.interfaces.contains_key(&name) => Type::Interface(name),
+        Type::Array(inner) => Type::Array(Box::new(resolve_interface_alias(layouts, *inner, seen))),
+        Type::Optional(inner) => {
+            Type::Optional(Box::new(resolve_interface_alias(layouts, *inner, seen)))
+        }
+        Type::Tuple(items) => Type::Tuple(
+            items
+                .into_iter()
+                .map(|item| resolve_interface_alias(layouts, item, seen))
+                .collect(),
+        ),
+        Type::Map(key, value) => Type::Map(
+            Box::new(resolve_interface_alias(layouts, *key, seen)),
+            Box::new(resolve_interface_alias(layouts, *value, seen)),
+        ),
+        Type::Channel(inner) => {
+            Type::Channel(Box::new(resolve_interface_alias(layouts, *inner, seen)))
+        }
+        Type::Result { ok_type, err_type } => Type::Result {
+            ok_type: Box::new(resolve_interface_alias(layouts, *ok_type, seen)),
+            err_type: Box::new(resolve_interface_alias(layouts, *err_type, seen)),
+        },
+        Type::Function {
+            params,
+            return_type,
+            required_params,
+        } => Type::Function {
+            params: params
+                .into_iter()
+                .map(|param| resolve_interface_alias(layouts, param, seen))
+                .collect(),
+            return_type: Box::new(resolve_interface_alias(layouts, *return_type, seen)),
+            required_params,
+        },
+        other => other,
+    }
+}
+
 fn collect(statements: &[Statement], map: &mut LayoutMap) -> CodegenResult<()> {
     let mut classes = Vec::new();
     collect_into(statements, map, &mut classes)?;
     lay_out_classes(classes, map)
+}
+
+fn collect_interface_names(
+    statements: &[Statement],
+    interfaces: &mut HashMap<String, InterfaceLayout>,
+) {
+    for statement in statements {
+        match &statement.kind {
+            StatementKind::InterfaceDecl { name, .. } => {
+                interfaces
+                    .entry(name.clone())
+                    .or_insert_with(|| InterfaceLayout {
+                        name: name.clone(),
+                        methods: Vec::new(),
+                    });
+            }
+            StatementKind::Block(block) => collect_interface_names(&block.statements, interfaces),
+            _ => {}
+        }
+    }
+}
+
+fn collect_aliases(statements: &[Statement], aliases: &mut HashMap<String, Type>) {
+    for statement in statements {
+        match &statement.kind {
+            StatementKind::TypeAlias { name, type_expr } => {
+                aliases.insert(name.clone(), type_of_ann(type_expr));
+            }
+            StatementKind::Block(block) => collect_aliases(&block.statements, aliases),
+            _ => {}
+        }
+    }
 }
 
 fn collect_into(
@@ -350,6 +665,29 @@ fn collect_into(
                         name: name.clone(),
                         variants: laid_out,
                         size: ENUM_PAYLOAD_OFFSET + SLOT_SIZE * widest as i32,
+                    },
+                );
+            }
+            StatementKind::InterfaceDecl { name, methods } => {
+                let mut seen = HashSet::new();
+                let methods = methods
+                    .iter()
+                    .enumerate()
+                    .map(|(slot, method)| {
+                        if !seen.insert(method.name.clone()) {
+                            return Err(CodegenError::unsupported(format!(
+                                "duplicate method `{}` in interface `{}`",
+                                method.name, name
+                            )));
+                        }
+                        Ok(interface_method_layout(map, name, method, slot))
+                    })
+                    .collect::<CodegenResult<Vec<_>>>()?;
+                map.interfaces.insert(
+                    name.clone(),
+                    InterfaceLayout {
+                        name: name.clone(),
+                        methods,
                     },
                 );
             }
@@ -539,12 +877,10 @@ impl LayoutMap {
                 .fields
                 .iter()
                 .map(|(field, ann)| {
-                    (
-                        field.clone(),
-                        substitute(&type_of_ann_in(ann, &in_scope), &bindings),
-                    )
+                    self.materialize_annotation(ann, &in_scope, &bindings)
+                        .map(|ty| (field.clone(), ty))
                 })
-                .collect();
+                .collect::<CodegenResult<_>>()?;
             self.structs
                 .insert(mangled.clone(), layout_fields(mangled.clone(), &fields));
         } else {
@@ -561,19 +897,21 @@ impl LayoutMap {
                 .variants
                 .iter()
                 .enumerate()
-                .map(|(tag, (variant, payloads))| {
-                    let field_types: Vec<Type> = payloads
-                        .iter()
-                        .map(|ann| substitute(&type_of_ann_in(ann, &in_scope), &bindings))
-                        .collect();
-                    widest = widest.max(field_types.len());
-                    VariantLayout {
-                        name: variant.clone(),
-                        tag: tag as i64,
-                        field_types,
-                    }
-                })
-                .collect();
+                .map(
+                    |(tag, (variant, payloads))| -> CodegenResult<VariantLayout> {
+                        let field_types: Vec<Type> = payloads
+                            .iter()
+                            .map(|ann| self.materialize_annotation(ann, &in_scope, &bindings))
+                            .collect::<CodegenResult<_>>()?;
+                        widest = widest.max(field_types.len());
+                        Ok(VariantLayout {
+                            name: variant.clone(),
+                            tag: tag as i64,
+                            field_types,
+                        })
+                    },
+                )
+                .collect::<CodegenResult<_>>()?;
             self.enums.insert(
                 mangled.clone(),
                 EnumLayout {
@@ -584,6 +922,110 @@ impl LayoutMap {
             );
         }
         Ok(mangled)
+    }
+
+    /// Resolve a template annotation under concrete bindings and eagerly
+    /// instantiate any generic aggregate it contains. The checker represents
+    /// user generic applications as nominal types, but the AST still gives us
+    /// their argument boundaries; using those boundaries here avoids trying to
+    /// reverse-engineer nested `$`-mangled names later.
+    fn materialize_annotation(
+        &mut self,
+        ann: &TypeExpr,
+        in_scope: &HashSet<String>,
+        bindings: &HashMap<String, Type>,
+    ) -> CodegenResult<Type> {
+        use lirac::ast::TypeExprKind;
+
+        let recur = |inner: &TypeExpr, layouts: &mut LayoutMap| {
+            layouts.materialize_annotation(inner, in_scope, bindings)
+        };
+        let ty =
+            match &ann.kind {
+                TypeExprKind::Named(name) if in_scope.contains(name) => {
+                    substitute(&Type::TypeParam(name.clone()), bindings)
+                }
+                TypeExprKind::Named(_) | TypeExprKind::Path(_) | TypeExprKind::Infer => {
+                    substitute(&type_of_ann_in(ann, in_scope), bindings)
+                }
+                TypeExprKind::Generic { name, args } => {
+                    let arguments: Vec<Type> = args
+                        .iter()
+                        .map(|arg| recur(arg, self))
+                        .collect::<CodegenResult<_>>()?;
+                    match name.as_str() {
+                        "Array" | "List" if arguments.len() == 1 => {
+                            Type::Array(Box::new(arguments.into_iter().next().ok_or_else(
+                                || CodegenError::internal("array type lost its element"),
+                            )?))
+                        }
+                        "Channel" if arguments.len() == 1 => {
+                            Type::Channel(Box::new(arguments.into_iter().next().ok_or_else(
+                                || CodegenError::internal("channel type lost its element"),
+                            )?))
+                        }
+                        "Map" if arguments.len() == 2 => {
+                            let mut arguments = arguments.into_iter();
+                            Type::Map(
+                                Box::new(arguments.next().ok_or_else(|| {
+                                    CodegenError::internal("map type lost its key")
+                                })?),
+                                Box::new(arguments.next().ok_or_else(|| {
+                                    CodegenError::internal("map type lost its value")
+                                })?),
+                            )
+                        }
+                        RESULT_TYPE if arguments.len() == 2 => {
+                            let mut arguments = arguments.into_iter();
+                            Type::Result {
+                                ok_type: Box::new(arguments.next().ok_or_else(|| {
+                                    CodegenError::internal("result type lost its ok payload")
+                                })?),
+                                err_type: Box::new(arguments.next().ok_or_else(|| {
+                                    CodegenError::internal("result type lost its error payload")
+                                })?),
+                            }
+                        }
+                        _ if self.generics.contains_key(name) => {
+                            let is_enum = !self
+                                .generics
+                                .get(name)
+                                .is_some_and(|aggregate| aggregate.variants.is_empty());
+                            let mangled = self.instantiate(name, &arguments)?;
+                            if is_enum {
+                                Type::Enum(mangled)
+                            } else {
+                                Type::Struct(mangled)
+                            }
+                        }
+                        _ => substitute(&type_of_ann_in(ann, in_scope), bindings),
+                    }
+                }
+                TypeExprKind::Optional(inner) => Type::Optional(Box::new(recur(inner, self)?)),
+                TypeExprKind::Array(inner) => Type::Array(Box::new(recur(inner, self)?)),
+                TypeExprKind::Tuple(items) => Type::Tuple(
+                    items
+                        .iter()
+                        .map(|item| recur(item, self))
+                        .collect::<CodegenResult<_>>()?,
+                ),
+                TypeExprKind::Function {
+                    params,
+                    return_type,
+                } => Type::Function {
+                    params: params
+                        .iter()
+                        .map(|param| recur(param, self))
+                        .collect::<CodegenResult<_>>()?,
+                    return_type: Box::new(recur(return_type, self)?),
+                    required_params: params.len(),
+                },
+                TypeExprKind::Result { ok_type, err_type } => Type::Result {
+                    ok_type: Box::new(recur(ok_type, self)?),
+                    err_type: Box::new(recur(err_type, self)?),
+                },
+            };
+        Ok(substitute(&ty, bindings))
     }
 }
 
@@ -611,8 +1053,35 @@ pub fn substitute(ty: &Type, bindings: &HashMap<String, Type>) -> Type {
             return_type: Box::new(substitute(return_type, bindings)),
             required_params: *required_params,
         },
+        Type::Struct(name) => Type::Struct(substitute_mangled_name(name, bindings)),
+        Type::Class(name) => Type::Class(substitute_mangled_name(name, bindings)),
+        Type::Enum(name) => Type::Enum(substitute_mangled_name(name, bindings)),
         other => other.clone(),
     }
+}
+
+/// Generic applications are represented in the layout map by a mangled name
+/// (`Box$T`) rather than a separate type node. Substitute the parameter
+/// segments as well, so a field such as `inner: Box<T>` lays out as
+/// `Box$int` when the surrounding aggregate is instantiated.
+fn substitute_mangled_name(name: &str, bindings: &HashMap<String, Type>) -> String {
+    // Generic names are encoded as `$`-separated segments (`Pair$T$T2`).
+    // Replacing substrings is incorrect here: a binding for `T` must not turn
+    // the `T` prefix of a distinct parameter named `T2` into `int2`.  Parsing
+    // the segments also makes the result independent of HashMap iteration
+    // order.  A substituted type may itself contain `$` segments; appending
+    // its display name preserves that nested mangling exactly.
+    let mut segments = name.split('$');
+    let mut result = segments.next().unwrap_or_default().to_owned();
+    for segment in segments {
+        result.push('$');
+        if let Some(ty) = bindings.get(segment) {
+            result.push_str(&ty.display_name());
+        } else {
+            result.push_str(segment);
+        }
+    }
+    result
 }
 
 /// Resolve an AST type annotation into a checker `Type`.
@@ -635,6 +1104,10 @@ pub fn type_of_ann_in(ann: &lirac::ast::TypeExpr, type_params: &HashSet<String>)
         TypeExprKind::Named(name) => named_type(name),
         TypeExprKind::Generic { name, args } => match name.as_str() {
             "Array" | "List" if args.len() == 1 => Type::Array(Box::new(recur(&args[0]))),
+            "Channel" if args.len() == 1 => Type::Channel(Box::new(recur(&args[0]))),
+            "Map" if args.len() == 2 => {
+                Type::Map(Box::new(recur(&args[0])), Box::new(recur(&args[1])))
+            }
             // `Result<T, E>` reaches here as a generic application rather than
             // as `TypeExprKind::Result`, depending on how it was written.
             RESULT_TYPE if args.len() == 2 => Type::Result {
@@ -774,11 +1247,27 @@ mod tests {
     }
 
     #[test]
-    fn range_is_a_builtin_layout_a_user_struct_can_shadow() {
+    fn range_layout_is_private_and_survives_a_user_struct() {
         let map = LayoutMap::build(&program("let x = 1")).unwrap();
         assert!(map.range_layout_is_usable());
-        let shadowed = LayoutMap::build(&program("struct Range { lo: string }")).unwrap();
-        assert!(!shadowed.range_layout_is_usable());
+        let with_user_range = LayoutMap::build(&program("struct Range { lo: string }")).unwrap();
+        assert!(with_user_range.range_layout_is_usable());
+        assert_eq!(
+            with_user_range
+                .structs
+                .get(RANGE_TYPE)
+                .and_then(|layout| layout.field("start"))
+                .map(|field| &field.ty),
+            Some(&Type::Int)
+        );
+        assert_eq!(
+            with_user_range
+                .structs
+                .get("Range")
+                .and_then(|layout| layout.field("lo"))
+                .map(|field| &field.ty),
+            Some(&Type::String)
+        );
     }
 
     #[test]
@@ -823,5 +1312,184 @@ mod tests {
     fn a_class_extending_something_unknown_is_reported() {
         let err = LayoutMap::build(&program("class Child extends Missing { y: int }")).unwrap_err();
         assert!(err.to_string().contains("not a class"));
+    }
+
+    #[test]
+    fn generic_field_layout_materializes_nested_type_arguments() {
+        let src = "struct Box<T> { value: T }\nstruct Pair<T> { inner: Box<T> }";
+        let mut map = LayoutMap::build(&program(src)).unwrap();
+        let pair = map.instantiate("Pair", &[Type::Int]).unwrap();
+        let pair_layout = map.structs.get(&pair).unwrap();
+        assert_eq!(
+            pair_layout.field("inner").unwrap().ty,
+            Type::Struct("Box$int".into())
+        );
+        assert_eq!(
+            map.structs
+                .get("Box$int")
+                .unwrap()
+                .field("value")
+                .unwrap()
+                .ty,
+            Type::Int
+        );
+    }
+
+    #[test]
+    fn generic_name_substitution_matches_complete_parameter_segments() {
+        let src = "struct Box<T> { value: T }\nstruct Pair<T, T2> { first: T\nsecond: T2\ninner: Box<T2> }";
+        let mut map = LayoutMap::build(&program(src)).unwrap();
+        let pair = map.instantiate("Pair", &[Type::Int, Type::String]).unwrap();
+        assert_eq!(pair, "Pair$int$string");
+        let layout = map.structs.get(&pair).unwrap();
+        assert_eq!(layout.field("first").unwrap().ty, Type::Int);
+        assert_eq!(layout.field("second").unwrap().ty, Type::String);
+        assert_eq!(
+            layout.field("inner").unwrap().ty,
+            Type::Struct("Box$string".into())
+        );
+        assert_eq!(
+            map.structs
+                .get("Box$string")
+                .unwrap()
+                .field("value")
+                .unwrap()
+                .ty,
+            Type::String
+        );
+
+        let bindings = HashMap::from([
+            ("T".to_string(), Type::Int),
+            ("T2".to_string(), Type::String),
+        ]);
+        assert_eq!(
+            substitute_mangled_name("Pair$T$T2", &bindings),
+            "Pair$int$string"
+        );
+    }
+
+    #[test]
+    fn interface_methods_keep_declaration_order_and_slots() {
+        let src = "interface Drawable { fn area() -> int fn perimeter() -> int }";
+        let map = LayoutMap::build(&program(src)).unwrap();
+        let layout = map.interface("Drawable").unwrap();
+        assert_eq!(
+            layout
+                .methods
+                .iter()
+                .map(|method| method.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["area", "perimeter"]
+        );
+        assert_eq!(layout.method_slot("area"), Some(0));
+        assert_eq!(map.interface_method_slot("Drawable", "perimeter"), Some(1));
+    }
+
+    #[test]
+    fn interface_methods_normalize_implicit_and_explicit_receivers() {
+        let src = "interface Explicit { fn value(this, amount: int) -> Self }\n\
+                   interface Implicit { fn value(amount: int) -> Self }";
+        let map = LayoutMap::build(&program(src)).unwrap();
+        for name in ["Explicit", "Implicit"] {
+            let method = map.interface(name).unwrap().method("value").unwrap();
+            let Type::Function {
+                params,
+                return_type,
+                required_params,
+            } = &method.signature
+            else {
+                panic!("interface method must have a function signature");
+            };
+            assert_eq!(params.first(), Some(&Type::Interface(name.to_string())));
+            assert_eq!(params.get(1), Some(&Type::Int));
+            assert_eq!(return_type.as_ref(), &Type::Interface(name.to_string()));
+            assert_eq!(*required_params, 2);
+            assert_eq!(method.params[0].name, "self");
+            assert!(method.params[0].default.is_none());
+            assert_eq!(method.params[1].name, "amount");
+        }
+    }
+
+    #[test]
+    fn interface_method_required_count_tracks_defaults() {
+        let src = "interface Flexible { fn value(first: int, second: int = 2, third: int) -> int }";
+        let map = LayoutMap::build(&program(src)).unwrap();
+        let method = map.interface("Flexible").unwrap().method("value").unwrap();
+        let Type::Function {
+            required_params, ..
+        } = &method.signature
+        else {
+            panic!("interface method must have a function signature");
+        };
+        assert_eq!(*required_params, 3);
+        assert!(method.params[1].default.is_none());
+        assert!(method.params[2].default.is_some());
+        assert!(method.params[3].default.is_none());
+    }
+
+    #[test]
+    fn interface_method_layout_resolves_forward_alias_chains() {
+        let src = "interface Convert { fn apply(value: Number) -> Integer }\n\
+                   type Number = Integer\n\
+                   type Integer = int";
+        let map = LayoutMap::build(&program(src)).unwrap();
+        let method = map.interface("Convert").unwrap().method("apply").unwrap();
+        let Type::Function {
+            params,
+            return_type,
+            ..
+        } = &method.signature
+        else {
+            panic!("interface method must have a function signature");
+        };
+        assert_eq!(params, &[Type::Interface("Convert".to_string()), Type::Int]);
+        assert_eq!(return_type.as_ref(), &Type::Int);
+    }
+
+    #[test]
+    fn interface_method_layout_resolves_aliases_to_interfaces() {
+        let src = "interface Named { fn name() -> string }\n\
+                   type NamedAlias = Named\n\
+                   interface Factory { fn make(values: [NamedAlias]) -> NamedAlias }";
+        let map = LayoutMap::build(&program(src)).unwrap();
+        let method = map.interface("Factory").unwrap().method("make").unwrap();
+        let Type::Function {
+            params,
+            return_type,
+            ..
+        } = &method.signature
+        else {
+            panic!("interface method must have a function signature");
+        };
+        assert_eq!(
+            params,
+            &[
+                Type::Interface("Factory".to_string()),
+                Type::Array(Box::new(Type::Interface("Named".to_string())))
+            ]
+        );
+        assert_eq!(return_type.as_ref(), &Type::Interface("Named".to_string()));
+    }
+
+    #[test]
+    fn duplicate_interface_methods_are_rejected() {
+        let error = LayoutMap::build(&program("interface Duplicate { fn value() fn value() }"))
+            .unwrap_err();
+        assert!(error.to_string().contains("duplicate method `value`"));
+    }
+
+    #[test]
+    fn linker_symbol_sanitising_preserves_distinct_type_keys() {
+        assert_eq!(sanitise_symbol("Plain123"), "Plain123");
+        assert_ne!(sanitise_symbol("Box$int"), sanitise_symbol("Box_int"));
+        assert_ne!(sanitise_symbol("A::run"), sanitise_symbol("A__run"));
+        assert_eq!(sanitise_symbol("A$int::foo"), "A_x24_int_x3a__x3a_foo");
+        assert_ne!(
+            sanitise_symbol("A$int::foo"),
+            sanitise_symbol("A_x24_int_x3a::x3a_foo")
+        );
+        assert!(sanitise_symbol("Box<[int]>")
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '_'));
     }
 }
