@@ -8,6 +8,7 @@
  */
 #include "lira_rt.h"
 
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,15 +26,104 @@ static const char BASE64_STANDARD[] =
 static const char BASE64_URL[] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
+/* Lira strings have the same UTF-8 invariant as the bytecode VM's String.
+ * Decoders produce arbitrary bytes, so validate those bytes before handing
+ * them to lira_rt_str_new.  The continuation checks are kept here rather than
+ * relying on the C locale, whose multibyte rules are process-dependent. */
+static int lira_valid_utf8(const char *bytes, int64_t len, int64_t *error_index, int *error_length) {
+    int64_t index = 0;
+    while (index < len) {
+        unsigned char first = (unsigned char)bytes[index];
+        int width;
+        if (first <= 0x7F) {
+            index++;
+            continue;
+        }
+        if (first >= 0xC2 && first <= 0xDF) {
+            width = 2;
+        } else if (first >= 0xE0 && first <= 0xEF) {
+            width = 3;
+        } else if (first >= 0xF0 && first <= 0xF4) {
+            width = 4;
+        } else {
+            *error_index = index;
+            *error_length = 1;
+            return 0;
+        }
+        if (len - index < width) {
+            *error_index = index;
+            *error_length = 0;
+            return 0;
+        }
+        for (int i = 1; i < width; i++) {
+            if (((unsigned char)bytes[index + i] & 0xC0) != 0x80) {
+                *error_index = index;
+                *error_length = 1;
+                return 0;
+            }
+        }
+        unsigned char second = (unsigned char)bytes[index + 1];
+        if ((first == 0xE0 && second < 0xA0) ||
+            (first == 0xED && second >= 0xA0) ||
+            (first == 0xF0 && second < 0x90) ||
+            (first == 0xF4 && second > 0x8F)) {
+            *error_index = index;
+            *error_length = 1;
+            return 0;
+        }
+        index += width;
+    }
+    return 1;
+}
+
+static int lira_encoding_valid_input(const LiraStr *input) {
+    return input != NULL && input->len >= 0 &&
+           (uint64_t)input->len <= (uint64_t)UINT32_MAX - sizeof(LiraStr);
+}
+
+static LiraStr *lira_decoded_string(char *bytes, int64_t len, const char *operation) {
+    int64_t error_index = 0;
+    int error_length = 0;
+    if (!lira_valid_utf8(bytes, len, &error_index, &error_length)) {
+        if (error_length > 0) {
+            fprintf(stderr,
+                    "%s error: UTF-8 decode error: invalid utf-8 sequence of %d bytes from index "
+                    "%" PRId64 "\n",
+                    operation, error_length, error_index);
+        } else {
+            fprintf(stderr,
+                    "%s error: UTF-8 decode error: incomplete utf-8 byte sequence from index "
+                    "%" PRId64 "\n",
+                    operation, error_index);
+        }
+        fflush(stderr);
+        lira_rt_mem_free(bytes);
+        return lira_rt_str_new("", 0);
+    }
+    LiraStr *result = lira_rt_str_new(bytes, len);
+    lira_rt_mem_free(bytes);
+    return result;
+}
+
 static LiraStr *lira_base64_encode(const LiraStr *input, const char *alphabet, int pad) {
     if (input == NULL) {
         return lira_rt_str_new("", 0);
     }
+    if (!lira_encoding_valid_input(input) || input->len > (INT64_MAX - 2) ||
+        (input->len + 2) / 3 > (INT64_MAX - 1) / 4) {
+        lira_rt_panic("base64 input string is invalid");
+        return lira_rt_str_new("", 0);
+    }
     int64_t groups = (input->len + 2) / 3;
     int64_t capacity = groups * 4;
-    char *out = (char *)malloc((size_t)capacity + 1);
+    if ((uint64_t)capacity > (uint64_t)SIZE_MAX - 1) {
+        lira_rt_panic("base64 encoded string is too large");
+        return lira_rt_str_new("", 0);
+    }
+    char *out = (char *)lira_rt_mem_try_alloc((size_t)capacity + 1, 0);
     if (out == NULL) {
-        lira_rt_panic("out of memory");
+        lira_rt_panic(lira_gc_last_allocation_error());
+        return lira_rt_str_new("", 0);
     }
 
     int64_t written = 0;
@@ -60,7 +150,7 @@ static LiraStr *lira_base64_encode(const LiraStr *input, const char *alphabet, i
         }
     }
     LiraStr *result = lira_rt_str_new(out, written);
-    free(out);
+    lira_rt_mem_free(out);
     return result;
 }
 
@@ -69,13 +159,23 @@ static int lira_base64_value(char c, const char *alphabet) {
     return found != NULL ? (int)(found - alphabet) : -1;
 }
 
-static LiraStr *lira_base64_decode(const LiraStr *input, const char *alphabet) {
+static LiraStr *lira_base64_decode(const LiraStr *input, const char *alphabet, const char *operation) {
     if (input == NULL) {
         return lira_rt_str_new("", 0);
     }
-    char *out = (char *)malloc((size_t)input->len + 1);
+    if (!lira_encoding_valid_input(input)) {
+        lira_rt_panic("base64 input string is invalid");
+        return lira_rt_str_new("", 0);
+    }
+    if ((uint64_t)input->len > (uint64_t)SIZE_MAX - 1) {
+        lira_rt_panic("base64 decoded string is too large");
+        return lira_rt_str_new("", 0);
+    }
+    size_t capacity = (size_t)input->len + 1;
+    char *out = (char *)lira_rt_mem_try_alloc(capacity, 0);
     if (out == NULL) {
-        lira_rt_panic("out of memory");
+        lira_rt_panic(lira_gc_last_allocation_error());
+        return lira_rt_str_new("", 0);
     }
     int64_t written = 0;
     uint32_t accumulator = 0;
@@ -96,22 +196,20 @@ static LiraStr *lira_base64_decode(const LiraStr *input, const char *alphabet) {
             out[written++] = (char)((accumulator >> bits) & 0xFF);
         }
     }
-    LiraStr *result = lira_rt_str_new(out, written);
-    free(out);
-    return result;
+    return lira_decoded_string(out, written, operation);
 }
 
 LiraStr *lira_rt_base64_encode(const LiraStr *s) {
     return lira_base64_encode(s, BASE64_STANDARD, 1);
 }
 LiraStr *lira_rt_base64_decode(const LiraStr *s) {
-    return lira_base64_decode(s, BASE64_STANDARD);
+    return lira_base64_decode(s, BASE64_STANDARD, "base64_decode");
 }
 LiraStr *lira_rt_base64_encode_url(const LiraStr *s) {
     return lira_base64_encode(s, BASE64_URL, 0);
 }
 LiraStr *lira_rt_base64_decode_url(const LiraStr *s) {
-    return lira_base64_decode(s, BASE64_URL);
+    return lira_base64_decode(s, BASE64_URL, "base64_decode_url");
 }
 
 /* ------------------------------------------------------------------ */
@@ -127,9 +225,14 @@ LiraStr *lira_rt_url_encode(const LiraStr *s) {
     if (s == NULL) {
         return lira_rt_str_new("", 0);
     }
-    char *out = (char *)malloc((size_t)s->len * 3 + 1);
+    if (!lira_encoding_valid_input(s) || (size_t)s->len > (SIZE_MAX - 1) / 3) {
+        lira_rt_panic("url encode input string is invalid");
+        return lira_rt_str_new("", 0);
+    }
+    char *out = (char *)lira_rt_mem_try_alloc((size_t)s->len * 3 + 1, 0);
     if (out == NULL) {
-        lira_rt_panic("out of memory");
+        lira_rt_panic(lira_gc_last_allocation_error());
+        return lira_rt_str_new("", 0);
     }
     int64_t written = 0;
     for (int64_t i = 0; i < s->len; i++) {
@@ -144,7 +247,7 @@ LiraStr *lira_rt_url_encode(const LiraStr *s) {
         }
     }
     LiraStr *result = lira_rt_str_new(out, written);
-    free(out);
+    lira_rt_mem_free(out);
     return result;
 }
 
@@ -165,27 +268,40 @@ LiraStr *lira_rt_url_decode(const LiraStr *s) {
     if (s == NULL) {
         return lira_rt_str_new("", 0);
     }
-    char *out = (char *)malloc((size_t)s->len + 1);
+    if (!lira_encoding_valid_input(s)) {
+        lira_rt_panic("url decode input string is invalid");
+        return lira_rt_str_new("", 0);
+    }
+    if ((uint64_t)s->len > (uint64_t)SIZE_MAX - 1) {
+        lira_rt_panic("url decoded string is too large");
+        return lira_rt_str_new("", 0);
+    }
+    size_t capacity = (size_t)s->len + 1;
+    char *out = (char *)lira_rt_mem_try_alloc(capacity, 0);
     if (out == NULL) {
-        lira_rt_panic("out of memory");
+        lira_rt_panic(lira_gc_last_allocation_error());
+        return lira_rt_str_new("", 0);
     }
     int64_t written = 0;
     for (int64_t i = 0; i < s->len; i++) {
         char c = s->data[i];
-        if (c == '%' && i + 2 < s->len) {
+        if (c == '%') {
+            if (s->len - i < 3) {
+                /* Match the VM: consume an incomplete trailing escape. */
+                break;
+            }
             int hi = lira_hex_value(s->data[i + 1]);
             int lo = lira_hex_value(s->data[i + 2]);
             if (hi >= 0 && lo >= 0) {
                 out[written++] = (char)((hi << 4) | lo);
-                i += 2;
-                continue;
             }
+            /* Invalid hex escapes are consumed without producing a byte. */
+            i += 2;
+            continue;
         }
         out[written++] = c == '+' ? ' ' : c;
     }
-    LiraStr *result = lira_rt_str_new(out, written);
-    free(out);
-    return result;
+    return lira_decoded_string(out, written, "url_decode");
 }
 
 /* ------------------------------------------------------------------ */
@@ -203,6 +319,23 @@ static LiraStr *lira_to_hex(const unsigned char *bytes, int count) {
 /* ------------------------------------------------------------------ */
 /* MD5 (RFC 1321)                                                      */
 /* ------------------------------------------------------------------ */
+
+static int lira_hash_padded_length(int64_t len, int64_t trailer, int64_t block,
+                                   int64_t *padded) {
+    if (len < 0 || trailer <= 0 || block <= 0 || len > INT64_MAX - trailer) {
+        return 0;
+    }
+    int64_t blocks = (len + trailer) / block;
+    if (blocks == INT64_MAX || blocks + 1 > INT64_MAX / block) {
+        return 0;
+    }
+    int64_t result = (blocks + 1) * block;
+    if ((uint64_t)result > (uint64_t)SIZE_MAX) {
+        return 0;
+    }
+    *padded = result;
+    return 1;
+}
 
 static uint32_t lira_rotl32(uint32_t x, int c) { return (x << c) | (x >> (32 - c)); }
 
@@ -224,10 +357,17 @@ static void lira_md5(const unsigned char *message, int64_t len, unsigned char di
                               6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21};
 
     uint32_t h[4] = {0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476};
-    int64_t padded = ((len + 8) / 64 + 1) * 64;
-    unsigned char *buffer = (unsigned char *)calloc(1, (size_t)padded);
+    int64_t padded = 0;
+    if (!lira_hash_padded_length(len, 8, 64, &padded)) {
+        memset(digest, 0, 16);
+        lira_rt_panic("hash input string is too large");
+        return;
+    }
+    unsigned char *buffer = (unsigned char *)lira_rt_mem_try_alloc((size_t)padded, 1);
     if (buffer == NULL) {
-        lira_rt_panic("out of memory");
+        memset(digest, 0, 16);
+        lira_rt_panic(lira_gc_last_allocation_error());
+        return;
     }
     memcpy(buffer, message, (size_t)len);
     buffer[len] = 0x80;
@@ -271,7 +411,7 @@ static void lira_md5(const unsigned char *message, int64_t len, unsigned char di
         h[2] += c;
         h[3] += d;
     }
-    free(buffer);
+    lira_rt_mem_free(buffer);
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 4; j++) {
             digest[i * 4 + j] = (unsigned char)(h[i] >> (8 * j));
@@ -280,6 +420,10 @@ static void lira_md5(const unsigned char *message, int64_t len, unsigned char di
 }
 
 LiraStr *lira_rt_md5(const LiraStr *s) {
+    if (s != NULL && !lira_encoding_valid_input(s)) {
+        lira_rt_panic("hash input string is invalid");
+        return lira_rt_str_new("", 0);
+    }
     unsigned char digest[16];
     lira_md5(s ? (const unsigned char *)s->data : (const unsigned char *)"", s ? s->len : 0,
              digest);
@@ -292,10 +436,17 @@ LiraStr *lira_rt_md5(const LiraStr *s) {
 
 static void lira_sha1(const unsigned char *message, int64_t len, unsigned char digest[20]) {
     uint32_t h[5] = {0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0};
-    int64_t padded = ((len + 8) / 64 + 1) * 64;
-    unsigned char *buffer = (unsigned char *)calloc(1, (size_t)padded);
+    int64_t padded = 0;
+    if (!lira_hash_padded_length(len, 8, 64, &padded)) {
+        memset(digest, 0, 20);
+        lira_rt_panic("hash input string is too large");
+        return;
+    }
+    unsigned char *buffer = (unsigned char *)lira_rt_mem_try_alloc((size_t)padded, 1);
     if (buffer == NULL) {
-        lira_rt_panic("out of memory");
+        memset(digest, 0, 20);
+        lira_rt_panic(lira_gc_last_allocation_error());
+        return;
     }
     memcpy(buffer, message, (size_t)len);
     buffer[len] = 0x80;
@@ -343,7 +494,7 @@ static void lira_sha1(const unsigned char *message, int64_t len, unsigned char d
         h[3] += d;
         h[4] += e;
     }
-    free(buffer);
+    lira_rt_mem_free(buffer);
     for (int i = 0; i < 5; i++) {
         for (int j = 0; j < 4; j++) {
             digest[i * 4 + j] = (unsigned char)(h[i] >> (24 - 8 * j));
@@ -352,6 +503,10 @@ static void lira_sha1(const unsigned char *message, int64_t len, unsigned char d
 }
 
 LiraStr *lira_rt_sha1(const LiraStr *s) {
+    if (s != NULL && !lira_encoding_valid_input(s)) {
+        lira_rt_panic("hash input string is invalid");
+        return lira_rt_str_new("", 0);
+    }
     unsigned char digest[20];
     lira_sha1(s ? (const unsigned char *)s->data : (const unsigned char *)"", s ? s->len : 0,
               digest);
@@ -380,10 +535,17 @@ static void lira_sha256(const unsigned char *message, int64_t len, unsigned char
 
     uint32_t h[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
                      0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
-    int64_t padded = ((len + 8) / 64 + 1) * 64;
-    unsigned char *buffer = (unsigned char *)calloc(1, (size_t)padded);
+    int64_t padded = 0;
+    if (!lira_hash_padded_length(len, 8, 64, &padded)) {
+        memset(digest, 0, 32);
+        lira_rt_panic("hash input string is too large");
+        return;
+    }
+    unsigned char *buffer = (unsigned char *)lira_rt_mem_try_alloc((size_t)padded, 1);
     if (buffer == NULL) {
-        lira_rt_panic("out of memory");
+        memset(digest, 0, 32);
+        lira_rt_panic(lira_gc_last_allocation_error());
+        return;
     }
     memcpy(buffer, message, (size_t)len);
     buffer[len] = 0x80;
@@ -431,7 +593,7 @@ static void lira_sha256(const unsigned char *message, int64_t len, unsigned char
         h[6] += g;
         h[7] += hh;
     }
-    free(buffer);
+    lira_rt_mem_free(buffer);
     for (int i = 0; i < 8; i++) {
         for (int j = 0; j < 4; j++) {
             digest[i * 4 + j] = (unsigned char)(h[i] >> (24 - 8 * j));
@@ -440,6 +602,10 @@ static void lira_sha256(const unsigned char *message, int64_t len, unsigned char
 }
 
 LiraStr *lira_rt_sha256(const LiraStr *s) {
+    if (s != NULL && !lira_encoding_valid_input(s)) {
+        lira_rt_panic("hash input string is invalid");
+        return lira_rt_str_new("", 0);
+    }
     unsigned char digest[32];
     lira_sha256(s ? (const unsigned char *)s->data : (const unsigned char *)"", s ? s->len : 0,
                 digest);
@@ -472,10 +638,17 @@ static void lira_sha512(const unsigned char *message, int64_t len, unsigned char
     uint64_t h[8] = {0x6a09e667f3bcc908ULL, 0xbb67ae8584caa73bULL, 0x3c6ef372fe94f82bULL,
                      0xa54ff53a5f1d36f1ULL, 0x510e527fade682d1ULL, 0x9b05688c2b3e6c1fULL,
                      0x1f83d9abfb41bd6bULL, 0x5be0cd19137e2179ULL};
-    int64_t padded = ((len + 16) / 128 + 1) * 128;
-    unsigned char *buffer = (unsigned char *)calloc(1, (size_t)padded);
+    int64_t padded = 0;
+    if (!lira_hash_padded_length(len, 16, 128, &padded)) {
+        memset(digest, 0, 64);
+        lira_rt_panic("hash input string is too large");
+        return;
+    }
+    unsigned char *buffer = (unsigned char *)lira_rt_mem_try_alloc((size_t)padded, 1);
     if (buffer == NULL) {
-        lira_rt_panic("out of memory");
+        memset(digest, 0, 64);
+        lira_rt_panic(lira_gc_last_allocation_error());
+        return;
     }
     memcpy(buffer, message, (size_t)len);
     buffer[len] = 0x80;
@@ -525,7 +698,7 @@ static void lira_sha512(const unsigned char *message, int64_t len, unsigned char
         h[6] += g;
         h[7] += hh;
     }
-    free(buffer);
+    lira_rt_mem_free(buffer);
     for (int i = 0; i < 8; i++) {
         for (int j = 0; j < 8; j++) {
             digest[i * 8 + j] = (unsigned char)(h[i] >> (56 - 8 * j));
@@ -534,6 +707,10 @@ static void lira_sha512(const unsigned char *message, int64_t len, unsigned char
 }
 
 LiraStr *lira_rt_sha512(const LiraStr *s) {
+    if (s != NULL && !lira_encoding_valid_input(s)) {
+        lira_rt_panic("hash input string is invalid");
+        return lira_rt_str_new("", 0);
+    }
     unsigned char digest[64];
     lira_sha512(s ? (const unsigned char *)s->data : (const unsigned char *)"", s ? s->len : 0,
                 digest);

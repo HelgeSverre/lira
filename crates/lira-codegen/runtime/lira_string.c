@@ -12,40 +12,60 @@
 
 void lira_rt_panic(const char *message);
 
-/* Byte length of the UTF-8 sequence starting at `b`. */
-static int lira_utf8_width(unsigned char b) {
-    if (b < 0x80) {
-        return 1;
-    }
-    if ((b & 0xE0) == 0xC0) {
-        return 2;
-    }
-    if ((b & 0xF0) == 0xE0) {
-        return 3;
-    }
-    if ((b & 0xF8) == 0xF0) {
-        return 4;
-    }
-    return 1; /* malformed: treat as a single byte so scanning terminates */
+static int lira_valid_string_length(const LiraStr *s) {
+    return s != NULL && s->len >= 0 &&
+           (uint64_t)s->len <= (uint64_t)UINT32_MAX - sizeof(LiraStr);
 }
 
-/* Decode the scalar value at `p`, writing its width to `width`. */
-static int64_t lira_utf8_decode(const char *p, int *width) {
-    unsigned char b = (unsigned char)*p;
-    int n = lira_utf8_width(b);
-    *width = n;
-    switch (n) {
-        case 1:
-            return b;
-        case 2:
-            return ((int64_t)(b & 0x1F) << 6) | ((unsigned char)p[1] & 0x3F);
-        case 3:
-            return ((int64_t)(b & 0x0F) << 12) | (((unsigned char)p[1] & 0x3F) << 6) |
-                   ((unsigned char)p[2] & 0x3F);
-        default:
-            return ((int64_t)(b & 0x07) << 18) | (((unsigned char)p[1] & 0x3F) << 12) |
-                   (((unsigned char)p[2] & 0x3F) << 6) | ((unsigned char)p[3] & 0x3F);
+/* Decode one scalar without ever reading beyond `remaining` bytes. Invalid
+ * ABI data is consumed as one byte, which keeps all string operations bounded
+ * while valid Lira/Rust UTF-8 retains VM-compatible scalar semantics. */
+static int64_t lira_utf8_decode(const char *p, int64_t remaining, int *width) {
+    unsigned char b = (unsigned char)p[0];
+    int n = 1;
+    if (b < 0x80) {
+        *width = 1;
+        return b;
     }
+    if (b >= 0xC2 && b <= 0xDF) {
+        n = 2;
+    } else if (b >= 0xE0 && b <= 0xEF) {
+        n = 3;
+    } else if (b >= 0xF0 && b <= 0xF4) {
+        n = 4;
+    }
+    if (remaining < n) {
+        *width = 1;
+        return b;
+    }
+    for (int i = 1; i < n; i++) {
+        if (((unsigned char)p[i] & 0xC0) != 0x80) {
+            *width = 1;
+            return b;
+        }
+    }
+    unsigned char b1 = n > 1 ? (unsigned char)p[1] : 0;
+    if ((n == 3 && ((b == 0xE0 && b1 < 0xA0) || (b == 0xED && b1 >= 0xA0))) ||
+        (n == 4 && ((b == 0xF0 && b1 < 0x90) || (b == 0xF4 && b1 > 0x8F)))) {
+        *width = 1;
+        return b;
+    }
+    *width = n;
+    if (n == 2) {
+        return ((int64_t)(b & 0x1F) << 6) | (b1 & 0x3F);
+    }
+    if (n == 3) {
+        return ((int64_t)(b & 0x0F) << 12) | ((int64_t)(b1 & 0x3F) << 6) |
+               ((unsigned char)p[2] & 0x3F);
+    }
+    return ((int64_t)(b & 0x07) << 18) | ((int64_t)(b1 & 0x3F) << 12) |
+           ((int64_t)((unsigned char)p[2] & 0x3F) << 6) | ((unsigned char)p[3] & 0x3F);
+}
+
+static int lira_utf8_width(const char *p, int64_t remaining) {
+    int width = 1;
+    (void)lira_utf8_decode(p, remaining, &width);
+    return width;
 }
 
 /* Byte offset of character `index`, or the string's length if it runs off the end. */
@@ -53,7 +73,7 @@ static int64_t lira_char_offset(const LiraStr *s, int64_t index) {
     int64_t offset = 0;
     int64_t seen = 0;
     while (offset < s->len && seen < index) {
-        offset += lira_utf8_width((unsigned char)s->data[offset]);
+        offset += lira_utf8_width(s->data + offset, s->len - offset);
         seen++;
     }
     return offset;
@@ -84,7 +104,7 @@ static int lira_encode_utf8(char *buf, int64_t cp) {
 }
 
 int64_t lira_rt_str_char_code(const LiraStr *s, int64_t index) {
-    if (s == NULL || index < 0) {
+    if (!lira_valid_string_length(s) || index < 0) {
         return -1;
     }
     int64_t offset = lira_char_offset(s, index);
@@ -92,11 +112,29 @@ int64_t lira_rt_str_char_code(const LiraStr *s, int64_t index) {
         return -1;
     }
     int width = 0;
-    return lira_utf8_decode(s->data + offset, &width);
+    return lira_utf8_decode(s->data + offset, s->len - offset, &width);
+}
+
+LiraStr *lira_rt_str_index(const LiraStr *s, int64_t index) {
+    if (s == NULL) {
+        lira_rt_panic("index into null string");
+    }
+    if (!lira_valid_string_length(s)) {
+        lira_rt_panic("string length is invalid");
+    }
+    if (index < 0) {
+        lira_rt_panic("index out of bounds: negative string index");
+    }
+    int64_t offset = lira_char_offset(s, index);
+    if (offset >= s->len) {
+        lira_rt_panic("string index out of bounds");
+    }
+    int width = lira_utf8_width(s->data + offset, s->len - offset);
+    return lira_rt_str_new(s->data + offset, width);
 }
 
 LiraStr *lira_rt_str_from_char_code(int64_t code) {
-    if (code < 0 || code > 0x10FFFF) {
+    if (code < 0 || code > 0x10FFFF || (code >= 0xD800 && code <= 0xDFFF)) {
         return lira_rt_str_new("", 0);
     }
     char buf[4];
@@ -107,7 +145,10 @@ LiraStr *lira_rt_str_from_char_code(int64_t code) {
 /* ASCII-only case mapping, matching what the VM does for ASCII input. Non-ASCII
  * scalars are passed through unchanged rather than half-cased. */
 static LiraStr *lira_map_ascii_case(const LiraStr *s, int to_upper) {
-    if (s == NULL) {
+    if (!lira_valid_string_length(s)) {
+        if (s != NULL) {
+            lira_rt_panic("string length is invalid");
+        }
         return lira_rt_str_new("", 0);
     }
     LiraStr *out = lira_rt_str_new(s->data, s->len);
@@ -126,7 +167,10 @@ LiraStr *lira_rt_str_to_upper(const LiraStr *s) { return lira_map_ascii_case(s, 
 LiraStr *lira_rt_str_to_lower(const LiraStr *s) { return lira_map_ascii_case(s, 0); }
 
 LiraStr *lira_rt_str_substring(const LiraStr *s, int64_t start, int64_t end) {
-    if (s == NULL) {
+    if (!lira_valid_string_length(s)) {
+        if (s != NULL) {
+            lira_rt_panic("string length is invalid");
+        }
         return lira_rt_str_new("", 0);
     }
     if (start < 0) {
@@ -144,7 +188,7 @@ LiraStr *lira_rt_str_substring(const LiraStr *s, int64_t start, int64_t end) {
 }
 
 int64_t lira_rt_str_index_of(const LiraStr *s, const LiraStr *needle) {
-    if (s == NULL || needle == NULL) {
+    if (!lira_valid_string_length(s) || !lira_valid_string_length(needle)) {
         return -1;
     }
     if (needle->len == 0) {
@@ -159,7 +203,7 @@ int64_t lira_rt_str_index_of(const LiraStr *s, const LiraStr *needle) {
              * byte position we matched at. */
             int64_t chars = 0;
             for (int64_t o = 0; o < i;) {
-                o += lira_utf8_width((unsigned char)s->data[o]);
+                o += lira_utf8_width(s->data + o, s->len - o);
                 chars++;
             }
             return chars;
@@ -170,16 +214,29 @@ int64_t lira_rt_str_index_of(const LiraStr *s, const LiraStr *needle) {
 
 LiraArray *lira_rt_str_split(const LiraStr *s, const LiraStr *delimiter) {
     LiraArray *parts = lira_rt_array_new(0);
-    if (s == NULL) {
+    /* The parts array is built with per-element allocations below; each can
+     * trigger a collection while the partially-built array is only reachable
+     * from this C frame (scheduler stack, not scanned by the GC). Root it so
+     * a mid-loop collection cannot sweep it out from under the pushes. */
+    lira_gc_register_root_slot(&parts);
+    if (!lira_valid_string_length(s)) {
+        if (s != NULL) {
+            lira_rt_panic("string length is invalid");
+        }
+        lira_gc_unregister_root_slot(&parts);
         return parts;
+    }
+    if (delimiter != NULL && !lira_valid_string_length(delimiter)) {
+        lira_rt_panic("string length is invalid");
     }
     /* An empty delimiter splits into characters, as in the VM. */
     if (delimiter == NULL || delimiter->len == 0) {
         for (int64_t offset = 0; offset < s->len;) {
-            int width = lira_utf8_width((unsigned char)s->data[offset]);
+            int width = lira_utf8_width(s->data + offset, s->len - offset);
             lira_rt_array_push(parts, (int64_t)(intptr_t)lira_rt_str_new(s->data + offset, width));
             offset += width;
         }
+        lira_gc_unregister_root_slot(&parts);
         return parts;
     }
     int64_t start = 0;
@@ -194,6 +251,7 @@ LiraArray *lira_rt_str_split(const LiraStr *s, const LiraStr *delimiter) {
         }
     }
     lira_rt_array_push(parts, (int64_t)(intptr_t)lira_rt_str_new(s->data + start, s->len - start));
+    lira_gc_unregister_root_slot(&parts);
     return parts;
 }
 
@@ -202,7 +260,10 @@ static int lira_is_space(unsigned char c) {
 }
 
 static LiraStr *lira_trim(const LiraStr *s, int from_start, int from_end) {
-    if (s == NULL) {
+    if (!lira_valid_string_length(s)) {
+        if (s != NULL) {
+            lira_rt_panic("string length is invalid");
+        }
         return lira_rt_str_new("", 0);
     }
     int64_t begin = 0;

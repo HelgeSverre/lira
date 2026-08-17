@@ -8,6 +8,7 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,11 +40,20 @@ void lira_rt_sleep(int64_t millis) {
     if (millis <= 0) {
         return;
     }
+    /* A running native fiber parks on the bounded I/O pool.  Calls made by an
+     * embedding thread (outside lira_rt_boot) retain the old synchronous
+     * behaviour because there is no fiber to resume. */
+    int8_t parked = lira_rt_io_sleep(millis);
+    if (parked > 0) {
+        return;
+    }
+    if (parked < 0) {
+        lira_rt_panic("I/O worker pool is unavailable or full");
+        return;
+    }
     struct timespec ts;
     ts.tv_sec = (time_t)(millis / 1000);
     ts.tv_nsec = (long)((millis % 1000) * 1000000);
-    /* Fibers are cooperative and share one OS thread, so this parks the whole
-     * program. Matching the VM, which also blocks. */
     while (nanosleep(&ts, &ts) == -1 && errno == EINTR) {
     }
 }
@@ -111,8 +121,24 @@ int64_t lira_rt_time_from_components(int64_t year, int64_t month, int64_t day, i
                                      int64_t minute, int64_t second) {
     struct tm utc;
     memset(&utc, 0, sizeof(utc));
+    /* Clamp component values into the platform `struct tm` (int) ranges so the
+     * signed `year - 1900` / `month - 1` subtraction and the `(int)` casts
+     * cannot overflow (that would be UB for extreme `year` inputs). Values
+     * outside the representable range fail closed (return 0), matching a
+     * `timegm` failure on an out-of-range date. */
+    if (year < INT64_MIN + 1900 || year > (int64_t)INT_MAX + 1900) {
+        return 0;
+    }
+    int64_t month_shift = month - 1;
+    if (month < INT64_MIN + 1 || month > (int64_t)INT_MAX + 1) {
+        return 0;
+    }
+    if (day > INT_MAX || day < INT_MIN || hour > INT_MAX || hour < INT_MIN ||
+        minute > INT_MAX || minute < INT_MIN || second > INT_MAX || second < INT_MIN) {
+        return 0;
+    }
     utc.tm_year = (int)(year - 1900);
-    utc.tm_mon = (int)(month - 1);
+    utc.tm_mon = (int)(month_shift);
     utc.tm_mday = (int)day;
     utc.tm_hour = (int)hour;
     utc.tm_min = (int)minute;
@@ -196,8 +222,18 @@ int64_t lira_rt_random_int(int64_t low, int64_t high) {
     if (high <= low) {
         return low;
     }
-    uint64_t span = (uint64_t)(high - low);
-    return low + (int64_t)(lira_rt_random_bits() % span);
+    uint64_t lo = (uint64_t)low;
+    uint64_t hi = (uint64_t)high;
+    /* Inclusive span. hi > lo here, so hi - lo is in [1, UINT64_MAX]; adding
+     * one wraps to 0 exactly when the range is the full 2^64-domain, in which
+     * case every random value is in range. All arithmetic is unsigned, so no
+     * signed-overflow UB can occur for any (low, high) pair. */
+    uint64_t span = hi - lo + 1;
+    uint64_t bits = lira_rt_random_bits();
+    if (span == 0) {
+        return (int64_t)(lo + bits);
+    }
+    return (int64_t)(lo + bits % span);
 }
 
 /* ------------------------------------------------------------------ */
@@ -313,38 +349,125 @@ LiraStr *lira_rt_env_home_dir(void) { return lira_env_or("HOME", ""); }
 typedef struct {
     int64_t handle;
     FILE *file;
+    int8_t busy;
 } LiraOpenFile;
 
 static LiraOpenFile g_files[LIRA_MAX_FILES];
 static int64_t g_next_file_handle = LIRA_FIRST_FILE_HANDLE;
 
-int64_t lira_rt_file_open(const LiraStr *path, int64_t mode) {
-    if (path == NULL) {
-        return -1;
+typedef struct {
+    char *path;
+    int64_t mode;
+    int64_t *slot;
+} FileOpenArg;
+typedef struct {
+    int64_t *slot;
+    FILE *file;
+    int owns_resource;
+} FileOpenResult;
+
+static void destroy_file_open_result(void *ptr) {
+    FileOpenResult *result = (FileOpenResult *)ptr;
+    if (result != NULL) {
+        if (result->owns_resource && result->file != NULL) {
+            fclose(result->file);
+        }
+        lira_rt_mem_free(result);
     }
-    /* 0 = read, 1 = write, 2 = append, 3 = read+write */
-    const char *flags;
+}
+
+static const char *file_mode(int64_t mode) {
     switch (mode) {
-        case 1:
-            flags = "wb";
-            break;
-        case 2:
-            flags = "ab";
-            break;
-        case 3:
-            flags = "r+b";
-            break;
-        default:
-            flags = "rb";
-            break;
+        case 1: return "wb";
+        case 2: return "ab";
+        case 3: return "r+b";
+        default: return "rb";
     }
-    FILE *file = fopen(path->data, flags);
-    if (file == NULL) {
-        return -1;
+}
+
+static void destroy_file_open_arg(void *ptr) {
+    FileOpenArg *arg = (FileOpenArg *)ptr;
+    if (arg != NULL) {
+        lira_rt_mem_free(arg->path);
+        lira_rt_mem_free(arg);
     }
+}
+
+static int file_open_work(void *ptr, void **out) {
+    FileOpenArg *arg = (FileOpenArg *)ptr;
+    FileOpenResult *result = (FileOpenResult *)lira_rt_mem_try_alloc(sizeof(FileOpenResult), 1);
+    if (result == NULL) return -1;
+    result->slot = arg->slot;
+    result->file = fopen(arg->path, file_mode(arg->mode));
+    result->owns_resource = result->file != NULL;
+    *out = result;
+    return 0;
+}
+
+static void file_open_complete(void *owner, uint64_t generation, void *ptr, int status,
+                               void *failure_arg) {
+    (void)failure_arg;
+    if (status != 0) {
+        lira_rt_io_wake(owner, generation, status);
+        return;
+    }
+    FileOpenResult *result = (FileOpenResult *)ptr;
+    if (result == NULL) {
+        lira_rt_io_wake(owner, generation, status);
+        return;
+    }
+    int64_t handle = -1;
+    if (status == 0 && result->file != NULL) {
+        for (int i = 0; i < LIRA_MAX_FILES; i++) {
+            if (g_files[i].file == NULL) {
+                if (g_next_file_handle >= INT64_MAX) {
+                    break;
+                }
+                g_files[i].file = result->file;
+                g_files[i].busy = 0;
+                g_files[i].handle = g_next_file_handle++;
+                handle = g_files[i].handle;
+                result->file = NULL;
+                result->owns_resource = 0;
+                break;
+            }
+        }
+    }
+    if (result->file != NULL) {
+        fclose(result->file);
+        result->file = NULL;
+        result->owns_resource = 0;
+    }
+    *result->slot = handle;
+    lira_rt_io_wake(owner, generation, 0);
+}
+
+int64_t lira_rt_file_open(const LiraStr *path, int64_t mode) {
+    if (path == NULL || path->len < 0 || (uint64_t)path->len > SIZE_MAX - 1) return -1;
+    FileOpenArg *arg = (FileOpenArg *)lira_rt_mem_try_alloc(sizeof(FileOpenArg), 1);
+    if (arg == NULL) return -1;
+    arg->path = (char *)lira_rt_mem_try_alloc((size_t)path->len + 1, 0);
+    if (arg->path == NULL) { destroy_file_open_arg(arg); return -1; }
+    memcpy(arg->path, path->data, (size_t)path->len);
+    arg->path[path->len] = '\0';
+    arg->mode = mode;
+    int64_t result = -1;
+    arg->slot = &result;
+    int8_t parked = lira_rt_io_submit_current(file_open_work, arg,
+                                               destroy_file_open_arg,
+                                               file_open_complete, destroy_file_open_result);
+    if (parked == 1) return result;
+    if (parked < 0) { destroy_file_open_arg(arg); return -1; }
+    FILE *file = fopen(arg->path, file_mode(arg->mode));
+    destroy_file_open_arg(arg);
+    if (file == NULL) return -1;
     for (int i = 0; i < LIRA_MAX_FILES; i++) {
         if (g_files[i].file == NULL) {
+            if (g_next_file_handle >= INT64_MAX) {
+                break;
+            }
             g_files[i].file = file;
+            g_files[i].busy = 0;
             g_files[i].handle = g_next_file_handle++;
             return g_files[i].handle;
         }
@@ -365,123 +488,476 @@ static LiraOpenFile *lira_file_slot(int64_t handle) {
     return NULL;
 }
 
-static FILE *lira_file(int64_t handle) {
+typedef struct {
+    int64_t handle;
+    FILE *file;
+    int64_t *slot;
+    int64_t max_bytes;
+    int owns_resource;
+} FileReadArg;
+typedef struct {
+    int64_t handle;
+    FILE *file;
+    int64_t *slot;
+    char *data;
+    int64_t len;
+    int owns_resource;
+} FileReadResult;
+
+static int file_read_work(void *ptr, void **out) {
+    FileReadArg *arg = (FileReadArg *)ptr;
+    if (lira_io_test_fail_result_alloc("LIRA_TEST_FAIL_FILE_READ_RESULT")) return -1;
+    FileReadResult *result = (FileReadResult *)lira_rt_mem_try_alloc(sizeof(FileReadResult), 1);
+    if (result == NULL) return -1;
+    result->handle = arg->handle;
+    result->file = arg->file;
+    result->slot = arg->slot;
+    result->owns_resource = 1;
+    result->data = (char *)lira_rt_mem_try_alloc((size_t)arg->max_bytes, 0);
+    if (result->data == NULL) { lira_rt_mem_free(result); return -1; }
+    arg->owns_resource = 0;
+    result->len = (int64_t)fread(result->data, 1, (size_t)arg->max_bytes, arg->file);
+    *out = result;
+    return 0;
+}
+
+static void file_busy_done(int64_t handle) {
     LiraOpenFile *slot = lira_file_slot(handle);
-    return slot != NULL ? slot->file : NULL;
+    if (slot != NULL) slot->busy = 0;
+}
+
+static int file_utf8_valid(const char *bytes, int64_t len) {
+    size_t i = 0;
+    while (i < (size_t)len) {
+        unsigned char c = (unsigned char)bytes[i++];
+        size_t need = c < 0x80 ? 0 : (c >= 0xc2 && c <= 0xdf ? 1 : (c >= 0xe0 && c <= 0xef ? 2 : (c >= 0xf0 && c <= 0xf4 ? 3 : 99)));
+        if (need == 99 || i + need > (size_t)len) return 0;
+        if (need >= 1 && ((unsigned char)bytes[i] < 0x80 || (unsigned char)bytes[i] > 0xbf)) return 0;
+        if (need >= 2 && ((unsigned char)bytes[i + 1] < 0x80 || (unsigned char)bytes[i + 1] > 0xbf)) return 0;
+        if (need == 3 && ((unsigned char)bytes[i + 2] < 0x80 || (unsigned char)bytes[i + 2] > 0xbf)) return 0;
+        if (need == 2 && c == 0xe0 && (unsigned char)bytes[i] < 0xa0) return 0;
+        if (need == 2 && c == 0xed && (unsigned char)bytes[i] >= 0xa0) return 0;
+        if (need == 3 && c == 0xf0 && (unsigned char)bytes[i] < 0x90) return 0;
+        if (need == 3 && c == 0xf4 && (unsigned char)bytes[i] >= 0x90) return 0;
+        i += need;
+    }
+    return 1;
+}
+
+static void destroy_file_read_result(void *ptr) {
+    FileReadResult *result = (FileReadResult *)ptr;
+    if (result != NULL && result->owns_resource && result->file != NULL) {
+        fclose(result->file);
+    }
+    if (result != NULL) { lira_rt_mem_free(result->data); lira_rt_mem_free(result); }
+}
+
+static void destroy_file_read_arg(void *ptr) {
+    FileReadArg *arg = (FileReadArg *)ptr;
+    if (arg != NULL) {
+        if (arg->owns_resource && arg->file != NULL) fclose(arg->file);
+        lira_rt_mem_free(arg);
+    }
+}
+
+static void file_read_complete(void *owner, uint64_t generation, void *ptr, int status,
+                               void *failure_arg) {
+    if (status != 0) {
+        FileReadArg *arg = (FileReadArg *)failure_arg;
+        if (arg != NULL) { file_busy_done(arg->handle); arg->owns_resource = 0; }
+        lira_rt_io_wake(owner, generation, status);
+        return;
+    }
+    FileReadResult *result = (FileReadResult *)ptr;
+    if (result == NULL) {
+        lira_rt_io_wake(owner, generation, status);
+        return;
+    }
+    LiraStr *value = status == 0 && file_utf8_valid(result->data, result->len) ? lira_rt_str_new(result->data, result->len)
+                                 : lira_rt_str_new("", 0);
+    *(LiraStr **)result->slot = value;
+    file_busy_done(result->handle);
+    result->owns_resource = 0;
+    lira_rt_io_wake(owner, generation, 0);
 }
 
 LiraStr *lira_rt_file_read(int64_t handle, int64_t max_bytes) {
-    FILE *file = lira_file(handle);
-    if (file == NULL || max_bytes <= 0) {
+    LiraOpenFile *slot = lira_file_slot(handle);
+    FILE *file = slot != NULL ? slot->file : NULL;
+    if (file == NULL || max_bytes <= 0 || slot->busy) {
         return lira_rt_str_new("", 0);
     }
     if (max_bytes > 1024 * 1024) {
         max_bytes = 1024 * 1024; /* the VM caps reads at 1 MiB */
     }
-    char *buffer = (char *)malloc((size_t)max_bytes);
-    if (buffer == NULL) {
-        lira_rt_panic("out of memory");
+    slot->busy = 1;
+    FileReadArg *arg = (FileReadArg *)lira_rt_mem_try_alloc(sizeof(FileReadArg), 1);
+    if (arg == NULL) { slot->busy = 0; return lira_rt_str_new("", 0); }
+    arg->handle = handle; arg->file = file; arg->max_bytes = max_bytes;
+    arg->owns_resource = 1;
+    LiraStr *result = NULL; arg->slot = (int64_t *)&result;
+    int8_t parked = lira_rt_io_submit_current(file_read_work, arg, destroy_file_read_arg,
+                                               file_read_complete,
+                                               destroy_file_read_result);
+    if (parked == 1) return result != NULL ? result : lira_rt_str_new("", 0);
+    slot->busy = 0;
+    if (parked < 0) { arg->owns_resource = 0; destroy_file_read_arg(arg); return lira_rt_str_new("", 0); }
+    void *out = NULL; int status = file_read_work(arg, &out); arg->owns_resource = 0; destroy_file_read_arg(arg);
+    FileReadResult *sync = (FileReadResult *)out;
+    if (sync == NULL || status != 0) { destroy_file_read_result(sync); return lira_rt_str_new("", 0); }
+    LiraStr *value = file_utf8_valid(sync->data, sync->len)
+                         ? lira_rt_str_new(sync->data, sync->len)
+                         : lira_rt_str_new("", 0);
+    sync->owns_resource = 0;
+    destroy_file_read_result(sync); return value;
+}
+
+typedef struct {
+    int64_t handle;
+    FILE *file;
+    int64_t *slot;
+    char *data;
+    int64_t len;
+    int owns_resource;
+} FileWriteArg;
+typedef struct {
+    int64_t handle;
+    FILE *file;
+    int64_t *slot;
+    int64_t value;
+    int owns_resource;
+} FileWriteResult;
+
+static void destroy_file_write_result(void *ptr) {
+    FileWriteResult *result = (FileWriteResult *)ptr;
+    if (result != NULL) {
+        if (result->owns_resource && result->file != NULL) {
+            fclose(result->file);
+        }
+        lira_rt_mem_free(result);
     }
-    size_t read = fread(buffer, 1, (size_t)max_bytes, file);
-    LiraStr *out = lira_rt_str_new(buffer, (int64_t)read);
-    free(buffer);
-    return out;
+}
+
+static void destroy_file_write_arg(void *ptr) {
+    FileWriteArg *arg = (FileWriteArg *)ptr;
+    if (arg != NULL) {
+        if (arg->owns_resource && arg->file != NULL) fclose(arg->file);
+        lira_rt_mem_free(arg->data);
+        lira_rt_mem_free(arg);
+    }
+}
+static int file_write_work(void *ptr, void **out) {
+    FileWriteArg *arg = (FileWriteArg *)ptr;
+    if (lira_io_test_fail_result_alloc("LIRA_TEST_FAIL_FILE_WRITE_RESULT")) return -1;
+    FileWriteResult *result = (FileWriteResult *)lira_rt_mem_try_alloc(sizeof(FileWriteResult), 1);
+    if (result == NULL) return -1;
+    result->handle = arg->handle; result->file = arg->file; result->slot = arg->slot;
+    result->owns_resource = 1;
+    arg->owns_resource = 0;
+    result->value = (int64_t)fwrite(arg->data, 1, (size_t)arg->len, arg->file);
+    if (fflush(arg->file) != 0) result->value = -1;
+    *out = result; return 0;
+}
+static void file_write_complete(void *owner, uint64_t generation, void *ptr, int status,
+                                void *failure_arg) {
+    if (status != 0) {
+        FileWriteArg *arg = (FileWriteArg *)failure_arg;
+        if (arg != NULL) { file_busy_done(arg->handle); arg->owns_resource = 0; }
+        lira_rt_io_wake(owner, generation, status);
+        return;
+    }
+    FileWriteResult *result = (FileWriteResult *)ptr;
+    if (result == NULL) {
+        lira_rt_io_wake(owner, generation, status);
+        return;
+    }
+    *result->slot = status == 0 ? result->value : -1;
+    file_busy_done(result->handle);
+    result->owns_resource = 0;
+    lira_rt_io_wake(owner, generation, 0);
 }
 
 int64_t lira_rt_file_write(int64_t handle, const LiraStr *data) {
-    FILE *file = lira_file(handle);
-    if (file == NULL || data == NULL) {
+    LiraOpenFile *slot = lira_file_slot(handle);
+    FILE *file = slot != NULL ? slot->file : NULL;
+    if (file == NULL || data == NULL || data->len < 0 ||
+        (uint64_t)data->len > SIZE_MAX - 1 || slot->busy) {
         return -1;
     }
-    return (int64_t)fwrite(data->data, 1, (size_t)data->len, file);
+    slot->busy = 1;
+    FileWriteArg *arg = (FileWriteArg *)lira_rt_mem_try_alloc(sizeof(FileWriteArg), 1);
+    if (arg == NULL) { slot->busy = 0; return -1; }
+    arg->data = (char *)lira_rt_mem_try_alloc((size_t)data->len + 1, 0);
+    if (arg->data == NULL) { destroy_file_write_arg(arg); slot->busy = 0; return -1; }
+    memcpy(arg->data, data->data, (size_t)data->len);
+    arg->handle = handle; arg->file = file; arg->len = data->len;
+    arg->owns_resource = 1;
+    int64_t result = -1; arg->slot = &result;
+    int8_t parked = lira_rt_io_submit_current(file_write_work, arg,
+                                               destroy_file_write_arg,
+                                               file_write_complete, destroy_file_write_result);
+    if (parked == 1) return result;
+    slot->busy = 0;
+    if (parked < 0) { arg->owns_resource = 0; destroy_file_write_arg(arg); return -1; }
+    void *out = NULL; file_write_work(arg, &out); arg->owns_resource = 0; destroy_file_write_arg(arg);
+    FileWriteResult *sync = (FileWriteResult *)out;
+    result = sync != NULL ? sync->value : -1;
+    if (sync != NULL) sync->owns_resource = 0;
+    destroy_file_write_result(sync);
+    return result;
+}
+
+typedef struct { int64_t handle; FILE *file; int8_t *slot; int owns_resource; } FileCloseArg;
+typedef struct { int64_t handle; FILE *file; int8_t *slot; int8_t value; } FileCloseResult;
+
+static void destroy_file_close_arg(void *ptr) {
+    FileCloseArg *arg = (FileCloseArg *)ptr;
+    if (arg != NULL) { if (arg->owns_resource && arg->file != NULL) fclose(arg->file); lira_rt_mem_free(arg); }
+}
+
+static int file_close_work(void *ptr, void **out) {
+    FileCloseArg *arg = (FileCloseArg *)ptr;
+    if (lira_io_test_fail_result_alloc("LIRA_TEST_FAIL_FILE_CLOSE_RESULT")) return -1;
+    FileCloseResult *result = (FileCloseResult *)lira_rt_mem_try_alloc(sizeof(FileCloseResult), 1);
+    if (result == NULL) return -1;
+    result->handle = arg->handle; result->file = arg->file; result->slot = arg->slot;
+    result->value = fclose(arg->file) == 0 ? 1 : 0;
+    arg->file = NULL;
+    arg->owns_resource = 0;
+    *out = result; return 0;
+}
+
+static void destroy_file_close_result(void *ptr) { lira_rt_mem_free(ptr); }
+
+static void file_close_complete(void *owner, uint64_t generation, void *ptr, int status,
+                                void *failure_arg) {
+    if (status != 0) {
+        FileCloseArg *arg = (FileCloseArg *)failure_arg;
+        if (arg != NULL) { file_busy_done(arg->handle); arg->owns_resource = 0; }
+        lira_rt_io_wake(owner, generation, status);
+        return;
+    }
+    FileCloseResult *result = (FileCloseResult *)ptr;
+    if (result == NULL) {
+        lira_rt_io_wake(owner, generation, status);
+        return;
+    }
+    LiraOpenFile *slot = lira_file_slot(result->handle);
+    if (slot != NULL) { slot->file = NULL; slot->busy = 0; }
+    *result->slot = status == 0 ? result->value : 0;
+    lira_rt_io_wake(owner, generation, 0);
+}
+
+void lira_rt_file_reap_orphans(void) {
+    for (int i = 0; i < LIRA_MAX_FILES; i++) {
+        if (g_files[i].busy) {
+            g_files[i].file = NULL;
+            g_files[i].busy = 0;
+        }
+    }
 }
 
 int8_t lira_rt_file_close(int64_t handle) {
     LiraOpenFile *slot = lira_file_slot(handle);
-    if (slot == NULL) {
+    if (slot == NULL || slot->busy) {
         return 0;
     }
     FILE *file = slot->file;
-    slot->file = NULL;
-    return fclose(file) == 0 ? 1 : 0;
+    FileCloseArg *arg = (FileCloseArg *)lira_rt_mem_try_alloc(sizeof(FileCloseArg), 1);
+    if (arg == NULL) return 0;
+    int8_t result = 0;
+    arg->handle = handle; arg->file = file; arg->slot = &result;
+    arg->owns_resource = 1;
+    slot->busy = 1;
+    int8_t parked = lira_rt_io_submit_current(file_close_work, arg, destroy_file_close_arg,
+                                               file_close_complete, destroy_file_close_result);
+    if (parked == 1) return result;
+    slot->busy = 0;
+    if (parked < 0) { arg->owns_resource = 0; destroy_file_close_arg(arg); return 0; }
+    void *out = NULL; int status = file_close_work(arg, &out);
+    FileCloseResult *sync = (FileCloseResult *)out;
+    arg->owns_resource = 0;
+    result = sync != NULL && status == 0 ? sync->value : 0;
+    file_close_complete(NULL, 0, sync, status, NULL);
+    destroy_file_close_result(sync);
+    destroy_file_close_arg(arg);
+    return result;
+}
+
+void lira_rt_file_cancel_all(void) {
+    for (int i = 0; i < LIRA_MAX_FILES; i++) {
+        /* A busy FILE* may still be used by an orphaned worker.  Keep it
+         * alive until that worker returns instead of closing it underneath
+         * fread/fwrite. */
+        if (g_files[i].file != NULL && !g_files[i].busy) {
+            fclose(g_files[i].file);
+            g_files[i].file = NULL;
+            g_files[i].busy = 0;
+        }
+    }
+}
+
+typedef struct { int64_t handle; FILE *file; int64_t offset; int origin; int64_t *slot; int owns_resource; } FileSeekArg;
+typedef struct { int64_t handle; FILE *file; int64_t *slot; int64_t value; int owns_resource; } FileSeekResult;
+
+static int file_seek_work(void *ptr, void **out) {
+    FileSeekArg *arg = (FileSeekArg *)ptr;
+    if (lira_io_test_fail_result_alloc("LIRA_TEST_FAIL_FILE_SEEK_RESULT")) return -1;
+    FileSeekResult *result = (FileSeekResult *)lira_rt_mem_try_alloc(sizeof(FileSeekResult), 1);
+    if (result == NULL) return -1;
+    result->handle = arg->handle; result->file = arg->file; result->slot = arg->slot;
+    result->value = -1; result->owns_resource = 1;
+    arg->owns_resource = 0;
+    if (fseek(arg->file, (long)arg->offset, arg->origin) == 0) result->value = (int64_t)ftell(arg->file);
+    *out = result; return 0;
+}
+
+static void destroy_file_seek_result(void *ptr) {
+    FileSeekResult *result = (FileSeekResult *)ptr;
+    if (result != NULL) {
+        if (result->owns_resource && result->file != NULL) fclose(result->file);
+        lira_rt_mem_free(result);
+    }
+}
+
+static void destroy_file_seek_arg(void *ptr) {
+    FileSeekArg *arg = (FileSeekArg *)ptr;
+    if (arg != NULL) {
+        if (arg->owns_resource && arg->file != NULL) fclose(arg->file);
+        lira_rt_mem_free(arg);
+    }
+}
+
+static void file_seek_complete(void *owner, uint64_t generation, void *ptr, int status,
+                               void *failure_arg) {
+    if (status != 0) {
+        FileSeekArg *arg = (FileSeekArg *)failure_arg;
+        if (arg != NULL) { file_busy_done(arg->handle); arg->owns_resource = 0; }
+        lira_rt_io_wake(owner, generation, status);
+        return;
+    }
+    FileSeekResult *result = (FileSeekResult *)ptr;
+    if (result == NULL) {
+        lira_rt_io_wake(owner, generation, status);
+        return;
+    }
+    *result->slot = status == 0 ? result->value : -1;
+    file_busy_done(result->handle);
+    result->file = NULL;
+    result->owns_resource = 0;
+    lira_rt_io_wake(owner, generation, 0);
 }
 
 int64_t lira_rt_file_seek(int64_t handle, int64_t offset, int64_t whence) {
-    FILE *file = lira_file(handle);
-    if (file == NULL) {
+    LiraOpenFile *slot = lira_file_slot(handle);
+    FILE *file = slot != NULL ? slot->file : NULL;
+    if (file == NULL || slot->busy) {
         return -1;
     }
     int origin = whence == 1 ? SEEK_CUR : (whence == 2 ? SEEK_END : SEEK_SET);
-    if (fseek(file, (long)offset, origin) != 0) {
-        return -1;
-    }
-    return (int64_t)ftell(file);
-}
-
-int8_t lira_rt_file_exists(const LiraStr *path) {
-    struct stat info;
-    return path != NULL && stat(path->data, &info) == 0 ? 1 : 0;
-}
-
-int64_t lira_rt_file_size(const LiraStr *path) {
-    struct stat info;
-    if (path == NULL || stat(path->data, &info) != 0) {
-        return -1;
-    }
-    return (int64_t)info.st_size;
+    FileSeekArg *arg = (FileSeekArg *)lira_rt_mem_try_alloc(sizeof(FileSeekArg), 1);
+    if (arg == NULL) return -1;
+    int64_t result = -1;
+    arg->handle = handle; arg->file = file; arg->offset = offset; arg->origin = origin; arg->slot = &result;
+    arg->owns_resource = 1;
+    slot->busy = 1;
+    int8_t parked = lira_rt_io_submit_current(file_seek_work, arg, destroy_file_seek_arg,
+                                               file_seek_complete, destroy_file_seek_result);
+    if (parked == 1) return result;
+    slot->busy = 0;
+    if (parked < 0) { arg->owns_resource = 0; destroy_file_seek_arg(arg); return -1; }
+    void *out = NULL; int status = file_seek_work(arg, &out); arg->owns_resource = 0; destroy_file_seek_arg(arg);
+    FileSeekResult *sync = (FileSeekResult *)out;
+    result = sync != NULL && status == 0 ? sync->value : -1;
+    if (sync != NULL) sync->owns_resource = 0;
+    destroy_file_seek_result(sync);
+    return result;
 }
 
 /* ------------------------------------------------------------------ */
-/* Filesystem                                                          */
+/* Filesystem operations                                                */
 /* ------------------------------------------------------------------ */
 
-LiraStr *lira_rt_getcwd(void) {
-    char buf[4096];
-    if (getcwd(buf, sizeof(buf)) == NULL) {
-        return lira_rt_str_new("", 0);
+enum LiraFsOp {
+    FS_EXISTS, FS_SIZE, FS_GETCWD, FS_CHDIR, FS_MKDIR, FS_MKDIR_ALL,
+    FS_RMDIR, FS_REMOVE, FS_REMOVE_ALL, FS_LISTDIR, FS_IS_DIR, FS_IS_FILE,
+    FS_RENAME, FS_COPY
+};
+
+typedef struct {
+    int op;
+    char *a;
+    char *b;
+    int8_t *bool_slot;
+    int64_t *int_slot;
+    LiraStr **str_slot;
+    LiraArray **array_slot;
+} LiraFsArg;
+
+typedef struct {
+    int op;
+    int8_t boolean;
+    int64_t integer;
+    char *text;
+    char **names;
+    size_t name_count;
+    int8_t *bool_slot;
+    int64_t *int_slot;
+    LiraStr **str_slot;
+    LiraArray **array_slot;
+} LiraFsResult;
+
+static char *fs_copy_text(const LiraStr *value) {
+    if (value == NULL || value->len < 0 || (uint64_t)value->len > SIZE_MAX - 1) {
+        return NULL;
     }
-    return lira_rt_str_new(buf, (int64_t)strlen(buf));
+    char *copy = (char *)lira_rt_mem_try_alloc((size_t)value->len + 1, 0);
+    if (copy == NULL) return NULL;
+    memcpy(copy, value->data, (size_t)value->len);
+    copy[value->len] = '\0';
+    return copy;
 }
 
-int8_t lira_rt_chdir(const LiraStr *path) {
-    return path != NULL && chdir(path->data) == 0 ? 1 : 0;
+static LiraFsArg *fs_arg_new(int op, const LiraStr *a, const LiraStr *b) {
+    LiraFsArg *arg = (LiraFsArg *)lira_rt_mem_try_alloc(sizeof(LiraFsArg), 1);
+    if (arg == NULL) return NULL;
+    arg->op = op;
+    arg->a = fs_copy_text(a);
+    arg->b = fs_copy_text(b);
+    if ((a != NULL && arg->a == NULL) || (b != NULL && arg->b == NULL)) {
+        lira_rt_mem_free(arg->a); lira_rt_mem_free(arg->b); lira_rt_mem_free(arg); return NULL;
+    }
+    return arg;
 }
 
-int8_t lira_rt_mkdir(const LiraStr *path) {
-    return path != NULL && mkdir(path->data, 0777) == 0 ? 1 : 0;
+static void fs_destroy_arg(void *ptr) {
+    LiraFsArg *arg = (LiraFsArg *)ptr;
+    if (arg != NULL) { lira_rt_mem_free(arg->a); lira_rt_mem_free(arg->b); lira_rt_mem_free(arg); }
 }
 
-int8_t lira_rt_mkdir_all(const LiraStr *path) {
-    if (path == NULL || path->len == 0) {
-        return 0;
+static void fs_free_names(LiraFsResult *result) {
+    if (result == NULL) return;
+    for (size_t i = 0; i < result->name_count; i++) {
+        lira_rt_mem_free(result->names[i]);
     }
-    char *copy = strdup(path->data);
-    if (copy == NULL) {
-        lira_rt_panic("out of memory");
-    }
-    /* Create each prefix in turn; an existing directory is not a failure. */
+    lira_rt_mem_free(result->names);
+    result->names = NULL;
+    result->name_count = 0;
+}
+
+static int fs_mkdir_all(const char *path) {
+    if (path == NULL || *path == '\0') return 0;
+    char *copy = lira_rt_mem_try_strdup(path);
+    if (copy == NULL) return 0;
     for (char *p = copy + 1; *p != '\0'; p++) {
-        if (*p != '/') {
-            continue;
-        }
+        if (*p != '/') continue;
         *p = '\0';
-        if (mkdir(copy, 0777) != 0 && errno != EEXIST) {
-            free(copy);
-            return 0;
-        }
+        if (mkdir(copy, 0777) != 0 && errno != EEXIST) { lira_rt_mem_free(copy); return 0; }
         *p = '/';
     }
     int ok = mkdir(copy, 0777) == 0 || errno == EEXIST;
-    free(copy);
-    return ok ? 1 : 0;
-}
-
-int8_t lira_rt_rmdir(const LiraStr *path) {
-    return path != NULL && rmdir(path->data) == 0 ? 1 : 0;
-}
-
-int8_t lira_rt_remove(const LiraStr *path) {
-    return path != NULL && unlink(path->data) == 0 ? 1 : 0;
+    lira_rt_mem_free(copy);
+    return ok;
 }
 
 static int lira_remove_tree(const char *path) {
@@ -512,68 +988,137 @@ static int lira_remove_tree(const char *path) {
     return ok && rmdir(path) == 0;
 }
 
-int8_t lira_rt_remove_all(const LiraStr *path) {
-    return path != NULL && lira_remove_tree(path->data) ? 1 : 0;
-}
-
-LiraArray *lira_rt_listdir(const LiraStr *path) {
-    LiraArray *entries = lira_rt_array_new(0);
-    if (path == NULL) {
-        return entries;
-    }
-    DIR *dir = opendir(path->data);
-    if (dir == NULL) {
-        return entries;
-    }
-    struct dirent *entry;
-    while ((entry = readdir(dir)) != NULL) {
-        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
-            continue;
+static int fs_work(void *ptr, void **out) {
+    LiraFsArg *arg = (LiraFsArg *)ptr;
+    LiraFsResult *result = (LiraFsResult *)lira_rt_mem_try_alloc(sizeof(LiraFsResult), 1);
+    if (result == NULL) return -1;
+    int failed = 0;
+    result->op = arg->op;
+    result->bool_slot = arg->bool_slot;
+    result->int_slot = arg->int_slot;
+    result->str_slot = arg->str_slot;
+    result->array_slot = arg->array_slot;
+    struct stat info;
+    switch (arg->op) {
+        case FS_EXISTS: result->boolean = arg->a != NULL && stat(arg->a, &info) == 0; break;
+        case FS_SIZE: result->integer = arg->a != NULL && stat(arg->a, &info) == 0 ? (int64_t)info.st_size : -1; break;
+        case FS_GETCWD: {
+            char buf[4096];
+            if (getcwd(buf, sizeof(buf)) != NULL) {
+                result->text = lira_rt_mem_try_strdup(buf);
+                if (result->text == NULL) failed = 1;
+            }
+            break;
         }
-        lira_rt_array_push(entries, (int64_t)(intptr_t)lira_rt_str_new(
-                                        entry->d_name, (int64_t)strlen(entry->d_name)));
-    }
-    closedir(dir);
-    return entries;
-}
-
-int8_t lira_rt_is_dir(const LiraStr *path) {
-    struct stat info;
-    return path != NULL && stat(path->data, &info) == 0 && S_ISDIR(info.st_mode) ? 1 : 0;
-}
-
-int8_t lira_rt_is_file(const LiraStr *path) {
-    struct stat info;
-    return path != NULL && stat(path->data, &info) == 0 && S_ISREG(info.st_mode) ? 1 : 0;
-}
-
-int8_t lira_rt_rename(const LiraStr *from, const LiraStr *to) {
-    return from != NULL && to != NULL && rename(from->data, to->data) == 0 ? 1 : 0;
-}
-
-int8_t lira_rt_copy(const LiraStr *from, const LiraStr *to) {
-    if (from == NULL || to == NULL) {
-        return 0;
-    }
-    FILE *in = fopen(from->data, "rb");
-    if (in == NULL) {
-        return 0;
-    }
-    FILE *out = fopen(to->data, "wb");
-    if (out == NULL) {
-        fclose(in);
-        return 0;
-    }
-    char buffer[8192];
-    size_t n;
-    int ok = 1;
-    while ((n = fread(buffer, 1, sizeof(buffer), in)) > 0) {
-        if (fwrite(buffer, 1, n, out) != n) {
-            ok = 0;
+        case FS_CHDIR: result->boolean = arg->a != NULL && chdir(arg->a) == 0; break;
+        case FS_MKDIR: result->boolean = arg->a != NULL && mkdir(arg->a, 0777) == 0; break;
+        case FS_MKDIR_ALL: result->boolean = fs_mkdir_all(arg->a); break;
+        case FS_RMDIR: result->boolean = arg->a != NULL && rmdir(arg->a) == 0; break;
+        case FS_REMOVE: result->boolean = arg->a != NULL && unlink(arg->a) == 0; break;
+        case FS_REMOVE_ALL: result->boolean = arg->a != NULL && lira_remove_tree(arg->a); break;
+        case FS_IS_DIR: result->boolean = arg->a != NULL && stat(arg->a, &info) == 0 && S_ISDIR(info.st_mode); break;
+        case FS_IS_FILE: result->boolean = arg->a != NULL && stat(arg->a, &info) == 0 && S_ISREG(info.st_mode); break;
+        case FS_RENAME: result->boolean = arg->a != NULL && arg->b != NULL && rename(arg->a, arg->b) == 0; break;
+        case FS_COPY: {
+            FILE *in = arg->a != NULL ? fopen(arg->a, "rb") : NULL;
+            FILE *out_file = in != NULL && arg->b != NULL ? fopen(arg->b, "wb") : NULL;
+            char buffer[8192]; size_t n; int ok = in != NULL && out_file != NULL;
+            while (ok && (n = fread(buffer, 1, sizeof(buffer), in)) > 0) if (fwrite(buffer, 1, n, out_file) != n) ok = 0;
+            if (in != NULL) fclose(in); if (out_file != NULL) ok = fclose(out_file) == 0 && ok;
+            result->boolean = ok; break;
+        }
+        case FS_LISTDIR: {
+            DIR *dir = arg->a != NULL ? opendir(arg->a) : NULL;
+            if (dir != NULL) {
+                struct dirent *entry;
+                while ((entry = readdir(dir)) != NULL) {
+                    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
+                    char *name = lira_rt_mem_try_strdup(entry->d_name);
+                    if (name == NULL) { failed = 1; break; }
+                    if (result->name_count >= SIZE_MAX / sizeof(char *)) {
+                        lira_rt_mem_free(name);
+                        failed = 1;
+                        break;
+                    }
+                    char **grown = (char **)lira_rt_mem_try_realloc(
+                        result->names, (result->name_count + 1) * sizeof(char *));
+                    if (grown == NULL) {
+                        lira_rt_mem_free(name);
+                        failed = 1;
+                        break;
+                    }
+                    result->names = grown; result->names[result->name_count++] = name;
+                }
+                closedir(dir);
+            }
             break;
         }
     }
-    fclose(in);
-    ok = (fclose(out) == 0) && ok;
-    return ok ? 1 : 0;
+    if (failed) {
+        fs_free_names(result);
+        lira_rt_mem_free(result->text);
+        lira_rt_mem_free(result);
+        return -1;
+    }
+    *out = result; return 0;
 }
+
+static void fs_destroy_result(void *ptr) {
+    LiraFsResult *result = (LiraFsResult *)ptr;
+    if (result != NULL) {
+        lira_rt_mem_free(result->text);
+        fs_free_names(result);
+        lira_rt_mem_free(result);
+    }
+}
+
+static void fs_complete(void *owner, uint64_t generation, void *ptr, int status,
+                        void *failure_arg) {
+    (void)failure_arg;
+    if (status != 0) {
+        lira_rt_io_wake(owner, generation, status);
+        return;
+    }
+    LiraFsResult *result = (LiraFsResult *)ptr;
+    if (result == NULL) { lira_rt_io_wake(owner, generation, status); return; }
+    if (result->bool_slot != NULL) *result->bool_slot = result->boolean;
+    if (result->int_slot != NULL) *result->int_slot = result->integer;
+    if (result->str_slot != NULL) *result->str_slot = lira_rt_str_new(result->text != NULL ? result->text : "", result->text != NULL ? strlen(result->text) : 0);
+    if (result->array_slot != NULL) {
+        LiraArray *array = lira_rt_array_new((int64_t)result->name_count);
+        /* The array is built from C code on the scheduler stack, which the
+         * collector does not scan. Each str_new below can trigger a
+         * collection, so keep the partially-built array alive through a root
+         * slot or it would be swept mid-loop (use-after-free). */
+        lira_gc_register_root_slot(&array);
+        for (size_t i = 0; i < result->name_count; i++)
+            lira_rt_array_push(array, (int64_t)(intptr_t)lira_rt_str_new(result->names[i], strlen(result->names[i])));
+        *result->array_slot = array;
+        lira_gc_unregister_root_slot(&array);
+    }
+    lira_rt_io_wake(owner, generation, 0);
+}
+
+static int8_t fs_submit(LiraFsArg *arg) {
+    int8_t parked = lira_rt_io_submit_current(fs_work, arg, fs_destroy_arg, fs_complete, fs_destroy_result);
+    if (parked == 1) return 1;
+    if (parked < 0) { fs_destroy_arg(arg); return -1; }
+    void *out = NULL; int status = fs_work(arg, &out); fs_complete(NULL, 0, out, status, NULL); fs_destroy_result(out); fs_destroy_arg(arg); return 0;
+}
+
+#define FS_BOOL(name, op) int8_t name(const LiraStr *path) { int8_t value = 0; LiraFsArg *arg = fs_arg_new(op, path, NULL); if (arg == NULL) return 0; arg->bool_slot = &value; fs_submit(arg); return value; }
+FS_BOOL(lira_rt_file_exists, FS_EXISTS)
+FS_BOOL(lira_rt_chdir, FS_CHDIR)
+FS_BOOL(lira_rt_mkdir, FS_MKDIR)
+FS_BOOL(lira_rt_mkdir_all, FS_MKDIR_ALL)
+FS_BOOL(lira_rt_rmdir, FS_RMDIR)
+FS_BOOL(lira_rt_remove, FS_REMOVE)
+FS_BOOL(lira_rt_remove_all, FS_REMOVE_ALL)
+FS_BOOL(lira_rt_is_dir, FS_IS_DIR)
+FS_BOOL(lira_rt_is_file, FS_IS_FILE)
+
+int64_t lira_rt_file_size(const LiraStr *path) { int64_t value = -1; LiraFsArg *arg = fs_arg_new(FS_SIZE, path, NULL); if (arg != NULL) { arg->int_slot = &value; fs_submit(arg); } return value; }
+LiraStr *lira_rt_getcwd(void) { LiraStr *value = NULL; LiraFsArg *arg = fs_arg_new(FS_GETCWD, NULL, NULL); if (arg != NULL) { arg->str_slot = &value; fs_submit(arg); } return value != NULL ? value : lira_rt_str_new("", 0); }
+int8_t lira_rt_rename(const LiraStr *from, const LiraStr *to) { int8_t value = 0; LiraFsArg *arg = fs_arg_new(FS_RENAME, from, to); if (arg != NULL) { arg->bool_slot = &value; fs_submit(arg); } return value; }
+int8_t lira_rt_copy(const LiraStr *from, const LiraStr *to) { int8_t value = 0; LiraFsArg *arg = fs_arg_new(FS_COPY, from, to); if (arg != NULL) { arg->bool_slot = &value; fs_submit(arg); } return value; }
+LiraArray *lira_rt_listdir(const LiraStr *path) { LiraArray *value = NULL; LiraFsArg *arg = fs_arg_new(FS_LISTDIR, path, NULL); if (arg != NULL) { arg->array_slot = &value; fs_submit(arg); } return value != NULL ? value : lira_rt_array_new(0); }

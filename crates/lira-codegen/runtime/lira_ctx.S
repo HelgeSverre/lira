@@ -29,19 +29,16 @@
 #define LIRA_SIZE(name)
 #endif
 
-#define LIRA_FUNC(name)      \
-    .globl LIRA_SYM(name);   \
-    LIRA_TYPE(name);         \
-    .p2align 4;              \
-    LIRA_SYM(name):
-
 /* ==================================================================== */
 #if defined(__x86_64__)
 /* ==================================================================== */
 
     .text
 
-LIRA_FUNC(lira_ctx_switch)
+    .globl LIRA_SYM(lira_ctx_switch)
+    LIRA_TYPE(lira_ctx_switch)
+    .p2align 4
+LIRA_SYM(lira_ctx_switch):
     pushq %rbp
     pushq %rbx
     pushq %r12
@@ -59,7 +56,10 @@ LIRA_FUNC(lira_ctx_switch)
     ret
     LIRA_SIZE(lira_ctx_switch)
 
-LIRA_FUNC(lira_fiber_trampoline)
+    .globl LIRA_SYM(lira_fiber_trampoline)
+    LIRA_TYPE(lira_fiber_trampoline)
+    .p2align 4
+LIRA_SYM(lira_fiber_trampoline):
     /* r15 holds the LiraFiber* planted by lira_fiber_init_stack. RSP is
      * 16-byte aligned here, which is exactly what the call below wants. */
     movq %r15, %rdi
@@ -74,7 +74,10 @@ LIRA_FUNC(lira_fiber_trampoline)
 
     .text
 
-LIRA_FUNC(lira_ctx_switch)
+    .globl LIRA_SYM(lira_ctx_switch)
+    LIRA_TYPE(lira_ctx_switch)
+    .p2align 4
+LIRA_SYM(lira_ctx_switch):
     sub  sp, sp, #160
     stp  x19, x20, [sp, #0]
     stp  x21, x22, [sp, #16]
@@ -103,7 +106,10 @@ LIRA_FUNC(lira_ctx_switch)
     ret
     LIRA_SIZE(lira_ctx_switch)
 
-LIRA_FUNC(lira_fiber_trampoline)
+    .globl LIRA_SYM(lira_fiber_trampoline)
+    LIRA_TYPE(lira_fiber_trampoline)
+    .p2align 4
+LIRA_SYM(lira_fiber_trampoline):
     /* x19 holds the LiraFiber* planted by lira_fiber_init_stack. */
     mov  x0, x19
     mov  x29, #0
