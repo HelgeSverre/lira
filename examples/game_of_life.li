@@ -1,0 +1,304 @@
+// Game of Life — a parallel cellular automaton in the terminal.
+//
+// The grid evolves on a torus under the classic rules. The simulation is
+// decomposed into horizontal bands; for every generation one worker fiber per
+// band reads the previous grid and computes its band of the next grid, then
+// hands the band back through a channel. The main fiber re-assembles the bands
+// and advances the generation. The workers share no mutable state — each reads
+// the immutable previous grid and produces its own fresh band — so the result
+// is deterministic and independent of fiber scheduling: BANDS=1 and BANDS=8
+// must produce byte-identical frames.
+//
+// (Lira fibers are cooperative green threads on one scheduler thread, so this
+// parallelism is structural — independent band-shaped work items — rather than
+// OS-thread speedup.)
+//
+// By default it prints one O/. frame per generation (deterministic, and what
+// the VM/AOT/JIT parity tests assert). Set LIRA_GOL_ANIMATE=1 for a live ANSI
+// canvas that redraws in place with a short pause between generations.
+//
+// Configuration (environment variables):
+//   LIRA_GOL_ROWS    grid height   (default 16)
+//   LIRA_GOL_COLS    grid width    (default 32)
+//   LIRA_GOL_BANDS   worker bands  (default 2)
+//   LIRA_GOL_GENS    generations   (default 50)
+//   LIRA_GOL_PATTERN dot|block|blinker|glider (default glider)
+//   LIRA_GOL_ANIMATE 1 to animate in the terminal
+//   LIRA_GOL_CFG      comma-separated key=value overrides, applied last:
+//                     rows=8,cols=12,bands=3,gens=4,pattern=glider
+//
+// @expect-contains: game_of_life
+// @expect-contains: generation 50
+
+struct Band {
+    band: int
+    rows: [int]
+}
+
+// Tiny decimal parser for the integer environment configuration.
+// Returns 0 for input that is not a plain optional-sign integer.
+fn atoi(s: string) -> int {
+    var value = 0
+    var i = 0
+    var negative = false
+    if len(s) > 0 && s[0] == "-" {
+        negative = true
+        i = 1
+    }
+    while i < len(s) {
+        let code = str_char_code(s, i)
+        if code < 48 || code > 57 {
+            return 0
+        }
+        value = value * 10 + (code - 48)
+        i = i + 1
+    }
+    if negative { return -value }
+    return value
+}
+
+fn env_int(name: string, default_value: int) -> int {
+    let raw = env_get(name)
+    if raw == null {
+        return default_value
+    }
+    return atoi("" + raw)
+}
+
+// Toroidal neighbour lookup: the grid wraps, so a glider orbits forever.
+fn cell(grid: [int], cols: int, rows: int, r: int, c: int) -> int {
+    let rr = ((r % rows) + rows) % rows
+    let cc = ((c % cols) + cols) % cols
+    return grid[rr * cols + cc]
+}
+
+fn alive_neighbors(grid: [int], cols: int, rows: int, r: int, c: int) -> int {
+    var total = 0
+    var dr = -1
+    while dr <= 1 {
+        var dc = -1
+        while dc <= 1 {
+            if dr != 0 || dc != 0 {
+                total = total + cell(grid, cols, rows, r + dr, c + dc)
+            }
+            dc = dc + 1
+        }
+        dr = dr + 1
+    }
+    return total
+}
+
+fn next_cell(grid: [int], cols: int, rows: int, r: int, c: int) -> int {
+    let n = alive_neighbors(grid, cols, rows, r, c)
+    let alive = grid[r * cols + c]
+    if alive == 1 {
+        if n == 2 || n == 3 { return 1 }
+        return 0
+    }
+    if n == 3 { return 1 }
+    return 0
+}
+
+// Worker fiber: compute one horizontal band of the next grid and send it back.
+fn compute_band(grid: [int], cols: int, rows: int, start: int, end: int, band: int, ch: Channel<Band>) {
+    var out: [int] = []
+    var r = start
+    while r < end {
+        var c = 0
+        while c < cols {
+            push(out, next_cell(grid, cols, rows, r, c))
+            c = c + 1
+        }
+        r = r + 1
+    }
+    send(ch, Band { band: band, rows: out })
+}
+
+// Advance one generation: spawn one band worker per band, gather the bands,
+// and assemble the next grid in the same cell layout as the previous one.
+fn step(grid: [int], cols: int, rows: int, bands: int) -> [int] {
+    var next: [int] = []
+    var i = 0
+    while i < rows * cols {
+        push(next, 0)
+        i = i + 1
+    }
+
+    let work = chan(bands)
+    var band = 0
+    while band < bands {
+        let start = (band * rows) / bands
+        let end = ((band + 1) * rows) / bands
+        spawn compute_band(grid, cols, rows, start, end, band, work)
+        band = band + 1
+    }
+
+    var got = 0
+    while got < bands {
+        select {
+            part = <-work => {
+                let base_row = (part.band * rows) / bands
+                var k = 0
+                while k < len(part.rows) {
+                    next[base_row * cols + k] = part.rows[k]
+                    k = k + 1
+                }
+            }
+        }
+        got = got + 1
+    }
+    return next
+}
+
+fn live_count(grid: [int]) -> int {
+    var count = 0
+    var i = 0
+    while i < len(grid) {
+        count = count + grid[i]
+        i = i + 1
+    }
+    return count
+}
+
+fn render(grid: [int], cols: int, rows: int, live: string, dead: string) -> string {
+    var out = ""
+    var r = 0
+    while r < rows {
+        var c = 0
+        while c < cols {
+            if grid[r * cols + c] == 1 {
+                out = out + live
+            } else {
+                out = out + dead
+            }
+            c = c + 1
+        }
+        out = out + "\n"
+        r = r + 1
+    }
+    return out
+}
+
+// A bare `grid[...] = 1` as the last statement of a block is an expression in
+// Lira, so the checker infers this function's return value from it. Give it an
+// explicit return type so the native backend can lower the value; without it,
+// callers that use `set_cell` as a statement make native codegen expect a
+// value from a void arm ("cannot box `void` as `any`"). The bytecode VM has no
+// such constraint.
+fn set_cell(grid: [int], cols: int, rows: int, rr: int, cc: int) -> int {
+    let r = ((rr % rows) + rows) % rows
+    let c = ((cc % cols) + cols) % cols
+    grid[r * cols + c] = 1
+    return 1
+}
+
+fn place_pattern(grid: [int], cols: int, rows: int, name: string) {
+    let mr = rows / 2
+    let mc = cols / 2
+    if name == "dot" {
+        set_cell(grid, cols, rows, mr, mc)
+    } else if name == "block" {
+        set_cell(grid, cols, rows, mr, mc)
+        set_cell(grid, cols, rows, mr, mc + 1)
+        set_cell(grid, cols, rows, mr + 1, mc)
+        set_cell(grid, cols, rows, mr + 1, mc + 1)
+    } else if name == "blinker" {
+        set_cell(grid, cols, rows, mr, mc - 1)
+        set_cell(grid, cols, rows, mr, mc)
+        set_cell(grid, cols, rows, mr, mc + 1)
+    } else if name == "glider" {
+        set_cell(grid, cols, rows, mr, mc + 1)
+        set_cell(grid, cols, rows, mr + 1, mc + 2)
+        set_cell(grid, cols, rows, mr + 2, mc)
+        set_cell(grid, cols, rows, mr + 2, mc + 1)
+        set_cell(grid, cols, rows, mr + 2, mc + 2)
+    }
+}
+
+// Look up `key=value` in a comma-separated "key=value" string; "" if absent.
+fn cfg_value(cfg: string, key: string) -> string {
+    let parts = str_split(cfg, ",")
+    var i = 0
+    while i < len(parts) {
+        let eq = str_index_of(parts[i], "=")
+        if eq > 0 {
+            let k = str_substring(parts[i], 0, eq)
+            if k == key {
+                return str_substring(parts[i], eq + 1, len(parts[i]))
+            }
+        }
+        i = i + 1
+    }
+    return ""
+}
+
+fn main() {
+    var rows = env_int("LIRA_GOL_ROWS", 16)
+    var cols = env_int("LIRA_GOL_COLS", 32)
+    var bands = env_int("LIRA_GOL_BANDS", 2)
+    var gens = env_int("LIRA_GOL_GENS", 50)
+    var pattern_name = "glider"
+    var animate_mode = false
+
+    let pattern = env_get("LIRA_GOL_PATTERN")
+    if pattern != null {
+        pattern_name = "" + pattern
+    }
+    let animate = env_get("LIRA_GOL_ANIMATE")
+    if animate != null {
+        animate_mode = ("" + animate) == "1"
+    }
+
+    // Single-string override, applied after the individual variables so tests
+    // can inject a full config through one environment variable:
+    //   LIRA_GOL_CFG=rows=8,cols=12,bands=3,gens=4,pattern=glider[,animate=1]
+    let cfg = env_get("LIRA_GOL_CFG")
+    if cfg != null {
+        let config = "" + cfg
+        let r = cfg_value(config, "rows")
+        let c = cfg_value(config, "cols")
+        let b = cfg_value(config, "bands")
+        let e = cfg_value(config, "gens")
+        let p = cfg_value(config, "pattern")
+        let a = cfg_value(config, "animate")
+        if r != "" { rows = atoi(r) }
+        if c != "" { cols = atoi(c) }
+        if b != "" { bands = atoi(b) }
+        if e != "" { gens = atoi(e) }
+        if p != "" { pattern_name = p }
+        if a == "1" { animate_mode = true }
+    }
+
+    var effective_bands = bands
+    if effective_bands < 1 { effective_bands = 1 }
+    if effective_bands > rows { effective_bands = rows }
+
+    var grid: [int] = []
+    var i = 0
+    while i < rows * cols {
+        push(grid, 0)
+        i = i + 1
+    }
+    place_pattern(grid, cols, rows, pattern_name)
+
+    println("game_of_life: " + rows + "x" + cols + ", " + gens + " generations, " + effective_bands + " bands, pattern " + pattern_name)
+
+    var g = 0
+    while g <= gens {
+        let count = live_count(grid)
+        if animate_mode {
+            print("\u{1B}[H\u{1B}[2J")
+            println("generation " + g + " of " + gens + " (live " + count + ")")
+            print(render(grid, cols, rows, "\u{1B}[7m \u{1B}[0m", " "))
+            sleep(80)
+        } else {
+            println("generation " + g + " (live " + count + ")")
+            print(render(grid, cols, rows, "O", "."))
+            println("")
+        }
+        grid = step(grid, cols, rows, effective_bands)
+        g = g + 1
+    }
+}
+
+main()

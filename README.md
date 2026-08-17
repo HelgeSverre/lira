@@ -189,7 +189,7 @@ lira/
 │   ├── helix-lira/         # Helix config
 │   └── intellij-lira/      # IntelliJ plugin
 ├── stdlib/             # Standard library (20 modules)
-├── examples/           # 87 example programs
+├── examples/           # 126 example programs
 ├── docs/               # Language specifications
 └── justfile            # Build commands
 ```

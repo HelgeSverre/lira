@@ -73,6 +73,9 @@ Findings from a deep code review comparing Lira to Sema. Items to address before
   - ~~`vm.rs`: function name from debug info for call frames~~ — call frames resolve names via `function_name_at(frame.func_offset)`.
   - ~~`lira-doc/extractor.rs`: format default parameter expressions~~ — handled.
 
+### Native Codegen: bare array-element assignment as a trailing expression
+- **Open (2026-08-17):** a function whose *last statement* is a bare `arr[i] = x` is expression-oriented in Lira, so the checker infers its return value (confirmed: `let y = f(a)` type-checks when `f` ends with `a[0] = 1`). The bytecode VM runs this fine, but native codegen rejects it with the misleading `cannot box 'void' as 'any'` when the call is used in statement position inside a trailing `if`/block expression — the arm is lowered as void while the expression expects a value. Repro: `fn f(a: [int]) { a[0] = 1 }` used as a statement in an if-arm, `lira build` fails; `lira run` succeeds. `examples/game_of_life.li` works around it by giving the write helper an explicit return type; the codegen should either lower the discarded value or reject with a precise message.
+
 ### VM Code Duplication — mostly DONE
 - **DONE (2026-06-23):** the duplicated fetch/decode block was extracted into a shared `decode_next()`, and the ~789-line `execute_opcode()` was split into category helpers (`execute_arithmetic`/`comparison`/`memory`/`control_flow`/`type`/`system`/`fiber_channel`).
 - Remaining: `run()` vs the stepping path (`step_instruction`/`execute_one`) still have separate outer loops — a full collapse was deliberately skipped because `run()` (breakpoints as `Err(String)`, no pause-flag/exec-state mutation) is not byte-identical to the stepping machinery.
