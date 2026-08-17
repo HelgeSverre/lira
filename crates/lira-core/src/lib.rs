@@ -10,4 +10,4 @@ pub mod opcode;
 pub const BYTECODE_MAGIC: u32 = 0x4C494243;
 
 /// Current bytecode format version
-pub const BYTECODE_VERSION: u32 = 1;
+pub const BYTECODE_VERSION: u32 = 2;

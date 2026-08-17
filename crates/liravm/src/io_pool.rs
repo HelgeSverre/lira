@@ -40,7 +40,7 @@ pub enum IoValue {
     Bool(bool),
     /// A list of strings (`listdir`) → `Value::Array` of strings.
     Strs(Vec<String>),
-    /// An HTTP response → `[status, body]`.
+    /// An HTTP response → `(status, body)`.
     HttpResponse {
         status: i64,
         body: String,

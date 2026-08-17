@@ -2,7 +2,8 @@
 //!
 //! Defines all value types used in the Lira virtual machine.
 //!
-//! Heap values that can form reference cycles (`Array`, `Object`, `Closure`)
+//! Heap values that can form reference cycles (`Array`, `Tuple`, `Struct`,
+//! `Object`, `Closure`)
 //! are held behind the tracing garbage-collected pointer [`gc::Gc`] so that
 //! cyclic structures (e.g. a node whose field points back at itself, or a
 //! closure capturing a table that holds the closure) are reclaimed by the
@@ -15,7 +16,7 @@
 #![allow(non_local_definitions)]
 
 use gc::{Finalize, Gc, GcCell, Trace};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::rc::Rc;
 
@@ -28,9 +29,69 @@ pub type FiberId = u64;
 /// Channel ID type
 pub type ChannelId = u64;
 
+/// Heap payload for a tuple.
+///
+/// Tuple elements are immutable at the language and bytecode boundaries. The
+/// private initializer cursor permits only the compiler's ordered `NewTuple`
+/// followed by `TupleSet(0..len)` construction sequence; copied, deserialized,
+/// and manually-created tuples are sealed immediately.
+#[derive(Debug, Clone, Trace, Finalize)]
+pub struct TupleData {
+    pub(crate) elements: Vec<Value>,
+    #[unsafe_ignore_trace]
+    pub(crate) next_initializer: Option<usize>,
+}
+
+/// Intrinsic operations that can be used as interface witnesses without a
+/// synthetic bytecode function. The enum is deliberately small: only the
+/// collection operations whose receiver ABI is already part of the VM are
+/// represented here.
+#[derive(Debug, Clone, PartialEq, Eq, Trace, Finalize)]
+pub enum InterfaceIntrinsic {
+    StringLen,
+    ArrayLen,
+    ArrayPush,
+    ArrayPop,
+}
+
+/// A bound method in an interface witness table.
+#[derive(Debug, Clone, Trace, Finalize)]
+pub enum InterfaceMethod {
+    /// A function value. Interface invocation prepends the witness receiver.
+    Value(Value),
+    Intrinsic(InterfaceIntrinsic),
+}
+
+/// Runtime representation of an interface value. The receiver is retained
+/// separately from the witness table so interface calls never need to expose
+/// or mutate user fields used to store methods.
+#[derive(Debug, Clone, Trace, Finalize)]
+pub struct InterfaceData {
+    pub receiver: Value,
+    pub methods: HashMap<String, InterfaceMethod>,
+}
+
+impl TupleData {
+    /// Construct an already-sealed tuple payload.
+    pub fn sealed(elements: Vec<Value>) -> Self {
+        Self {
+            elements,
+            next_initializer: None,
+        }
+    }
+
+    pub(crate) fn initializing(elements: Vec<Value>) -> Self {
+        let next_initializer = (!elements.is_empty()).then_some(0);
+        Self {
+            elements,
+            next_initializer,
+        }
+    }
+}
+
 /// Value types in the VM
 ///
-/// Cyclic-capable heap variants (`Array`, `Object`, `Closure`) are
+/// Cyclic-capable heap variants (`Array`, `Tuple`, `Struct`, `Object`, `Closure`) are
 /// garbage-collected via [`gc::Gc`]; the tracing collector reclaims reference
 /// cycles that plain reference counting cannot. `String` is skipped by the
 /// tracer because `IString` (`Rc<String>`) never holds a `Gc` and so has
@@ -52,7 +113,15 @@ pub enum Value {
     Float(f64),
     String(IString), // Interned string for memory efficiency
     Array(Gc<GcCell<Vec<Value>>>),
+    /// A fixed-size, value-semantic aggregate. Unlike arrays, tuple containers
+    /// are recursively copied at `CopyValue` boundaries.
+    Tuple(Gc<GcCell<TupleData>>),
+    /// A value-semantic aggregate. The GC cell permits nested/self-referential
+    /// data without making copies of the VM's enum layout; `CopyValue` performs
+    /// a recursive copy of only these nodes.
+    Struct(Gc<GcCell<HashMap<String, Value>>>),
     Object(Gc<GcCell<HashMap<String, Value>>>),
+    Interface(Gc<InterfaceData>),
     Function(usize),          // Code offset
     Closure(Gc<ClosureData>), // Closure with captured values
     Fiber(FiberId),           // Fiber handle
@@ -65,7 +134,10 @@ unsafe impl Trace for Value {
     unsafe fn trace(&self) {
         match self {
             Value::Array(a) => a.trace(),
+            Value::Tuple(t) => t.trace(),
+            Value::Struct(s) => s.trace(),
             Value::Object(o) => o.trace(),
+            Value::Interface(i) => i.trace(),
             Value::Closure(c) => c.trace(),
             _ => {}
         }
@@ -74,7 +146,10 @@ unsafe impl Trace for Value {
     unsafe fn root(&self) {
         match self {
             Value::Array(a) => a.root(),
+            Value::Tuple(t) => t.root(),
+            Value::Struct(s) => s.root(),
             Value::Object(o) => o.root(),
+            Value::Interface(i) => i.root(),
             Value::Closure(c) => c.root(),
             _ => {}
         }
@@ -83,7 +158,10 @@ unsafe impl Trace for Value {
     unsafe fn unroot(&self) {
         match self {
             Value::Array(a) => a.unroot(),
+            Value::Tuple(t) => t.unroot(),
+            Value::Struct(s) => s.unroot(),
             Value::Object(o) => o.unroot(),
+            Value::Interface(i) => i.unroot(),
             Value::Closure(c) => c.unroot(),
             _ => {}
         }
@@ -93,7 +171,10 @@ unsafe impl Trace for Value {
         Finalize::finalize(self);
         match self {
             Value::Array(a) => a.finalize_glue(),
+            Value::Tuple(t) => t.finalize_glue(),
+            Value::Struct(s) => s.finalize_glue(),
             Value::Object(o) => o.finalize_glue(),
+            Value::Interface(i) => i.finalize_glue(),
             Value::Closure(c) => c.finalize_glue(),
             _ => {}
         }
@@ -123,11 +204,50 @@ impl Value {
             Value::Float(_) => "float",
             Value::String(_) => "string",
             Value::Array(_) => "array",
+            Value::Tuple(_) => "tuple",
+            Value::Struct(_) => "struct",
             Value::Object(_) => "object",
+            Value::Interface(_) => "interface",
             Value::Function(_) => "function",
             Value::Closure(_) => "closure",
             Value::Fiber(_) => "fiber",
             Value::Channel(_) => "channel",
+        }
+    }
+
+    /// Shallow value label for instruction tracing and debugger tables.
+    ///
+    /// Unlike [`Display`](fmt::Display), this never walks aggregate children,
+    /// so enabling VM tracing cannot duplicate or render an entire user-owned
+    /// collection on every instruction.
+    pub(crate) fn debug_summary(&self) -> String {
+        const STRING_PREVIEW_BYTES: usize = 256;
+
+        match self {
+            Self::Null => "null".to_string(),
+            Self::Bool(value) => value.to_string(),
+            Self::Int(value) => value.to_string(),
+            Self::Float(value) => value.to_string(),
+            Self::String(value) if value.len() <= STRING_PREVIEW_BYTES => (**value).clone(),
+            Self::String(value) => {
+                let mut end = STRING_PREVIEW_BYTES;
+                while end > 0 && !value.is_char_boundary(end) {
+                    end -= 1;
+                }
+                format!("{}<truncated>", &value[..end])
+            }
+            Self::Array(values) => format!("[{} elements]", values.borrow().len()),
+            Self::Tuple(values) => format!("({} elements)", values.borrow().elements.len()),
+            Self::Object(fields) | Self::Struct(fields) => {
+                format!("{{{} fields}}", fields.borrow().len())
+            }
+            Self::Interface(interface) => {
+                format!("<interface {} methods>", interface.methods.len())
+            }
+            Self::Function(offset) => format!("<function@{offset}>"),
+            Self::Closure(closure) => format!("<closure@{}>", closure.code_offset),
+            Self::Fiber(id) => format!("<fiber#{id}>"),
+            Self::Channel(id) => format!("<channel#{id}>"),
         }
     }
 
@@ -140,7 +260,10 @@ impl Value {
             Value::Float(f) => *f != 0.0,
             Value::String(s) => !s.is_empty(),
             Value::Array(arr) => !arr.borrow().is_empty(),
+            Value::Tuple(tuple) => !tuple.borrow().elements.is_empty(),
+            Value::Struct(_) => true,
             Value::Object(_) => true,
+            Value::Interface(_) => true,
             Value::Function(_) => true,
             Value::Closure(_) => true,
             Value::Fiber(_) => true,
@@ -149,31 +272,210 @@ impl Value {
     }
 }
 
+impl Value {
+    /// Copy a value at a language value boundary.
+    ///
+    /// Tuple containers and struct fields are copied recursively, while all
+    /// reference-valued fields (including arrays and objects that may contain
+    /// tuples or structs) retain their handles. Memo tables preserve cycles in
+    /// malformed or manually constructed self-referential aggregates.
+    pub fn semantic_copy(&self) -> Self {
+        self.semantic_copy_with_allocations().0
+    }
+
+    /// Copy a value and report the number of newly allocated tuple/struct nodes.
+    /// The VM uses this count to drive deterministic cycle collection even for
+    /// a single boundary copy containing many nested structs.
+    pub fn semantic_copy_with_allocations(&self) -> (Self, u64) {
+        fn copy(
+            value: &Value,
+            struct_memo: &mut HashMap<usize, Gc<GcCell<HashMap<String, Value>>>>,
+            tuple_memo: &mut HashMap<usize, Gc<GcCell<TupleData>>>,
+            allocations: &mut u64,
+        ) -> Value {
+            match value {
+                Value::Struct(source) => {
+                    let identity = Gc::as_ptr(source) as usize;
+                    if let Some(existing) = struct_memo.get(&identity) {
+                        return Value::Struct(existing.clone());
+                    }
+
+                    let destination = Gc::new(GcCell::new(HashMap::new()));
+                    struct_memo.insert(identity, destination.clone());
+                    *allocations = allocations.wrapping_add(1);
+                    let fields: Vec<(String, Value)> = source
+                        .borrow()
+                        .iter()
+                        .map(|(name, field)| (name.clone(), field.clone()))
+                        .collect();
+                    let copied: Vec<(String, Value)> = fields
+                        .iter()
+                        .map(|(name, field)| {
+                            (
+                                name.clone(),
+                                copy(field, struct_memo, tuple_memo, allocations),
+                            )
+                        })
+                        .collect();
+                    destination.borrow_mut().extend(copied);
+                    Value::Struct(destination)
+                }
+                Value::Tuple(source) => {
+                    let identity = Gc::as_ptr(source) as usize;
+                    if let Some(existing) = tuple_memo.get(&identity) {
+                        return Value::Tuple(existing.clone());
+                    }
+
+                    let destination = Gc::new(GcCell::new(TupleData::sealed(Vec::new())));
+                    tuple_memo.insert(identity, destination.clone());
+                    *allocations = allocations.wrapping_add(1);
+                    let elements = source.borrow().elements.clone();
+                    let copied = elements
+                        .iter()
+                        .map(|element| copy(element, struct_memo, tuple_memo, allocations))
+                        .collect();
+                    destination.borrow_mut().elements = copied;
+                    Value::Tuple(destination)
+                }
+                _ => value.clone(),
+            }
+        }
+
+        let mut allocations = 0;
+        let copied = copy(
+            self,
+            &mut HashMap::new(),
+            &mut HashMap::new(),
+            &mut allocations,
+        );
+        (copied, allocations)
+    }
+}
+
+/// Keep value rendering bounded even for a malformed or deliberately
+/// self-referential aggregate. This mirrors the native renderer's depth bound
+/// while preserving the existing VM spellings for recursive containers.
+const DISPLAY_DEPTH_LIMIT: usize = 8;
+
+fn fmt_value(
+    value: &Value,
+    f: &mut fmt::Formatter<'_>,
+    active: &mut HashSet<usize>,
+    depth: usize,
+) -> fmt::Result {
+    match value {
+        Value::Null => write!(f, "null"),
+        Value::Bool(b) => write!(f, "{}", b),
+        Value::Int(n) => write!(f, "{}", n),
+        Value::Float(fl) => write!(f, "{}", fl),
+        Value::String(s) => write!(f, "{}", s),
+        Value::Array(arr) => {
+            write!(f, "[")?;
+            let identity = Gc::as_ptr(arr) as usize;
+            if depth >= DISPLAY_DEPTH_LIMIT || !active.insert(identity) {
+                return write!(f, "...]");
+            }
+
+            let elements = arr.borrow();
+            let result = (|| {
+                for (index, element) in elements.iter().enumerate() {
+                    if index > 0 {
+                        write!(f, ", ")?;
+                    }
+                    fmt_value(element, f, active, depth + 1)?;
+                }
+                write!(f, "]")
+            })();
+            active.remove(&identity);
+            result
+        }
+        Value::Tuple(tuple) => {
+            write!(f, "(")?;
+            let identity = Gc::as_ptr(tuple) as usize;
+            if depth >= DISPLAY_DEPTH_LIMIT || !active.insert(identity) {
+                return write!(f, "...)");
+            }
+
+            let tuple = tuple.borrow();
+            let elements = &tuple.elements;
+            let result = (|| {
+                for (index, element) in elements.iter().enumerate() {
+                    if index > 0 {
+                        write!(f, ", ")?;
+                    }
+                    fmt_value(element, f, active, depth + 1)?;
+                }
+                if elements.len() == 1 {
+                    write!(f, ",")?;
+                }
+                write!(f, ")")
+            })();
+            active.remove(&identity);
+            result
+        }
+        Value::Object(obj) => {
+            write!(f, "{{")?;
+            let identity = Gc::as_ptr(obj) as usize;
+            if depth >= DISPLAY_DEPTH_LIMIT || !active.insert(identity) {
+                return write!(f, "...}}");
+            }
+
+            // HashMap iteration order is not stable. Sorting copied fields
+            // keeps print/cast output deterministic and matches native maps.
+            let obj = obj.borrow();
+            let mut fields: Vec<(&String, &Value)> = obj.iter().collect();
+            fields.sort_unstable_by_key(|(name, _)| *name);
+
+            let result = (|| {
+                for (index, (key, value)) in fields.iter().enumerate() {
+                    if index > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}: ", key)?;
+                    fmt_value(value, f, active, depth + 1)?;
+                }
+                write!(f, "}}")
+            })();
+            active.remove(&identity);
+            result
+        }
+        Value::Interface(interface) => fmt_value(&interface.receiver, f, active, depth),
+        Value::Struct(obj) => {
+            write!(f, "{{")?;
+            let identity = Gc::as_ptr(obj) as usize;
+            if depth >= DISPLAY_DEPTH_LIMIT || !active.insert(identity) {
+                return write!(f, "...}}");
+            }
+
+            let obj = obj.borrow();
+            let mut fields: Vec<(&String, &Value)> = obj.iter().collect();
+            fields.sort_unstable_by_key(|(name, _)| *name);
+            let result = (|| {
+                for (index, (key, value)) in fields.iter().enumerate() {
+                    if index > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}: ", key)?;
+                    fmt_value(value, f, active, depth + 1)?;
+                }
+                write!(f, "}}")
+            })();
+            active.remove(&identity);
+            result
+        }
+        // User-facing rendering must not expose bytecode offsets or scheduler
+        // ids. Those identities are backend implementation details and make
+        // otherwise equivalent VM/native programs print different strings.
+        // Debug summaries and the structured debug protocol retain the ids.
+        Value::Function(_) | Value::Closure(_) => write!(f, "<function>"),
+        Value::Fiber(_) => write!(f, "<fiber>"),
+        Value::Channel(_) => write!(f, "<channel>"),
+    }
+}
+
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Value::Null => write!(f, "null"),
-            Value::Bool(b) => write!(f, "{}", b),
-            Value::Int(n) => write!(f, "{}", n),
-            Value::Float(fl) => write!(f, "{}", fl),
-            Value::String(s) => write!(f, "{}", s),
-            Value::Array(arr) => {
-                let elements: Vec<String> = arr.borrow().iter().map(|v| v.to_string()).collect();
-                write!(f, "[{}]", elements.join(", "))
-            }
-            Value::Object(obj) => {
-                let fields: Vec<String> = obj
-                    .borrow()
-                    .iter()
-                    .map(|(k, v)| format!("{}: {}", k, v))
-                    .collect();
-                write!(f, "{{{}}}", fields.join(", "))
-            }
-            Value::Function(offset) => write!(f, "<function@{}>", offset),
-            Value::Closure(c) => write!(f, "<closure@{}>", c.code_offset),
-            Value::Fiber(id) => write!(f, "<fiber#{}>", id),
-            Value::Channel(id) => write!(f, "<channel#{}>", id),
-        }
+        fmt_value(self, f, &mut HashSet::new(), 0)
     }
 }
 
@@ -196,10 +498,51 @@ mod tests {
     }
 
     #[test]
+    fn user_facing_opaque_handles_do_not_expose_backend_identities() {
+        assert_eq!(Value::Function(37).to_string(), "<function>");
+        assert_eq!(
+            Value::Closure(Gc::new(ClosureData {
+                code_offset: 91,
+                captures: vec![Value::Int(1)],
+            }))
+            .to_string(),
+            "<function>"
+        );
+        assert_eq!(Value::Fiber(12).to_string(), "<fiber>");
+        assert_eq!(Value::Channel(18).to_string(), "<channel>");
+    }
+
+    #[test]
     fn display_renders_without_debug_wrapper() {
         // Display backs the value-rendering error sites; `3` not `Int(3)`.
         assert_eq!(Value::Int(3).to_string(), "3");
         assert_eq!(Value::String(Rc::new("hi".to_string())).to_string(), "hi");
+    }
+
+    #[test]
+    fn debug_summary_is_shallow_and_bounds_utf8_strings() {
+        let array = Value::Array(Gc::new(GcCell::new(vec![Value::Int(1); 300])));
+        assert_eq!(array.debug_summary(), "[300 elements]");
+
+        let text = Value::String(Rc::new("ø".repeat(200)));
+        let summary = text.debug_summary();
+        assert!(summary.is_char_boundary(summary.len()));
+        assert!(summary.ends_with("<truncated>"));
+        assert!(summary.len() <= 256 + "<truncated>".len());
+    }
+
+    #[test]
+    fn display_bounds_self_referential_arrays_and_objects() {
+        let array = Gc::new(GcCell::new(Vec::new()));
+        array.borrow_mut().push(Value::Int(1));
+        array.borrow_mut().push(Value::Array(array.clone()));
+        assert_eq!(Value::Array(array).to_string(), "[1, [...]]");
+
+        let object = Gc::new(GcCell::new(HashMap::new()));
+        object
+            .borrow_mut()
+            .insert("self".to_string(), Value::Object(object.clone()));
+        assert_eq!(Value::Object(object).to_string(), "{self: {...}}");
     }
 }
 

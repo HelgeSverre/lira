@@ -799,24 +799,33 @@ impl Parser {
     fn class_declaration(&mut self, span: Span) -> Result<Statement, String> {
         let name = self.expect_identifier("Expected class name")?;
 
-        // Parse inheritance: class Child extends Parent { } or class Child : Parent { }
-        let parent = if self.match_token(&TokenKind::Extends) || self.match_token(&TokenKind::Colon)
-        {
+        // Parse inheritance: class Child [extends Parent] [ : Interface1, Interface2 ] { }
+        let parent = if self.match_token(&TokenKind::Extends) {
             Some(self.expect_identifier("Expected parent class name")?)
         } else {
             None
         };
 
-        // Parse interfaces: class Child extends Parent, Interface1, Interface2 { }
-        let mut interfaces = Vec::new();
-        if parent.is_some() && self.match_token(&TokenKind::Comma) {
-            loop {
-                interfaces.push(self.expect_identifier("Expected interface name")?);
-                if !self.match_token(&TokenKind::Comma) {
-                    break;
-                }
+        // A colon always introduces the interface list. It is not an
+        // alternate spelling for the parent clause.
+        let interfaces = if self.match_token(&TokenKind::Colon) {
+            let mut interfaces = vec![self.expect_identifier("Expected interface name after ':'")?];
+
+            while self.match_token(&TokenKind::Comma) {
+                interfaces.push(self.expect_identifier("Expected interface name after ','")?);
             }
-        }
+
+            interfaces
+        } else {
+            if parent.is_some() && self.check(&TokenKind::Comma) {
+                return Err(format!(
+                    "{}:{}: Expected ':' before class interface list",
+                    self.peek().line,
+                    self.peek().column
+                ));
+            }
+            Vec::new()
+        };
 
         self.consume(&TokenKind::LBrace, "Expected '{' after class name")?;
 
@@ -1307,8 +1316,8 @@ impl Parser {
     fn type_expr(&mut self) -> Result<TypeExpr, String> {
         let span = self.span();
 
-        // Function type: fn(A, B) -> C
-        if self.match_token(&TokenKind::Fn) {
+        let kind = if self.match_token(&TokenKind::Fn) {
+            // Function type: fn(A, B) -> C
             self.consume(&TokenKind::LParen, "Expected '(' after 'fn'")?;
             let mut params = Vec::new();
             if !self.check(&TokenKind::RParen) {
@@ -1322,17 +1331,12 @@ impl Parser {
             self.consume(&TokenKind::RParen, "Expected ')'")?;
             self.consume(&TokenKind::Arrow, "Expected '->' in function type")?;
             let return_type = Box::new(self.type_expr()?);
-            return Ok(TypeExpr {
-                kind: TypeExprKind::Function {
-                    params,
-                    return_type,
-                },
-                span,
-            });
-        }
-
-        // Tuple type: (A, B, C)
-        if self.match_token(&TokenKind::LParen) {
+            TypeExprKind::Function {
+                params,
+                return_type,
+            }
+        } else if self.match_token(&TokenKind::LParen) {
+            // Tuple type: (A, B, C)
             let mut types = Vec::new();
             if !self.check(&TokenKind::RParen) {
                 loop {
@@ -1343,49 +1347,33 @@ impl Parser {
                 }
             }
             self.consume(&TokenKind::RParen, "Expected ')'")?;
-            return Ok(TypeExpr {
-                kind: TypeExprKind::Tuple(types),
-                span,
-            });
-        }
-
-        // Array type: [T]
-        if self.match_token(&TokenKind::LBracket) {
+            TypeExprKind::Tuple(types)
+        } else if self.match_token(&TokenKind::LBracket) {
+            // Array type: [T]
             let element_type = self.type_expr()?;
             self.consume(
                 &TokenKind::RBracket,
                 "Expected ']' after array element type",
             )?;
-            return Ok(TypeExpr {
-                kind: TypeExprKind::Array(Box::new(element_type)),
-                span,
-            });
-        }
-
-        // Self type
-        if self.match_token(&TokenKind::SelfType) {
-            return Ok(TypeExpr {
-                kind: TypeExprKind::Named("Self".to_string()),
-                span,
-            });
-        }
-
-        // Named type or generic
-        let name = self.expect_type_name("Expected type name")?;
-
-        let kind = if self.match_token(&TokenKind::Lt) {
-            // Generic type: List<T>
-            let mut args = Vec::new();
-            loop {
-                args.push(self.type_expr()?);
-                if !self.match_token(&TokenKind::Comma) {
-                    break;
-                }
-            }
-            self.consume(&TokenKind::Gt, "Expected '>' after type arguments")?;
-            TypeExprKind::Generic { name, args }
+            TypeExprKind::Array(Box::new(element_type))
+        } else if self.match_token(&TokenKind::SelfType) {
+            TypeExprKind::Named("Self".to_string())
         } else {
-            TypeExprKind::Named(name)
+            // Named type or generic
+            let name = self.expect_type_name("Expected type name")?;
+            if self.match_token(&TokenKind::Lt) {
+                let mut args = Vec::new();
+                loop {
+                    args.push(self.type_expr()?);
+                    if !self.match_token(&TokenKind::Comma) {
+                        break;
+                    }
+                }
+                self.consume(&TokenKind::Gt, "Expected '>' after type arguments")?;
+                TypeExprKind::Generic { name, args }
+            } else {
+                TypeExprKind::Named(name)
+            }
         };
 
         let mut result = TypeExpr {
@@ -1393,7 +1381,8 @@ impl Parser {
             span: span.clone(),
         };
 
-        // Optional type: T?
+        // Optional postfix applies to every type form, including aggregate and
+        // function types (`[T]?`, `(A, B)?`, and `fn(A) -> B?`).
         if self.match_token(&TokenKind::Question) {
             result = TypeExpr {
                 kind: TypeExprKind::Optional(Box::new(result)),
@@ -3012,6 +3001,68 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn class_relationship_syntax_keeps_parent_and_interfaces_separate() {
+        fn relationships(source: &str) -> (Option<String>, Vec<String>) {
+            let tokens = tokenize(source).unwrap();
+            let program = parse(&tokens).unwrap();
+            assert_eq!(program.statements.len(), 1);
+
+            match &program.statements[0].kind {
+                StatementKind::ClassDecl {
+                    name,
+                    parent,
+                    interfaces,
+                    ..
+                } => {
+                    assert_eq!(name, "C");
+                    (parent.clone(), interfaces.clone())
+                }
+                _ => panic!("Expected ClassDecl"),
+            }
+        }
+
+        assert_eq!(relationships("class C {}"), (None, Vec::new()));
+        assert_eq!(
+            relationships("class C extends P {}"),
+            (Some("P".to_string()), Vec::new())
+        );
+        assert_eq!(
+            relationships("class C : I {}"),
+            (None, vec!["I".to_string()])
+        );
+        assert_eq!(
+            relationships("class C extends P : I, J {}"),
+            (
+                Some("P".to_string()),
+                vec!["I".to_string(), "J".to_string()]
+            )
+        );
+    }
+
+    #[test]
+    fn class_interface_lists_reject_empty_and_trailing_entries() {
+        let empty = parse(&tokenize("class C : {} ").unwrap()).expect_err("empty list must fail");
+        assert!(
+            empty.contains("Expected interface name after ':'"),
+            "{empty}"
+        );
+
+        let trailing =
+            parse(&tokenize("class C : I, {} ").unwrap()).expect_err("trailing comma must fail");
+        assert!(
+            trailing.contains("Expected interface name after ','"),
+            "{trailing}"
+        );
+
+        let missing_colon =
+            parse(&tokenize("class C extends P, I {} ").unwrap()).expect_err("colon is required");
+        assert!(
+            missing_colon.contains("Expected ':' before class interface list"),
+            "{missing_colon}"
+        );
     }
 
     // ========================================================================

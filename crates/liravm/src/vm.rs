@@ -5,23 +5,136 @@
 
 use crate::bytecode::Program;
 use crate::debug::{
-    CallFrameInfo, DebugSnapshot, ExecutionState, LocalInfo, PauseFlag, RichValue, StepContext,
-    StepMode, StepOutcome, ValueInfo,
+    CallFrameInfo, DebugSnapshot, ExecutionState, LocalInfo, PauseFlag, RichValueBuilder,
+    StepContext, StepMode, StepOutcome, ValueInfo,
 };
 use crate::fiber::{FiberEvent, Scheduler};
 use crate::runtime::Runtime;
-use crate::value::{ChannelId, ClosureData, FiberId, Value};
+use crate::value::{
+    ChannelId, ClosureData, FiberId, InterfaceData, InterfaceIntrinsic, InterfaceMethod, TupleData,
+    Value,
+};
 use crate::vm_snapshot::{
     ChannelStateSnapshot, FiberFrameSnapshot, FiberStateSnapshot, SchedulerSnapshot,
 };
 use gc::{Gc, GcCell};
 use lira_core::opcode::Opcode;
 use std::collections::{HashMap, HashSet};
+use std::fmt::{self, Write as _};
 use std::rc::Rc;
 use std::sync::mpsc::{channel, Receiver};
 
+/// Maximum backing storage allocated by one array or tuple construction.
+///
+/// Bytecode is an external input format, so a malformed `NewArray` or
+/// `NewTuple` operand must fail before it can ask the allocator for most of the
+/// address space. Mutable array growth observes the same per-collection cap.
+const MAX_COLLECTION_ALLOCATION_BYTES: usize = 16 * 1024 * 1024;
+const MAX_COLLECTION_ELEMENTS: usize =
+    MAX_COLLECTION_ALLOCATION_BYTES / std::mem::size_of::<Value>();
+
+/// Captured output is retained in both raw-stream and logical-line form for
+/// compatibility with the public test/debug APIs. Bound both representations
+/// so hostile programs cannot exhaust the host by printing indefinitely.
+const MAX_CAPTURE_OUTPUT_BYTES: usize = 8 * 1024 * 1024;
+const MAX_CAPTURE_OUTPUT_LINES: usize = 100_000;
+
 /// Type alias for output callback function
 pub type OutputCallback = Box<dyn FnMut(&str) + Send>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OutputRenderFailure {
+    Limit,
+    Allocation,
+}
+
+struct BoundedOutputString {
+    text: String,
+    failure: Option<OutputRenderFailure>,
+}
+
+impl BoundedOutputString {
+    fn new() -> Self {
+        Self {
+            text: String::new(),
+            failure: None,
+        }
+    }
+}
+
+impl fmt::Write for BoundedOutputString {
+    fn write_str(&mut self, text: &str) -> fmt::Result {
+        let Some(new_len) = self.text.len().checked_add(text.len()) else {
+            self.failure = Some(OutputRenderFailure::Limit);
+            return Err(fmt::Error);
+        };
+        if new_len > MAX_CAPTURE_OUTPUT_BYTES {
+            self.failure = Some(OutputRenderFailure::Limit);
+            return Err(fmt::Error);
+        }
+        if self.text.try_reserve(text.len()).is_err() {
+            self.failure = Some(OutputRenderFailure::Allocation);
+            return Err(fmt::Error);
+        }
+        self.text.push_str(text);
+        Ok(())
+    }
+}
+
+fn render_output_value(value: &Value) -> Result<String, String> {
+    let mut rendered = BoundedOutputString::new();
+    if write!(&mut rendered, "{value}").is_err() {
+        return Err(match rendered.failure {
+            Some(OutputRenderFailure::Limit) => format!(
+                "one printed value exceeded the {} byte output limit",
+                MAX_CAPTURE_OUTPUT_BYTES
+            ),
+            Some(OutputRenderFailure::Allocation) => {
+                "printed value could not be rendered within available memory".to_string()
+            }
+            None => "printed value could not be rendered".to_string(),
+        });
+    }
+    Ok(rendered.text)
+}
+
+fn value_matches_type_id(value: &Value, type_id: u8) -> bool {
+    match type_id {
+        0 => matches!(value, Value::Null),
+        1 => matches!(value, Value::Bool(_)),
+        2 => matches!(value, Value::Int(_)),
+        3 => matches!(value, Value::Float(_)),
+        4 => matches!(value, Value::String(_)),
+        5 => matches!(value, Value::Array(_)),
+        6 => matches!(value, Value::Object(_) | Value::Struct(_)),
+        7 => matches!(value, Value::Function(_) | Value::Closure(_)),
+        8 => matches!(value, Value::Tuple(_)),
+        9 => matches!(value, Value::Channel(_)),
+        10 => matches!(value, Value::Interface(_)),
+        _ => false,
+    }
+}
+
+/// Validate the runtime's outer representation for aggregate/function casts.
+///
+/// The bytecode cast operand contains only the coarse type ID, so this check
+/// intentionally does not claim to validate array element, function
+/// signature, tuple element, channel payload, or nominal metadata.
+fn validate_runtime_cast(value: &Value, type_id: u8) -> Result<(), String> {
+    let expected = match type_id {
+        5 => "array",
+        7 => "function",
+        8 => "tuple",
+        9 => "channel",
+        _ => return Ok(()),
+    };
+
+    if value_matches_type_id(value, type_id) {
+        Ok(())
+    } else {
+        Err(format!("Cannot cast {} to {expected}", value.type_name()))
+    }
+}
 
 /// Result of executing a single instruction
 #[derive(Debug, Clone)]
@@ -64,6 +177,12 @@ pub struct RuntimeError {
     pub stack: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
+struct ErrorContext {
+    location: Option<(u32, u32)>,
+    stack: Vec<String>,
+}
+
 /// Call frame for function calls
 #[derive(Debug, Clone)]
 struct CallFrame {
@@ -104,6 +223,10 @@ pub struct VM {
     runtime: Runtime,
     /// Captured output (for testing)
     output: Vec<String>,
+    /// Exact captured byte stream, including newline boundaries.
+    output_raw: String,
+    /// Whether the last logical line in `output` is unterminated.
+    output_line_open: bool,
     /// Whether to capture output instead of printing
     capture_output: bool,
     /// Callback for streaming output
@@ -134,6 +257,8 @@ pub struct VM {
     io_pool: Option<crate::io_pool::IoPool>,
     /// Exit code captured when the main fiber finishes
     main_exit_code: i32,
+    /// State for the deterministic SplitMix64 select arbiter.
+    select_rng: u64,
     /// True when sys_exit has been called, signaling a clean VM-level halt
     exit_requested: bool,
     /// Saved native call stacks per fiber. The VM-native `CallFrame` carries
@@ -144,9 +269,14 @@ pub struct VM {
     /// since startup. Drives the periodic auto-collection at the interpreter
     /// loop boundary (see [`VM::AUTO_COLLECT_INTERVAL`]).
     allocations: u64,
+    /// Source context for the first runtime error, including errors reported
+    /// by a parked child fiber after the root fiber has moved on.
+    error_context: Option<ErrorContext>,
 }
 
 impl VM {
+    const DEFAULT_SELECT_SEED: u64 = 0x6a09_e667_f3bc_c909;
+
     /// Number of cyclic-capable heap allocations between automatic collections.
     ///
     /// The tracing cycle collector is also driven implicitly by rust-gc's own
@@ -171,6 +301,12 @@ impl VM {
         let mut scheduler = Scheduler::new();
         scheduler.set_event_sender(tx);
 
+        let select_rng = std::env::var("LIRA_SELECT_SEED")
+            .ok()
+            .and_then(|seed| seed.parse::<u64>().ok())
+            .filter(|seed| *seed != 0)
+            .unwrap_or(Self::DEFAULT_SELECT_SEED);
+
         Self {
             program,
             stack: Vec::with_capacity(4096),
@@ -184,6 +320,8 @@ impl VM {
             io_pool: None,
             runtime: Runtime::new(),
             output: Vec::new(),
+            output_raw: String::new(),
+            output_line_open: false,
             capture_output: false,
             output_callback: None,
             stop_check: None,
@@ -195,9 +333,11 @@ impl VM {
             fiber_event_rx: Some(rx),
             main_fiber_id: 0,
             main_exit_code: 0,
+            select_rng,
             exit_requested: false,
             fiber_call_stacks: HashMap::new(),
             allocations: 0,
+            error_context: None,
         }
     }
 
@@ -218,12 +358,157 @@ impl VM {
 
     /// Get captured output as a single string
     pub fn get_output_string(&self) -> String {
-        self.output.join("\n")
+        self.output_raw.clone()
+    }
+
+    fn capture_output_chunk(&mut self, text: &str, newline: bool) -> Result<(), String> {
+        let additional = text
+            .len()
+            .checked_add(usize::from(newline))
+            .ok_or_else(|| "captured output length overflowed".to_string())?;
+        let new_len = self
+            .output_raw
+            .len()
+            .checked_add(additional)
+            .ok_or_else(|| "captured output length overflowed".to_string())?;
+        if new_len > MAX_CAPTURE_OUTPUT_BYTES {
+            return Err(format!(
+                "captured output exceeded the {} byte limit",
+                MAX_CAPTURE_OUTPUT_BYTES
+            ));
+        }
+
+        let mut projected_open = self.output_line_open;
+        let mut new_lines = 0_usize;
+        for piece in text.split_inclusive('\n') {
+            let terminates = piece.ends_with('\n');
+            let segment = piece.strip_suffix('\n').unwrap_or(piece);
+            if (!segment.is_empty() || terminates) && !projected_open {
+                new_lines = new_lines
+                    .checked_add(1)
+                    .ok_or_else(|| "captured output line count overflowed".to_string())?;
+                projected_open = true;
+            }
+            if terminates {
+                projected_open = false;
+            }
+        }
+        if newline && !projected_open {
+            new_lines = new_lines
+                .checked_add(1)
+                .ok_or_else(|| "captured output line count overflowed".to_string())?;
+        }
+        if self
+            .output
+            .len()
+            .checked_add(new_lines)
+            .is_none_or(|count| count > MAX_CAPTURE_OUTPUT_LINES)
+        {
+            return Err(format!(
+                "captured output exceeded the {} line limit",
+                MAX_CAPTURE_OUTPUT_LINES
+            ));
+        }
+
+        self.output_raw.try_reserve(additional).map_err(|_| {
+            "captured output could not be retained within available memory".to_string()
+        })?;
+        self.output.try_reserve(new_lines).map_err(|_| {
+            "captured output lines could not be retained within available memory".to_string()
+        })?;
+
+        let mut append = |segment: &str, terminates: bool| -> Result<(), String> {
+            if !segment.is_empty() || terminates {
+                if !self.output_line_open {
+                    self.output.push(String::new());
+                    self.output_line_open = true;
+                }
+                let line = self
+                    .output
+                    .last_mut()
+                    .expect("an open captured output line must exist");
+                line.try_reserve(segment.len()).map_err(|_| {
+                    "captured output line could not be retained within available memory".to_string()
+                })?;
+                line.push_str(segment);
+            }
+            if terminates {
+                self.output_line_open = false;
+            }
+            Ok(())
+        };
+
+        for piece in text.split_inclusive('\n') {
+            let terminates = piece.ends_with('\n');
+            let segment = piece.strip_suffix('\n').unwrap_or(piece);
+            append(segment, terminates)?;
+        }
+        if newline {
+            append("", true)?;
+        }
+
+        self.output_raw.push_str(text);
+        if newline {
+            self.output_raw.push('\n');
+        }
+        Ok(())
     }
 
     /// Enable fiber mode for concurrent execution
     pub fn set_fiber_mode(&mut self, enabled: bool) {
         self.fiber_mode = enabled;
+    }
+
+    /// Set an environment value visible only to this VM instance.
+    pub fn set_env_override(&mut self, name: impl Into<String>, value: impl Into<String>) {
+        self.runtime.set_env_override(name, value);
+    }
+
+    /// Set the deterministic seed used to arbitrate ready `select` arms.
+    ///
+    /// The VM uses SplitMix64, which is small, reproducible, and has no
+    /// zero-state trap. A zero seed is mapped to the documented default so a
+    /// caller cannot accidentally request a degenerate stream.
+    pub fn set_select_seed(&mut self, seed: u64) {
+        self.select_rng = if seed == 0 {
+            Self::DEFAULT_SELECT_SEED
+        } else {
+            seed
+        };
+    }
+
+    /// Advance the select PRNG for one arbitration round.
+    fn next_select_seed(&mut self) -> u64 {
+        self.select_rng = self.select_rng.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        Self::mix_select(self.select_rng)
+    }
+
+    /// SplitMix64's output function. The arm's channel id, direction, and
+    /// ordinal are folded into the round seed before this function is called.
+    /// The ordinal breaks ties for duplicate offers without making the later
+    /// source arm win deterministically.
+    fn mix_select(mut mixed: u64) -> u64 {
+        mixed = (mixed ^ (mixed >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        mixed = (mixed ^ (mixed >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        mixed ^= mixed >> 31;
+        mixed
+    }
+
+    /// Score one communication arm for a select arbitration round.
+    ///
+    /// The ordinal is part of the score deliberately: two arms can name the
+    /// same channel and direction. Ambiguous parked offers are deferred until
+    /// their owner chooses a value, while endpoint resolution for a completed
+    /// operation scores matching duplicate bodies again without changing the
+    /// exactly-once channel operation.
+    fn select_arm_score(round_seed: u64, index: usize, channel: ChannelId, is_send: bool) -> u64 {
+        let kind = u64::from(is_send);
+        Self::mix_select(
+            round_seed
+                ^ channel.wrapping_mul(0xd6e8_feb8_6659_fd93)
+                ^ kind.wrapping_mul(0xa5a3_5634_1f12_5d3b)
+                ^ (index as u64).wrapping_mul(0x8cb9_2d3b_5e4f_1a77),
+        )
     }
 
     /// Set an output callback for streaming output during execution
@@ -289,7 +574,10 @@ impl VM {
     /// Get the current source location (line, column) from the instruction pointer
     /// Uses the debug info embedded in the bytecode
     pub fn get_current_location(&self) -> Option<(u32, u32)> {
-        self.program.debug_info.lookup(self.ip as u32)
+        self.error_context
+            .as_ref()
+            .and_then(|context| context.location)
+            .or_else(|| self.program.debug_info.lookup(self.ip as u32))
     }
 
     /// Build a function-named call stack for the active fiber, innermost first.
@@ -304,7 +592,16 @@ impl VM {
     /// resolvable frames (no/empty debug info), letting callers render just the
     /// message as before.
     pub(crate) fn build_call_stack_names(&self) -> Vec<String> {
-        self.call_stack
+        if let Some(context) = &self.error_context {
+            if !context.stack.is_empty() {
+                return context.stack.clone();
+            }
+        }
+        self.call_stack_names_for(&self.call_stack)
+    }
+
+    fn call_stack_names_for(&self, frames: &[CallFrame]) -> Vec<String> {
+        frames
             .iter()
             .rev()
             .filter_map(|frame| {
@@ -314,6 +611,72 @@ impl VM {
                     .map(|s| s.to_string())
             })
             .collect()
+    }
+
+    fn function_name_for_ip(&self, ip: usize) -> Option<String> {
+        self.program
+            .debug_info
+            .function_symbols
+            .iter()
+            .filter(|symbol| symbol.code_offset as usize <= ip)
+            .max_by_key(|symbol| symbol.code_offset)
+            .map(|symbol| symbol.name.clone())
+    }
+
+    fn capture_error_context(&mut self, location_ip: usize, frames: &[CallFrame]) {
+        self.error_context = Some(ErrorContext {
+            location: self.program.debug_info.lookup(location_ip as u32),
+            stack: self.call_stack_names_for(frames),
+        });
+    }
+
+    fn capture_error_context_at(&mut self, ip: usize) {
+        let frames = self.call_stack.clone();
+        self.capture_error_context(ip, &frames);
+        if self
+            .error_context
+            .as_ref()
+            .is_some_and(|context| context.stack.is_empty())
+        {
+            if let Some(name) = self.function_name_for_ip(ip) {
+                if let Some(context) = self.error_context.as_mut() {
+                    context.stack.push(name);
+                }
+            }
+        }
+    }
+
+    fn capture_fiber_failure_context(&mut self, fiber_id: FiberId) {
+        let Some(fiber) = self.scheduler.get_fiber(fiber_id) else {
+            self.error_context = Some(ErrorContext {
+                location: None,
+                stack: Vec::new(),
+            });
+            return;
+        };
+
+        let frames = self
+            .fiber_call_stacks
+            .get(&fiber_id)
+            .cloned()
+            .unwrap_or_default();
+        // The scheduler records the operation offset before changing a parked
+        // fiber to Failed. This distinguishes a direct ChanSend (whose saved
+        // IP is already past the opcode) from a parked Select (whose saved IP
+        // is rewound to the Select opcode).
+        let location_ip = fiber.failure_ip.unwrap_or(fiber.ip);
+        let location = self
+            .program
+            .debug_info
+            .lookup(location_ip as u32)
+            .or_else(|| self.program.debug_info.lookup(fiber.ip as u32));
+        let mut stack = self.call_stack_names_for(&frames);
+        if stack.is_empty() {
+            if let Some(name) = self.function_name_for_ip(fiber.ip) {
+                stack.push(name);
+            }
+        }
+        self.error_context = Some(ErrorContext { location, stack });
     }
 
     /// Get a detailed, value-carrying snapshot of the fiber scheduler.
@@ -329,6 +692,7 @@ impl VM {
         // snapshot is accurate, and resolve its frame function names from debug
         // info. Parked fibers are read straight from their `Fiber`.
         let current = self.scheduler.current;
+        let mut rich_values = RichValueBuilder::new();
         let mut fibers: Vec<FiberStateSnapshot> = self
             .scheduler
             .fibers
@@ -372,10 +736,16 @@ impl VM {
                     id: f.id,
                     state: f.state.clone(),
                     ip,
-                    stack: stack_src.iter().map(RichValue::from_value).collect(),
-                    locals: locals_src.iter().map(RichValue::from_value).collect(),
+                    stack: stack_src
+                        .iter()
+                        .map(|value| rich_values.convert(value))
+                        .collect(),
+                    locals: locals_src
+                        .iter()
+                        .map(|value| rich_values.convert(value))
+                        .collect(),
                     call_stack,
-                    result: f.result.as_ref().map(RichValue::from_value),
+                    result: f.result.as_ref().map(|value| rich_values.convert(value)),
                 }
             })
             .collect();
@@ -387,13 +757,17 @@ impl VM {
             .values()
             .map(|c| ChannelStateSnapshot {
                 id: c.id,
-                buffer: c.buffer.iter().map(RichValue::from_value).collect(),
+                buffer: c
+                    .buffer
+                    .iter()
+                    .map(|value| rich_values.convert(value))
+                    .collect(),
                 capacity: c.capacity,
                 receivers: c.receivers.iter().copied().collect(),
                 senders: c
                     .senders
                     .iter()
-                    .map(|(id, v)| (*id, RichValue::from_value(v)))
+                    .map(|(id, value)| (*id, rich_values.convert(value)))
                     .collect(),
                 closed: c.closed,
             })
@@ -445,6 +819,10 @@ impl VM {
     /// the stepping path drives the scheduler identically.
     fn pump_scheduler(&mut self) -> Option<StepOutcome> {
         if self.fiber_mode && self.scheduler.current.is_none() {
+            if let Some((fiber_id, message)) = self.scheduler.first_failure() {
+                self.capture_fiber_failure_context(fiber_id);
+                return Some(StepOutcome::Error { message });
+            }
             // Wake fibers whose offloaded I/O completed, then pick one.
             self.harvest_io();
             if self.scheduler.schedule().is_some() {
@@ -498,6 +876,7 @@ impl VM {
 
     /// Execute a single bytecode instruction
     pub fn step_instruction(&mut self) -> StepOutcome {
+        self.error_context = None;
         // Check pause request first
         if self.pause_flag.check_and_clear() {
             let (line, column) = self.get_current_location().unwrap_or((0, 0));
@@ -574,6 +953,7 @@ impl VM {
 
         // Execute one instruction
         self.execution_state = ExecutionState::Running;
+        let opcode_ip = self.ip;
         match self.execute_one() {
             Ok(Some(exit_code)) => {
                 self.execution_state = ExecutionState::Finished { exit_code };
@@ -581,6 +961,8 @@ impl VM {
             }
             Ok(None) => StepOutcome::Continue,
             Err(e) => {
+                self.capture_error_context_at(opcode_ip);
+                self.scheduler.fail_current(e.clone());
                 self.execution_state = ExecutionState::Error {
                     message: e.clone(),
                     location: self.get_current_location(),
@@ -685,7 +1067,7 @@ impl VM {
         })?;
 
         if self.debug {
-            let stack_repr: Vec<String> = self.stack.iter().map(|v| format!("{:?}", v)).collect();
+            let stack_repr: Vec<String> = self.stack.iter().map(Value::debug_summary).collect();
             eprintln!(
                 "[VM] ip={:04} {:?} stack=[{}] locals={}",
                 self.ip - 1,
@@ -707,16 +1089,17 @@ impl VM {
 
     /// Get a detailed debug snapshot with type information
     pub fn get_debug_snapshot(&self) -> DebugSnapshot {
-        use crate::debug::RichValue;
+        let mut rich_values = RichValueBuilder::new();
 
         let stack: Vec<ValueInfo> = self
             .stack
             .iter()
             .map(|v| {
+                let rich_value = rich_values.convert(v);
                 ValueInfo::with_rich_value(
-                    format!("{:?}", v),
+                    rich_value.display_summary(),
                     v.type_name().to_string(),
-                    RichValue::from_value(v),
+                    rich_value,
                 )
             })
             .collect();
@@ -727,14 +1110,17 @@ impl VM {
             .locals
             .iter()
             .enumerate()
-            .map(|(i, v)| LocalInfo {
-                slot: i,
-                name: local_names.get(&(i as u16)).map(|s| s.to_string()),
-                value: ValueInfo::with_rich_value(
-                    format!("{:?}", v),
-                    v.type_name().to_string(),
-                    RichValue::from_value(v),
-                ),
+            .map(|(i, v)| {
+                let rich_value = rich_values.convert(v);
+                LocalInfo {
+                    slot: i,
+                    name: local_names.get(&(i as u16)).map(|s| s.to_string()),
+                    value: ValueInfo::with_rich_value(
+                        rich_value.display_summary(),
+                        v.type_name().to_string(),
+                        rich_value,
+                    ),
+                }
             })
             .collect();
 
@@ -772,6 +1158,7 @@ impl VM {
     /// VM's debug info. Breakpoint-hit sentinels are passed through unchanged
     /// so downstream parsers (e.g. the playground) keep working.
     pub fn run(&mut self) -> Result<i32, String> {
+        self.error_context = None;
         match self.run_inner() {
             Ok(code) => Ok(code),
             Err(msg) => {
@@ -782,11 +1169,25 @@ impl VM {
                 // First line stays byte-compatible with the historical form
                 // (`line:col: message`); the function-named call stack, when
                 // available, is appended on subsequent lines.
-                let mut rendered = match self.get_current_location() {
+                let context = self.error_context.clone();
+                let location = context
+                    .as_ref()
+                    .and_then(|context| context.location)
+                    .or_else(|| self.program.debug_info.lookup(self.ip as u32));
+                let stack = context
+                    .as_ref()
+                    .map(|context| context.stack.as_slice())
+                    .unwrap_or(&[]);
+                let mut rendered = match location {
                     Some((line, col)) => format!("{}:{}: {}", line, col, msg),
                     None => msg,
                 };
-                for name in self.build_call_stack_names() {
+                let stack = if stack.is_empty() {
+                    self.build_call_stack_names()
+                } else {
+                    stack.to_vec()
+                };
+                for name in stack {
                     rendered.push_str("\n  at ");
                     rendered.push_str(&name);
                 }
@@ -898,8 +1299,8 @@ impl VM {
                 Value::Array(Gc::new(GcCell::new(arr)))
             }
             IoValue::HttpResponse { status, body } => {
-                let arr = vec![Value::Int(status), Value::String(Rc::new(body))];
-                Value::Array(Gc::new(GcCell::new(arr)))
+                let tuple = vec![Value::Int(status), Value::String(Rc::new(body))];
+                Value::Tuple(Gc::new(GcCell::new(TupleData::sealed(tuple))))
             }
             IoValue::FileOpened(file) => {
                 // Allocate the fd only now (open succeeded), so a failed open —
@@ -930,6 +1331,7 @@ impl VM {
     /// location, and structured callers use it directly to recover the bare
     /// message alongside [`VM::get_current_location`].
     pub(crate) fn run_inner(&mut self) -> Result<i32, String> {
+        self.error_context = None;
         // Start at entry point
         self.ip = self.program.entry_point;
 
@@ -940,6 +1342,11 @@ impl VM {
         self.ensure_fiber_runtime_started();
 
         loop {
+            if let Some((fiber_id, message)) = self.scheduler.first_failure() {
+                self.capture_fiber_failure_context(fiber_id);
+                return Err(message);
+            }
+
             // When the current fiber has parked or finished, re-enter the
             // scheduler to pick the next runnable fiber. Sequential programs
             // never reach this branch: main stays Running until it Halts.
@@ -1023,7 +1430,8 @@ impl VM {
 
             // Decode and execute in one step — avoid the separate decode_next call
             // which would re-check bounds and convert the byte twice.
-            let opcode_byte = self.program.code[self.ip];
+            let opcode_ip = self.ip;
+            let opcode_byte = self.program.code[opcode_ip];
             self.ip += 1;
             let opcode = Opcode::from_byte(opcode_byte).ok_or_else(|| {
                 format!(
@@ -1033,8 +1441,14 @@ impl VM {
                 )
             })?;
 
-            if let Some(exit_code) = self.execute_opcode(opcode)? {
-                return Ok(exit_code);
+            match self.execute_opcode(opcode) {
+                Ok(Some(exit_code)) => return Ok(exit_code),
+                Ok(None) => {}
+                Err(message) => {
+                    self.capture_error_context_at(opcode_ip);
+                    self.scheduler.fail_current(message.clone());
+                    return Err(message);
+                }
             }
         }
     }
@@ -1204,17 +1618,22 @@ impl VM {
             Opcode::LoadConst
             | Opcode::Pop
             | Opcode::Dup
+            | Opcode::CopyValue
             | Opcode::LoadLocal
             | Opcode::StoreLocal
             | Opcode::GetField
             | Opcode::SetField
             | Opcode::NewObject
+            | Opcode::NewStruct
+            | Opcode::InterfaceBox
             | Opcode::NewArray
             | Opcode::ArrayGet
             | Opcode::ArraySet
             | Opcode::ArrayLen
             | Opcode::ArrayPush
             | Opcode::ArrayPop
+            | Opcode::NewTuple
+            | Opcode::TupleSet
             | Opcode::MakeClosure
             | Opcode::LoadCapture => self.execute_memory(opcode),
 
@@ -1251,14 +1670,19 @@ impl VM {
             | Opcode::JumpIfFalse
             | Opcode::Call
             | Opcode::TailCall
+            | Opcode::InterfaceCall
             | Opcode::Return
             | Opcode::Halt => self.execute_control_flow(opcode),
 
             // Type operations
-            Opcode::TypeIs | Opcode::Cast => self.execute_type(opcode),
+            Opcode::TypeIs | Opcode::Cast | Opcode::InterfaceIs => self.execute_type(opcode),
 
             // System operations
-            Opcode::Print | Opcode::Collect | Opcode::Syscall => self.execute_system(opcode),
+            Opcode::Print
+            | Opcode::Println
+            | Opcode::Assert
+            | Opcode::Collect
+            | Opcode::Syscall => self.execute_system(opcode),
 
             // Fiber and channel operations
             Opcode::Spawn
@@ -1290,12 +1714,19 @@ impl VM {
 
             Opcode::Pop => {
                 // Use safe pop to respect stack base
-                let _ = self.pop();
+                self.pop()?;
             }
 
             Opcode::Dup => {
                 let value = self.stack.last().cloned().ok_or("Stack underflow")?;
                 self.stack.push(value);
+            }
+
+            Opcode::CopyValue => {
+                let value = self.pop()?;
+                let (copied, allocations) = value.semantic_copy_with_allocations();
+                self.stack.push(copied);
+                self.allocations = self.allocations.wrapping_add(allocations);
             }
 
             // Local variable operations
@@ -1337,7 +1768,7 @@ impl VM {
                 // Match by reference: borrowing the handle and cloning what we
                 // need keeps the `_` arm's `object.type_name()` usable too.
                 match &object {
-                    Value::Object(obj) => {
+                    Value::Object(obj) | Value::Struct(obj) => {
                         let value = obj
                             .borrow()
                             .get(&*field_name)
@@ -1359,7 +1790,7 @@ impl VM {
                 let object = self.pop()?;
 
                 match &object {
-                    Value::Object(obj) => {
+                    Value::Object(obj) | Value::Struct(obj) => {
                         obj.borrow_mut().insert(field_name, value);
                     }
                     _ => return Err(format!("Cannot set field on {}", object.type_name())),
@@ -1372,16 +1803,150 @@ impl VM {
                 self.stack.push(Value::Object(obj));
             }
 
+            Opcode::NewStruct => {
+                let obj = Gc::new(GcCell::new(HashMap::new()));
+                self.note_allocation();
+                self.stack.push(Value::Struct(obj));
+            }
+
+            Opcode::InterfaceBox => {
+                let flags = self.read_u8()?;
+                let method_count = self.read_u8()? as usize;
+                let receiver = self.pop()?;
+                let existing = match &receiver {
+                    Value::Interface(interface) => Some(interface.clone()),
+                    _ => None,
+                };
+                let mut methods = HashMap::with_capacity(method_count);
+                for _ in 0..method_count {
+                    let name_idx = self.read_u16()? as usize;
+                    let name = match self.program.constants.get(name_idx) {
+                        Some(Value::String(name)) => (**name).clone(),
+                        _ => return Err("Invalid interface method name constant".to_string()),
+                    };
+                    let kind = self.read_u8()?;
+                    let witness = match kind {
+                        0 => match existing
+                            .as_ref()
+                            .and_then(|interface| interface.methods.get(&name))
+                            .cloned()
+                        {
+                            Some(method) => method,
+                            None => {
+                                let value = match &receiver {
+                                    Value::Object(object) | Value::Struct(object) => {
+                                        object.borrow().get(&name).cloned().ok_or_else(|| {
+                                            format!(
+                                                "receiver does not provide interface method '{name}'"
+                                            )
+                                        })?
+                                    }
+                                    _ => {
+                                        return Err(format!(
+                                            "receiver does not provide interface method '{name}'"
+                                        ));
+                                    }
+                                };
+                                if !matches!(value, Value::Function(_) | Value::Closure(_)) {
+                                    return Err(format!(
+                                        "interface witness '{name}' is not callable"
+                                    ));
+                                }
+                                InterfaceMethod::Value(value)
+                            }
+                        },
+                        1 => InterfaceMethod::Value(Value::Function(self.read_u16()? as usize)),
+                        2 => InterfaceMethod::Intrinsic(match self.read_u8()? {
+                            0 => InterfaceIntrinsic::StringLen,
+                            1 => InterfaceIntrinsic::ArrayLen,
+                            2 => InterfaceIntrinsic::ArrayPush,
+                            3 => InterfaceIntrinsic::ArrayPop,
+                            _ => return Err("Invalid interface intrinsic method".to_string()),
+                        }),
+                        3 => match &receiver {
+                            Value::Interface(interface) => {
+                                interface.methods.get(&name).cloned().ok_or_else(|| {
+                                    format!("receiver does not provide interface method '{name}'")
+                                })?
+                            }
+                            Value::String(_) if name == "len" => {
+                                InterfaceMethod::Intrinsic(InterfaceIntrinsic::StringLen)
+                            }
+                            Value::Array(_) if name == "len" => {
+                                InterfaceMethod::Intrinsic(InterfaceIntrinsic::ArrayLen)
+                            }
+                            Value::Array(_) if name == "push" => {
+                                InterfaceMethod::Intrinsic(InterfaceIntrinsic::ArrayPush)
+                            }
+                            Value::Array(_) if name == "pop" => {
+                                InterfaceMethod::Intrinsic(InterfaceIntrinsic::ArrayPop)
+                            }
+                            Value::Object(object) | Value::Struct(object) => {
+                                let value =
+                                    object.borrow().get(&name).cloned().ok_or_else(|| {
+                                        format!(
+                                            "receiver does not provide interface method '{name}'"
+                                        )
+                                    })?;
+                                if !matches!(value, Value::Function(_) | Value::Closure(_)) {
+                                    return Err(format!(
+                                        "interface witness '{name}' is not callable"
+                                    ));
+                                }
+                                InterfaceMethod::Value(value)
+                            }
+                            _ => {
+                                return Err(format!(
+                                    "erased receiver cannot provide interface method '{name}'"
+                                ));
+                            }
+                        },
+                        _ => return Err("Invalid interface witness kind".to_string()),
+                    };
+                    methods.insert(name, witness);
+                }
+
+                if let Some(interface) = existing {
+                    if methods
+                        .keys()
+                        .any(|name| !interface.methods.contains_key(name))
+                    {
+                        return Err("interface value is missing a required method".to_string());
+                    }
+                    self.stack.push(Value::Interface(interface));
+                } else if matches!(&receiver, Value::Null) {
+                    // Optional interface values use the same representation as
+                    // their payload at runtime; null remains the empty option.
+                    self.stack.push(Value::Null);
+                } else {
+                    let receiver = if flags & 1 != 0 {
+                        let (receiver, allocations) = receiver.semantic_copy_with_allocations();
+                        self.allocations = self.allocations.wrapping_add(allocations);
+                        receiver
+                    } else {
+                        receiver
+                    };
+                    self.note_allocation();
+                    self.stack.push(Value::Interface(Gc::new(InterfaceData {
+                        receiver,
+                        methods,
+                    })));
+                }
+            }
+
             // Array operations
             Opcode::NewArray => {
-                let size = self.pop()?;
-                let size = match size {
-                    Value::Int(n) => n as usize,
-                    _ => return Err("Array size must be an integer".to_string()),
-                };
-                let arr = Gc::new(GcCell::new(vec![Value::Null; size]));
+                let elements = allocate_null_collection("Array", self.pop()?)?;
+                let arr = Gc::new(GcCell::new(elements));
                 self.note_allocation();
                 self.stack.push(Value::Array(arr));
+            }
+
+            Opcode::NewTuple => {
+                let elements = allocate_null_collection("Tuple", self.pop()?)?;
+                let tuple = Gc::new(GcCell::new(TupleData::initializing(elements)));
+                self.note_allocation();
+                self.stack.push(Value::Tuple(tuple));
             }
 
             Opcode::ArrayGet => {
@@ -1401,6 +1966,19 @@ impl VM {
                             .ok_or_else(|| "Index out of bounds".to_string())?;
                         self.stack.push(value);
                     }
+                    (Value::Tuple(tuple), Value::Int(idx)) => {
+                        if *idx < 0 {
+                            return Err("Index out of bounds: negative index".to_string());
+                        }
+                        let idx = *idx as usize;
+                        let value = tuple
+                            .borrow()
+                            .elements
+                            .get(idx)
+                            .cloned()
+                            .ok_or_else(|| "Index out of bounds".to_string())?;
+                        self.stack.push(value);
+                    }
                     (Value::String(s), Value::Int(idx)) => {
                         if *idx < 0 {
                             return Err("Index out of bounds: negative index".to_string());
@@ -1414,7 +1992,7 @@ impl VM {
                         self.stack.push(value);
                     }
                     // Support object indexing with string keys (for JSON objects)
-                    (Value::Object(obj), Value::String(key)) => {
+                    (Value::Object(obj) | Value::Struct(obj), Value::String(key)) => {
                         let value = obj.borrow().get(&**key).cloned().unwrap_or(Value::Null);
                         self.stack.push(value);
                     }
@@ -1447,12 +2025,51 @@ impl VM {
                 }
             }
 
+            Opcode::TupleSet => {
+                let value = self.pop()?;
+                let index = self.pop()?;
+                let tuple = self.pop()?;
+
+                match (&tuple, &index) {
+                    (Value::Tuple(tuple), Value::Int(idx)) => {
+                        if *idx < 0 {
+                            return Err("Tuple index out of bounds: negative index".to_string());
+                        }
+                        let idx = *idx as usize;
+                        let mut tuple = tuple.borrow_mut();
+                        if idx >= tuple.elements.len() {
+                            return Err(format!(
+                                "Tuple index out of bounds: {} (len={})",
+                                idx,
+                                tuple.elements.len()
+                            ));
+                        }
+                        let Some(expected) = tuple.next_initializer else {
+                            return Err(
+                                "TupleSet is only valid while constructing a tuple".to_string()
+                            );
+                        };
+                        if idx != expected {
+                            return Err(format!(
+                                "Tuple elements must be initialized in order: expected index {expected}, got {idx}"
+                            ));
+                        }
+                        tuple.elements[idx] = value;
+                        tuple.next_initializer =
+                            (expected + 1 < tuple.elements.len()).then_some(expected + 1);
+                    }
+                    _ => return Err("Invalid tuple/index types".to_string()),
+                }
+            }
+
             Opcode::ArrayLen => {
                 let array = self.pop()?;
                 let len = match &array {
                     Value::Array(arr) => arr.borrow().len() as i64,
+                    Value::Tuple(tuple) => tuple.borrow().elements.len() as i64,
+                    Value::Object(obj) => obj.borrow().len() as i64,
                     Value::String(s) => s.len() as i64,
-                    _ => return Err("Cannot get length of non-array/string".to_string()),
+                    _ => return Err("Cannot get length of non-sized value".to_string()),
                 };
                 self.stack.push(Value::Int(len));
             }
@@ -1462,7 +2079,19 @@ impl VM {
                 let array = self.pop()?;
                 match &array {
                     Value::Array(arr) => {
-                        arr.borrow_mut().push(value);
+                        let mut arr = arr.borrow_mut();
+                        if arr.len() >= MAX_COLLECTION_ELEMENTS {
+                            return Err(format!(
+                                "Array size exceeds VM collection limit of {MAX_COLLECTION_ELEMENTS} elements"
+                            ));
+                        }
+                        arr.try_reserve_exact(1).map_err(|_| {
+                            format!(
+                                "Array allocation failed while growing to {} elements",
+                                arr.len() + 1
+                            )
+                        })?;
+                        arr.push(value);
                     }
                     _ => return Err("Cannot push to non-array".to_string()),
                 }
@@ -1629,6 +2258,18 @@ impl VM {
                         Value::Int(a % b)
                     }
                     (Value::Float(a), Value::Float(b)) => Value::Float(a % b),
+                    (Value::Int(a), Value::Float(b)) => {
+                        if *b == 0.0 {
+                            return Err("Modulo by zero".to_string());
+                        }
+                        Value::Float(*a as f64 % b)
+                    }
+                    (Value::Float(a), Value::Int(b)) => {
+                        if *b == 0 {
+                            return Err("Modulo by zero".to_string());
+                        }
+                        Value::Float(a % *b as f64)
+                    }
                     _ => {
                         return Err(format!(
                             "Cannot modulo {} by {}",
@@ -1843,26 +2484,35 @@ impl VM {
     /// Control flow, function calls and program halt.
     #[inline(always)]
     fn execute_control_flow(&mut self, opcode: Opcode) -> Result<Option<i32>, String> {
+        /// Compute the target of a relative jump and validate it lies within
+        /// the code section. A jump past the end would otherwise fall through
+        /// the interpreter loop and silently report a clean exit.
+        fn jump_target(ip: usize, offset: i16, code_len: usize) -> Result<usize, String> {
+            let target = (ip as isize).wrapping_add(offset as isize);
+            if target < 0 {
+                return Err("jump target out of bounds".to_string());
+            }
+            let target = target as usize;
+            if target >= code_len {
+                return Err(format!(
+                    "jump target {target} is out of bounds for a {code_len} byte code section"
+                ));
+            }
+            Ok(target)
+        }
+
         match opcode {
             // Control flow
             Opcode::Jump => {
                 let offset = self.read_i16()?;
-                let target = (self.ip as isize).wrapping_add(offset as isize);
-                if target < 0 {
-                    return Err("jump target out of bounds".to_string());
-                }
-                self.ip = target as usize;
+                self.ip = jump_target(self.ip, offset, self.program.code.len())?;
             }
 
             Opcode::JumpIfTrue => {
                 let offset = self.read_i16()?;
                 let condition = self.pop()?;
                 if condition.is_truthy() {
-                    let target = (self.ip as isize).wrapping_add(offset as isize);
-                    if target < 0 {
-                        return Err("jump target out of bounds".to_string());
-                    }
-                    self.ip = target as usize;
+                    self.ip = jump_target(self.ip, offset, self.program.code.len())?;
                 }
             }
 
@@ -1870,15 +2520,123 @@ impl VM {
                 let offset = self.read_i16()?;
                 let condition = self.pop()?;
                 if !condition.is_truthy() {
-                    let target = (self.ip as isize).wrapping_add(offset as isize);
-                    if target < 0 {
-                        return Err("jump target out of bounds".to_string());
-                    }
-                    self.ip = target as usize;
+                    self.ip = jump_target(self.ip, offset, self.program.code.len())?;
                 }
             }
 
             // Function operations
+            Opcode::InterfaceCall => {
+                let method_idx = self.read_u16()? as usize;
+                let arg_count = self.read_u8()? as usize;
+                let method_name = match self.program.constants.get(method_idx) {
+                    Some(Value::String(name)) => (**name).clone(),
+                    _ => return Err("Invalid interface method name constant".to_string()),
+                };
+                let start = self.stack_top_start(arg_count + 1)?;
+                let interface = self.stack.get(start).cloned().ok_or("Stack underflow")?;
+                let Value::Interface(interface) = interface else {
+                    return Err(format!(
+                        "Cannot call interface method on {}",
+                        interface.type_name()
+                    ));
+                };
+                let method = interface
+                    .methods
+                    .get(&method_name)
+                    .cloned()
+                    .ok_or_else(|| format!("interface has no method '{method_name}'"))?;
+                match &method {
+                    InterfaceMethod::Value(callee) => {
+                        self.stack[start] = interface.receiver.clone();
+                        match callee {
+                            Value::Function(code_offset) => {
+                                let frame = CallFrame {
+                                    func_offset: *code_offset,
+                                    return_addr: self.ip,
+                                    locals_base: self.locals.len(),
+                                    local_count: arg_count + 1,
+                                    stack_base: start,
+                                    captures: None,
+                                };
+                                self.call_stack.push(frame);
+                                self.locals.extend(self.stack.drain(start..));
+                                self.ip = *code_offset;
+                            }
+                            Value::Closure(closure_data) => {
+                                let frame = CallFrame {
+                                    func_offset: closure_data.code_offset,
+                                    return_addr: self.ip,
+                                    locals_base: self.locals.len(),
+                                    local_count: arg_count + 1,
+                                    stack_base: start,
+                                    captures: Some(closure_data.clone()),
+                                };
+                                self.call_stack.push(frame);
+                                self.locals.extend(self.stack.drain(start..));
+                                self.ip = closure_data.code_offset;
+                            }
+                            other => return Err(format!("Cannot call {}", other.type_name())),
+                        }
+                    }
+                    InterfaceMethod::Intrinsic(intrinsic) => {
+                        let arguments: Vec<Value> = self.stack.drain(start..).collect();
+                        let receiver = interface.receiver.clone();
+                        let explicit = &arguments[1..];
+                        let result = match intrinsic {
+                            InterfaceIntrinsic::StringLen if explicit.is_empty() => {
+                                match receiver {
+                                    Value::String(value) => {
+                                        // `len` on a string is a byte count
+                                        // (matching `len()`, the docs, and the
+                                        // native backend), not a scalar count.
+                                        Value::Int(value.len() as i64)
+                                    }
+                                    _ => {
+                                        return Err("interface string len receiver is not a string"
+                                            .to_string())
+                                    }
+                                }
+                            }
+                            InterfaceIntrinsic::ArrayLen if explicit.is_empty() => match receiver {
+                                Value::Array(array) => Value::Int(array.borrow().len() as i64),
+                                _ => {
+                                    return Err(
+                                        "interface array len receiver is not an array".to_string()
+                                    )
+                                }
+                            },
+                            InterfaceIntrinsic::ArrayPush if explicit.len() == 1 => {
+                                match receiver {
+                                    Value::Array(array) => {
+                                        if array.borrow().len() >= MAX_COLLECTION_ELEMENTS {
+                                            return Err("Array size exceeds VM collection limit"
+                                                .to_string());
+                                        }
+                                        array.borrow_mut().push(explicit[0].clone());
+                                        Value::Null
+                                    }
+                                    _ => {
+                                        return Err("interface array push receiver is not an array"
+                                            .to_string())
+                                    }
+                                }
+                            }
+                            InterfaceIntrinsic::ArrayPop if explicit.is_empty() => match receiver {
+                                Value::Array(array) => {
+                                    array.borrow_mut().pop().unwrap_or(Value::Null)
+                                }
+                                _ => {
+                                    return Err(
+                                        "interface array pop receiver is not an array".to_string()
+                                    )
+                                }
+                            },
+                            _ => return Err("invalid interface intrinsic arguments".to_string()),
+                        };
+                        self.stack.push(result);
+                    }
+                }
+            }
             Opcode::Call => {
                 let arg_count = self.read_u8()? as usize;
                 let callee = self.pop()?;
@@ -2016,23 +2774,14 @@ impl VM {
             Opcode::TypeIs => {
                 let type_id = self.read_u8()?;
                 let value = self.pop()?;
-                let matches = match type_id {
-                    0 => matches!(value, Value::Null),
-                    1 => matches!(value, Value::Bool(_)),
-                    2 => matches!(value, Value::Int(_)),
-                    3 => matches!(value, Value::Float(_)),
-                    4 => matches!(value, Value::String(_)),
-                    5 => matches!(value, Value::Array(_)),
-                    6 => matches!(value, Value::Object(_)),
-                    7 => matches!(value, Value::Function(_) | Value::Closure(_)),
-                    _ => false,
-                };
+                let matches = value_matches_type_id(&value, type_id);
                 self.stack.push(Value::Bool(matches));
             }
 
             Opcode::Cast => {
                 let type_id = self.read_u8()?;
                 let value = self.pop()?;
+                validate_runtime_cast(&value, type_id)?;
                 let result = match type_id {
                     // Cast to int.
                     2 => match &value {
@@ -2059,6 +2808,56 @@ impl VM {
                 self.stack.push(result);
             }
 
+            Opcode::InterfaceIs => {
+                let source_type = self.read_u8()?;
+                let method_count = self.read_u8()? as usize;
+                let value = self.pop()?;
+                let mut matches = match &value {
+                    Value::Interface(_) => true,
+                    _ if source_type != u8::MAX => value_matches_type_id(&value, source_type),
+                    _ => true,
+                };
+                for _ in 0..method_count {
+                    let name_idx = self.read_u16()? as usize;
+                    let name = match self.program.constants.get(name_idx) {
+                        Some(Value::String(name)) => (**name).clone(),
+                        _ => return Err("Invalid interface method name constant".to_string()),
+                    };
+                    let kind = self.read_u8()?;
+                    let witness_matches = match kind {
+                        0 => match &value {
+                            Value::Interface(interface) => interface.methods.contains_key(&name),
+                            Value::Object(object) | Value::Struct(object) => {
+                                object.borrow().get(&name).is_some_and(|value| {
+                                    matches!(value, Value::Function(_) | Value::Closure(_))
+                                })
+                            }
+                            _ => false,
+                        },
+                        1 => source_type != u8::MAX,
+                        2 => match self.read_u8()? {
+                            0 => matches!(value, Value::String(_)),
+                            1..=3 => matches!(value, Value::Array(_)),
+                            _ => false,
+                        },
+                        3 => match &value {
+                            Value::Interface(interface) => interface.methods.contains_key(&name),
+                            Value::String(_) => name == "len",
+                            Value::Array(_) => matches!(name.as_str(), "len" | "push" | "pop"),
+                            Value::Object(object) | Value::Struct(object) => {
+                                object.borrow().get(&name).is_some_and(|value| {
+                                    matches!(value, Value::Function(_) | Value::Closure(_))
+                                })
+                            }
+                            _ => false,
+                        },
+                        _ => return Err("Invalid interface witness kind".to_string()),
+                    };
+                    matches &= witness_matches;
+                }
+                self.stack.push(Value::Bool(matches));
+            }
+
             _ => unreachable!("execute_type called with non-type opcode"),
         }
         Ok(None)
@@ -2069,21 +2868,41 @@ impl VM {
     fn execute_system(&mut self, opcode: Opcode) -> Result<Option<i32>, String> {
         match opcode {
             // System operations
-            Opcode::Print => {
+            Opcode::Print | Opcode::Println => {
                 let value = self.pop()?;
-                let output_str = value.to_string();
-
-                // Call output callback if set
-                if let Some(ref mut callback) = self.output_callback {
-                    callback(&output_str);
-                }
+                let output_str = render_output_value(&value)?;
+                let newline = opcode == Opcode::Println;
 
                 if self.capture_output {
-                    self.output.push(output_str);
-                } else {
+                    self.capture_output_chunk(&output_str, newline)?;
+                }
+
+                // Stream one exact chunk per source-level output call.
+                if let Some(ref mut callback) = self.output_callback {
+                    if newline {
+                        let mut chunk = output_str.clone();
+                        chunk.try_reserve(1).map_err(|_| {
+                            "output callback allocation exceeded available memory".to_string()
+                        })?;
+                        chunk.push('\n');
+                        callback(&chunk);
+                    } else {
+                        callback(&output_str);
+                    }
+                }
+
+                if !self.capture_output && newline {
                     println!("{}", output_str);
+                } else if !self.capture_output {
+                    print!("{}", output_str);
                 }
             }
+
+            Opcode::Assert => match self.pop()? {
+                Value::Bool(true) => {}
+                Value::Bool(false) => return Err("assertion failed".to_string()),
+                value => return Err(format!("assert expects bool, got {}", value.type_name())),
+            },
 
             Opcode::Collect => {
                 // The `collect()` builtin. We are at an opcode-dispatch boundary:
@@ -2152,10 +2971,11 @@ impl VM {
             Opcode::ChanNew => {
                 let capacity = self.pop()?;
                 let capacity = match capacity {
-                    Value::Int(n) => n as usize,
-                    _ => 0,
+                    Value::Int(n) => usize::try_from(n)
+                        .map_err(|_| "Channel capacity must be non-negative".to_string())?,
+                    _ => return Err("Channel capacity must be an integer".to_string()),
                 };
-                let channel_id = self.scheduler.create_channel(capacity);
+                let channel_id = self.scheduler.create_channel(capacity)?;
                 self.stack.push(Value::Channel(channel_id));
             }
 
@@ -2264,10 +3084,11 @@ impl VM {
     /// order: recv pushes the channel; send pushes channel then value; default
     /// pushes nothing.
     ///
-    /// Semantics (Go-like): poll all recv/send arms; the first ready one wins. A
-    /// recv arm pushes the received value for the body to bind. If none is ready
-    /// and a `default` arm exists, run it (non-blocking poll). Otherwise park the
-    /// fiber until any arm becomes ready, then re-run this opcode and commit.
+    /// Semantics (Go-like): probe all recv/send arms and choose one ready arm
+    /// with the VM's deterministic SplitMix64 arbiter. A recv arm pushes the
+    /// received value for the body to bind. If none is ready and a `default`
+    /// arm exists, run it (non-blocking poll). Otherwise park the fiber until
+    /// any arm becomes ready, then re-run this opcode and re-arbitrate.
     fn execute_select(&mut self) -> Result<Option<i32>, String> {
         // The opcode byte was already consumed; remember its offset so a parked
         // select resumes by re-executing this very opcode.
@@ -2329,26 +3150,97 @@ impl VM {
             .current_fiber_mut()
             .and_then(|f| f.select_resolution.take());
         if let Some(res) = resolution {
-            for (i, arm) in arms.iter().enumerate() {
-                let matches = match arm {
-                    Arm::Recv { channel } => res.recv.is_some() && *channel == res.channel_id,
-                    Arm::Send { channel, .. } => res.recv.is_none() && *channel == res.channel_id,
-                    Arm::Default => false,
-                };
-                if matches {
-                    self.deregister_current_select_waiter();
-                    if let Some((value, _ok)) = res.recv {
-                        self.stack.push(value);
-                    }
-                    self.ip = body_targets[i];
-                    return Ok(None);
+            let round_seed = self.next_select_seed();
+            let is_recv = res.recv.is_some();
+            let selected = arms
+                .iter()
+                .enumerate()
+                .filter_map(|(index, arm)| match arm {
+                    Arm::Recv { channel } if is_recv && *channel == res.channel_id => Some((
+                        index,
+                        Self::select_arm_score(round_seed, index, *channel, false),
+                    )),
+                    Arm::Send { channel, .. } if !is_recv && *channel == res.channel_id => Some((
+                        index,
+                        Self::select_arm_score(round_seed, index, *channel, true),
+                    )),
+                    _ => None,
+                })
+                .max_by_key(|(_, score)| *score)
+                .map(|(index, _)| index);
+            if let Some(index) = selected {
+                self.deregister_current_select_waiter();
+                if let Some((value, _ok)) = res.recv {
+                    self.stack.push(value);
                 }
+                self.ip = body_targets[index];
+                return Ok(None);
             }
             // Resolution did not match any arm (spurious); fall through to a
             // fresh poll below.
         }
 
-        // Poll recv arms first.
+        // Probe every communication arm without mutating channel state. The
+        // selected index is then committed exactly once, so source order does
+        // not privilege receives or earlier arms over other ready choices.
+        let ready_indices: Vec<usize> = arms
+            .iter()
+            .enumerate()
+            .filter_map(|(index, arm)| match arm {
+                Arm::Recv { channel } => (self.scheduler.select_receive_ready(*channel)
+                    && !self.scheduler.select_receive_deferred(*channel))
+                .then_some(index),
+                Arm::Send { channel, .. } => (self.scheduler.select_send_ready(*channel)
+                    && !self.scheduler.select_send_deferred(*channel))
+                .then_some(index),
+                Arm::Default => None,
+            })
+            .collect();
+
+        let deferred_communication = arms.iter().any(|arm| match arm {
+            Arm::Recv { channel } => self.scheduler.select_receive_deferred(*channel),
+            Arm::Send { channel, .. } => self.scheduler.select_send_deferred(*channel),
+            Arm::Default => false,
+        });
+
+        if !ready_indices.is_empty() {
+            let round_seed = self.next_select_seed();
+            let arm_idx = ready_indices
+                .iter()
+                .copied()
+                .max_by_key(|index| match &arms[*index] {
+                    Arm::Recv { channel } => {
+                        Self::select_arm_score(round_seed, *index, *channel, false)
+                    }
+                    Arm::Send { channel, .. } => {
+                        Self::select_arm_score(round_seed, *index, *channel, true)
+                    }
+                    Arm::Default => unreachable!("default arms are not ready"),
+                })
+                .expect("ready arm list is non-empty");
+            match &arms[arm_idx] {
+                Arm::Recv { channel } => {
+                    // A cooperative VM cannot mutate this channel between the
+                    // probe and commit, so a ready receive must commit. Keep a
+                    // defensive fallback for malformed/stale scheduler state.
+                    if let Some((value, _ok)) = self.scheduler.try_select_receive(*channel) {
+                        self.deregister_current_select_waiter();
+                        self.stack.push(value);
+                        self.ip = body_targets[arm_idx];
+                        return Ok(None);
+                    }
+                }
+                Arm::Send { channel, value } => {
+                    if self.scheduler.try_select_send(*channel, value.clone()) {
+                        self.deregister_current_select_waiter();
+                        self.ip = body_targets[arm_idx];
+                        return Ok(None);
+                    }
+                }
+                Arm::Default => unreachable!("default arms are not communication-ready"),
+            }
+        }
+
         let recv_ids: Vec<ChannelId> = arms
             .iter()
             .filter_map(|a| match a {
@@ -2356,43 +3248,18 @@ impl VM {
                 _ => None,
             })
             .collect();
-        if !recv_ids.is_empty() {
-            if let Some((local_idx, value, _ok)) = self.scheduler.try_select(&recv_ids) {
-                // Map the recv-local index back to the arm index.
-                let arm_idx = arms
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, a)| matches!(a, Arm::Recv { .. }))
-                    .nth(local_idx)
-                    .map(|(i, _)| i)
-                    .expect("recv index out of range");
-                self.deregister_current_select_waiter();
-                self.stack.push(value);
-                self.ip = body_targets[arm_idx];
-                return Ok(None);
-            }
-        }
-
-        // Poll send arms.
-        for (i, arm) in arms.iter().enumerate() {
-            if let Arm::Send { channel, value } = arm {
-                if self.scheduler.try_select_send(*channel, value.clone()) {
-                    self.deregister_current_select_waiter();
-                    self.ip = body_targets[i];
-                    return Ok(None);
-                }
-            }
-        }
 
         // No arm ready. If a default exists, run it (non-blocking poll).
-        if let Some((i, _)) = arms
-            .iter()
-            .enumerate()
-            .find(|(_, a)| matches!(a, Arm::Default))
-        {
-            self.deregister_current_select_waiter();
-            self.ip = body_targets[i];
-            return Ok(None);
+        if !deferred_communication {
+            if let Some((i, _)) = arms
+                .iter()
+                .enumerate()
+                .find(|(_, a)| matches!(a, Arm::Default))
+            {
+                self.deregister_current_select_waiter();
+                self.ip = body_targets[i];
+                return Ok(None);
+            }
         }
 
         // No default: park until an arm becomes ready, then re-run this opcode.
@@ -2426,6 +3293,11 @@ impl VM {
         self.ip = select_ip;
         self.save_fiber_state();
         self.scheduler.park_select(&recv_ids, &send_specs);
+        if deferred_communication {
+            let send_ids: Vec<ChannelId> = send_specs.iter().map(|(id, _)| *id).collect();
+            self.scheduler
+                .wake_select_counterparts(&recv_ids, &send_ids);
+        }
         Ok(None)
     }
 
@@ -2527,6 +3399,25 @@ fn pop_float_fast(stack: &mut Vec<Value>) -> Result<f64, String> {
     }
 }
 
+fn allocate_null_collection(kind: &str, size: Value) -> Result<Vec<Value>, String> {
+    let Value::Int(size) = size else {
+        return Err(format!("{kind} size must be an integer"));
+    };
+    let size = usize::try_from(size).map_err(|_| format!("{kind} size must be non-negative"))?;
+    if size > MAX_COLLECTION_ELEMENTS {
+        return Err(format!(
+            "{kind} size exceeds VM collection limit of {MAX_COLLECTION_ELEMENTS} elements"
+        ));
+    }
+
+    let mut elements = Vec::new();
+    elements
+        .try_reserve_exact(size)
+        .map_err(|_| format!("{kind} allocation failed while creating {size} elements"))?;
+    elements.resize(size, Value::Null);
+    Ok(elements)
+}
+
 impl VM {
     #[inline(always)]
     fn read_u8(&mut self) -> Result<u8, String> {
@@ -2620,7 +3511,7 @@ impl VM {
         // same single "requires ... arguments" error on a type mismatch).
         //
         // Irregular arms (sys_exit, print/println, env_get's Option->Null,
-        // json passthrough, http Result-tuple->Array, and the few syscalls with
+        // json passthrough, HTTP response tuples, and the few syscalls with
         // bespoke error/Option handling) are left explicit and individually
         // commented further down.
         //
@@ -3372,7 +4263,7 @@ impl VM {
             // HTTP Client syscalls (120-122)
             // ================================================================
 
-            // http_get(url: string) -> [int, string] (status, body)
+            // http_get(url: string) -> (int, string) (status, body)
             120 => {
                 let url = self.pop()?;
                 let Value::String(url) = &url else {
@@ -3396,11 +4287,12 @@ impl VM {
                     Ok((status, _headers, body)) => (status, body),
                     Err(e) => (-1, e),
                 };
-                let arr = vec![Value::Int(status), Value::String(Rc::new(body))];
-                self.stack.push(Value::Array(Gc::new(GcCell::new(arr))));
+                let tuple = vec![Value::Int(status), Value::String(Rc::new(body))];
+                self.stack
+                    .push(Value::Tuple(Gc::new(GcCell::new(TupleData::sealed(tuple)))));
                 Ok(())
             }
-            // http_post(url: string, body: string, content_type: string) -> [int, string]
+            // http_post(url: string, body: string, content_type: string) -> (int, string)
             121 => {
                 let content_type = self.pop()?;
                 let body = self.pop()?;
@@ -3428,11 +4320,12 @@ impl VM {
                         Ok((status, _headers, response_body)) => (status, response_body),
                         Err(e) => (-1, e),
                     };
-                let arr = vec![Value::Int(status), Value::String(Rc::new(response_body))];
-                self.stack.push(Value::Array(Gc::new(GcCell::new(arr))));
+                let tuple = vec![Value::Int(status), Value::String(Rc::new(response_body))];
+                self.stack
+                    .push(Value::Tuple(Gc::new(GcCell::new(TupleData::sealed(tuple)))));
                 Ok(())
             }
-            // http_request(method: string, url: string, headers: string, body: string) -> [int, string]
+            // http_request(method: string, url: string, headers: string, body: string) -> (int, string)
             122 => {
                 let body = self.pop()?;
                 let headers = self.pop()?;
@@ -3472,8 +4365,9 @@ impl VM {
                         Ok((status, response_body)) => (status, response_body),
                         Err(e) => (-1, e),
                     };
-                let arr = vec![Value::Int(status), Value::String(Rc::new(response_body))];
-                self.stack.push(Value::Array(Gc::new(GcCell::new(arr))));
+                let tuple = vec![Value::Int(status), Value::String(Rc::new(response_body))];
+                self.stack
+                    .push(Value::Tuple(Gc::new(GcCell::new(TupleData::sealed(tuple)))));
                 Ok(())
             }
 
@@ -3615,6 +4509,22 @@ impl VM {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rendering_one_value_beyond_the_output_limit_fails_without_partial_text() {
+        // `[` + 466,034 sixteen-byte strings + separators + `]` is
+        // 8,388,612 bytes: four bytes beyond the user-facing limit. Build the
+        // runtime value directly so the resource-bound test does not spend
+        // hundreds of thousands of debug-VM iterations constructing it.
+        let element = Value::String(Rc::new("0123456789abcdef".to_string()));
+        let elements = vec![element; 466_034];
+        let value = Value::Array(Gc::new(GcCell::new(elements)));
+        let error = render_output_value(&value).expect_err("oversized render must fail");
+        assert_eq!(
+            error,
+            "one printed value exceeded the 8388608 byte output limit"
+        );
+    }
     use crate::fiber::FiberState;
 
     fn make_program(constants: Vec<Value>, code: Vec<u8>) -> Program {
@@ -3627,6 +4537,17 @@ mod tests {
             debug_info: DebugInfo::new(),
             source_file: None,
         }
+    }
+
+    #[test]
+    fn env_override_is_scoped_to_vm() {
+        const NAME: &str = "LIRA_VM_ENV_OVERRIDE_VM_TEST_UNIQUE";
+        let process_value = std::env::var(NAME).ok();
+        let mut vm = VM::new(make_program(Vec::new(), vec![Opcode::Halt as u8]));
+        vm.set_env_override(NAME, "vm-local-value");
+
+        assert_eq!(vm.runtime.env_get(NAME).as_deref(), Some("vm-local-value"));
+        assert_eq!(std::env::var(NAME).ok(), process_value);
     }
 
     #[test]
@@ -3939,6 +4860,47 @@ mod tests {
     }
 
     #[test]
+    fn assert_consumes_true_and_continues() {
+        let program = make_program(
+            vec![Value::Bool(true), Value::Int(42)],
+            vec![
+                Opcode::LoadConst as u8,
+                0,
+                0,
+                Opcode::Assert as u8,
+                Opcode::LoadConst as u8,
+                1,
+                0,
+                Opcode::Halt as u8,
+            ],
+        );
+        let mut vm = VM::new(program);
+        assert_eq!(vm.run(), Ok(0));
+        assert!(matches!(vm.stack.as_slice(), [Value::Int(42)]));
+    }
+
+    #[test]
+    fn assert_false_and_invalid_operands_fail_deterministically() {
+        for (value, expected) in [
+            (Value::Bool(false), "assertion failed"),
+            (Value::Int(1), "assert expects bool, got int"),
+        ] {
+            let program = make_program(
+                vec![value],
+                vec![
+                    Opcode::LoadConst as u8,
+                    0,
+                    0,
+                    Opcode::Assert as u8,
+                    Opcode::Halt as u8,
+                ],
+            );
+            let mut vm = VM::new(program);
+            assert_eq!(vm.run().expect_err("assert operand must fail"), expected);
+        }
+    }
+
+    #[test]
     fn test_new_array() {
         let program = make_program(
             vec![Value::Int(3), Value::Int(1), Value::Int(2), Value::Int(3)],
@@ -3966,6 +4928,67 @@ mod tests {
     }
 
     #[test]
+    fn collection_construction_rejects_negative_and_excessive_sizes_before_allocation() {
+        for (opcode, kind) in [(Opcode::NewArray, "Array"), (Opcode::NewTuple, "Tuple")] {
+            for (size, expected) in [
+                (-1, format!("{kind} size must be non-negative")),
+                (
+                    i64::MAX,
+                    format!(
+                        "{kind} size exceeds VM collection limit of {MAX_COLLECTION_ELEMENTS} elements"
+                    ),
+                ),
+            ] {
+                let program = make_program(
+                    vec![Value::Int(size)],
+                    vec![
+                        Opcode::LoadConst as u8,
+                        0,
+                        0,
+                        opcode as u8,
+                        Opcode::Halt as u8,
+                    ],
+                );
+                let mut vm = VM::new(program);
+                let error = vm
+                    .run()
+                    .expect_err("invalid collection size must fail without allocating");
+                assert_eq!(error, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn channel_construction_rejects_negative_and_excessive_capacity_before_allocation() {
+        for (capacity, expected) in [
+            (-1, "Channel capacity must be non-negative".to_string()),
+            (
+                i64::MAX,
+                format!(
+                    "Channel capacity exceeds VM limit of {} elements",
+                    crate::fiber::MAX_CHANNEL_CAPACITY
+                ),
+            ),
+        ] {
+            let program = make_program(
+                vec![Value::Int(capacity)],
+                vec![
+                    Opcode::LoadConst as u8,
+                    0,
+                    0,
+                    Opcode::ChanNew as u8,
+                    Opcode::Halt as u8,
+                ],
+            );
+            let mut vm = VM::new(program);
+            let error = vm
+                .run()
+                .expect_err("invalid channel capacity must fail without allocating");
+            assert_eq!(error, expected);
+        }
+    }
+
+    #[test]
     fn test_jump_if_false() {
         // Skip printing 42 if false
         let program = make_program(
@@ -3975,8 +4998,8 @@ mod tests {
                 0,
                 0, // Load false
                 Opcode::JumpIfFalse as u8,
-                11,
-                0, // Jump to offset 11 if false
+                4,
+                0, // Jump +4 from byte 6 -> byte 10 (Load 100), skipping Print 42
                 Opcode::LoadConst as u8,
                 1,
                 0,                   // Load 42 (skipped)
@@ -3991,6 +5014,31 @@ mod tests {
         let mut vm = VM::new(program);
         let result = vm.run();
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_jump_past_end_of_code_is_an_error() {
+        // A jump whose target lands past the end of the code section must be
+        // reported as an error rather than silently falling off the end of the
+        // interpreter loop (which used to exit cleanly with code 0, dropping
+        // any pending fibers).
+        let program = make_program(
+            Vec::new(),
+            vec![
+                Opcode::Jump as u8,
+                10,
+                0,                  // Jump forward +10 from byte 3 -> 13 (past end)
+                Opcode::Halt as u8, // would never be reached
+            ],
+        );
+        let mut vm = VM::new(program);
+        let result = vm.run();
+        let error = result.expect_err("an out-of-bounds jump must fail");
+        assert!(
+            error.contains("out of bounds"),
+            "expected an out-of-bounds jump error, got: {}",
+            error
+        );
     }
 
     #[test]
@@ -4935,8 +5983,8 @@ mod tests {
                 0,
                 0, // Load 42
                 Opcode::Jump as u8,
-                0,
-                2,                 // jump forward 2 bytes to Halt
+                1,
+                0,                 // jump +1 from byte 6 -> byte 7 (Halt), skipping Pop
                 Opcode::Pop as u8, // skipped
                 Opcode::Halt as u8,
             ],
@@ -5317,6 +6365,308 @@ mod tests {
         let mut vm = VM::new(program);
         let result = vm.run();
         assert!(result.is_ok(), "valid array set must still work");
+    }
+
+    #[test]
+    fn test_array_set_rejects_tuple_operand() {
+        let program = make_program(
+            vec![
+                Value::Tuple(Gc::new(GcCell::new(TupleData::sealed(vec![Value::Int(1)])))),
+                Value::Int(0),
+                Value::Int(99),
+            ],
+            vec![
+                Opcode::LoadConst as u8,
+                0,
+                0,
+                Opcode::LoadConst as u8,
+                1,
+                0,
+                Opcode::LoadConst as u8,
+                2,
+                0,
+                Opcode::ArraySet as u8,
+                Opcode::Halt as u8,
+            ],
+        );
+        let mut vm = VM::new(program);
+        let error = vm.run().expect_err("ArraySet must reject tuples");
+        assert!(
+            error.contains("Invalid array/index types"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn test_tuple_set_rejects_array_operand() {
+        let program = make_program(
+            vec![
+                Value::Array(Gc::new(GcCell::new(vec![Value::Int(1)]))),
+                Value::Int(0),
+                Value::Int(99),
+            ],
+            vec![
+                Opcode::LoadConst as u8,
+                0,
+                0,
+                Opcode::LoadConst as u8,
+                1,
+                0,
+                Opcode::LoadConst as u8,
+                2,
+                0,
+                Opcode::TupleSet as u8,
+                Opcode::Halt as u8,
+            ],
+        );
+        let mut vm = VM::new(program);
+        let error = vm.run().expect_err("TupleSet must reject arrays");
+        assert!(
+            error.contains("Invalid tuple/index types"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn test_tuple_set_rejects_negative_and_out_of_bounds_indices() {
+        for index in [-1, 1] {
+            let program = make_program(
+                vec![Value::Int(1), Value::Int(index), Value::Int(99)],
+                vec![
+                    Opcode::LoadConst as u8,
+                    0,
+                    0,
+                    Opcode::NewTuple as u8,
+                    Opcode::LoadConst as u8,
+                    1,
+                    0,
+                    Opcode::LoadConst as u8,
+                    2,
+                    0,
+                    Opcode::TupleSet as u8,
+                    Opcode::Halt as u8,
+                ],
+            );
+            let mut vm = VM::new(program);
+            let error = vm.run().expect_err("invalid tuple index must fail");
+            assert!(
+                error.contains("Tuple index out of bounds"),
+                "index {index} produced unexpected error: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_tuple_set_initializes_new_tuple_once_in_order() {
+        let program = make_program(
+            vec![Value::Int(1), Value::Int(0), Value::Int(99)],
+            vec![
+                Opcode::LoadConst as u8,
+                0,
+                0,
+                Opcode::NewTuple as u8,
+                Opcode::Dup as u8,
+                Opcode::LoadConst as u8,
+                1,
+                0,
+                Opcode::LoadConst as u8,
+                2,
+                0,
+                Opcode::TupleSet as u8,
+                Opcode::Halt as u8,
+            ],
+        );
+        let mut vm = VM::new(program);
+        assert!(vm.run().is_ok(), "ordered tuple initialization must work");
+        let Some(Value::Tuple(tuple)) = vm.stack.last() else {
+            panic!("constructed tuple was not left on the stack");
+        };
+        let tuple = tuple.borrow();
+        match tuple.elements.first() {
+            Some(Value::Int(value)) => assert_eq!(*value, 99),
+            other => panic!("TupleSet wrote unexpected value: {other:?}"),
+        };
+    }
+
+    #[test]
+    fn test_tuple_set_enforces_order_reads_elements_and_rejects_sealed_tuple() {
+        let out_of_order = make_program(
+            vec![Value::Int(3), Value::Int(1), Value::Int(20)],
+            vec![
+                Opcode::LoadConst as u8,
+                0,
+                0,
+                Opcode::NewTuple as u8,
+                Opcode::Dup as u8,
+                Opcode::LoadConst as u8,
+                1,
+                0,
+                Opcode::LoadConst as u8,
+                2,
+                0,
+                Opcode::TupleSet as u8,
+                Opcode::Halt as u8,
+            ],
+        );
+        let mut vm = VM::new(out_of_order);
+        let error = vm
+            .run()
+            .expect_err("tuple elements must be initialized in order");
+        assert_eq!(
+            error,
+            "Tuple elements must be initialized in order: expected index 0, got 1"
+        );
+
+        let ordered = make_program(
+            vec![
+                Value::Int(3),
+                Value::Int(0),
+                Value::Int(10),
+                Value::Int(1),
+                Value::Int(20),
+                Value::Int(2),
+                Value::Int(30),
+            ],
+            vec![
+                Opcode::LoadConst as u8,
+                0,
+                0,
+                Opcode::NewTuple as u8,
+                Opcode::Dup as u8,
+                Opcode::LoadConst as u8,
+                1,
+                0,
+                Opcode::LoadConst as u8,
+                2,
+                0,
+                Opcode::TupleSet as u8,
+                Opcode::Dup as u8,
+                Opcode::LoadConst as u8,
+                3,
+                0,
+                Opcode::LoadConst as u8,
+                4,
+                0,
+                Opcode::TupleSet as u8,
+                Opcode::Dup as u8,
+                Opcode::LoadConst as u8,
+                5,
+                0,
+                Opcode::LoadConst as u8,
+                6,
+                0,
+                Opcode::TupleSet as u8,
+                Opcode::Dup as u8,
+                Opcode::LoadConst as u8,
+                1,
+                0,
+                Opcode::ArrayGet as u8,
+                Opcode::Halt as u8,
+            ],
+        );
+        let mut vm = VM::new(ordered);
+        assert!(vm.run().is_ok(), "ordered tuple initialization must work");
+        assert_eq!(vm.stack.len(), 2);
+        let Value::Tuple(tuple) = &vm.stack[0] else {
+            panic!("constructed tuple was not left on the stack");
+        };
+        {
+            let tuple = tuple.borrow();
+            assert!(tuple.next_initializer.is_none());
+            assert!(matches!(
+                tuple.elements.as_slice(),
+                [Value::Int(10), Value::Int(20), Value::Int(30)]
+            ));
+        }
+        assert!(matches!(vm.stack.get(1), Some(Value::Int(10))));
+
+        let sealed = make_program(
+            vec![
+                Value::Int(2),
+                Value::Int(0),
+                Value::Int(10),
+                Value::Int(1),
+                Value::Int(20),
+                Value::Int(99),
+            ],
+            vec![
+                Opcode::LoadConst as u8,
+                0,
+                0,
+                Opcode::NewTuple as u8,
+                Opcode::Dup as u8,
+                Opcode::LoadConst as u8,
+                1,
+                0,
+                Opcode::LoadConst as u8,
+                2,
+                0,
+                Opcode::TupleSet as u8,
+                Opcode::Dup as u8,
+                Opcode::LoadConst as u8,
+                3,
+                0,
+                Opcode::LoadConst as u8,
+                4,
+                0,
+                Opcode::TupleSet as u8,
+                Opcode::Dup as u8,
+                Opcode::LoadConst as u8,
+                1,
+                0,
+                Opcode::LoadConst as u8,
+                5,
+                0,
+                Opcode::TupleSet as u8,
+                Opcode::Halt as u8,
+            ],
+        );
+        let mut vm = VM::new(sealed);
+        let error = vm.run().expect_err("sealed tuple must reject TupleSet");
+        assert_eq!(error, "TupleSet is only valid while constructing a tuple");
+    }
+
+    #[test]
+    fn test_tuple_set_rejects_mutation_after_construction() {
+        let program = make_program(
+            vec![
+                Value::Int(1),
+                Value::Int(0),
+                Value::Int(99),
+                Value::Int(100),
+            ],
+            vec![
+                Opcode::LoadConst as u8,
+                0,
+                0,
+                Opcode::NewTuple as u8,
+                Opcode::Dup as u8,
+                Opcode::LoadConst as u8,
+                1,
+                0,
+                Opcode::LoadConst as u8,
+                2,
+                0,
+                Opcode::TupleSet as u8,
+                Opcode::Dup as u8,
+                Opcode::LoadConst as u8,
+                1,
+                0,
+                Opcode::LoadConst as u8,
+                3,
+                0,
+                Opcode::TupleSet as u8,
+                Opcode::Halt as u8,
+            ],
+        );
+        let mut vm = VM::new(program);
+        let error = vm
+            .run()
+            .expect_err("TupleSet must reject mutation after construction");
+        assert!(
+            error.contains("only valid while constructing a tuple"),
+            "unexpected error: {error}"
+        );
     }
 
     // ── Bug M3: Neg on Int::MIN wraps (spec: integer overflow is wrapping) ──

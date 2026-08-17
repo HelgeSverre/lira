@@ -1,7 +1,7 @@
 //! Lira VM opcodes
 //!
 //! Defines all bytecode instructions for the Lira virtual machine.
-//! See docs/lira/11-instruction-set.md for the full specification.
+//! See `docs/11-instruction-set.md` for the bytecode reference.
 
 /// Lira VM opcodes
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -12,6 +12,9 @@ pub enum Opcode {
     LoadConst = 0x01,
     Pop = 0x02,
     Dup = 0x03,
+    /// Copy a value according to language value/reference semantics. Structs
+    /// are recursively copied; reference values are left shared.
+    CopyValue = 0x04,
 
     // Local variable operations
     LoadLocal = 0x10,
@@ -65,14 +68,28 @@ pub enum Opcode {
     GetField = 0x70,
     SetField = 0x71,
     NewObject = 0x72,
+    NewStruct = 0x73,
+    /// Box a receiver with a deterministic interface witness table.
+    InterfaceBox = 0x74,
+    /// Call a method in an interface witness table. Operands are a method-name
+    /// constant index, followed by the explicit argument count.
+    InterfaceCall = 0x75,
 
-    // Array operations
+    // Array and tuple operations
     NewArray = 0x80,
     ArrayGet = 0x81,
     ArraySet = 0x82,
     ArrayLen = 0x83,
     ArrayPush = 0x84,
     ArrayPop = 0x85,
+    /// Create a fixed-size tuple from a stack-provided element count.
+    NewTuple = 0x86,
+    /// Store one element while constructing a tuple.
+    ///
+    /// Unlike `ArraySet`, this instruction accepts only `Value::Tuple` and
+    /// exists so tuple construction cannot accidentally make tuples mutable
+    /// through the array mutation opcode.
+    TupleSet = 0x87,
 
     // Fiber operations
     Spawn = 0x90,
@@ -94,6 +111,8 @@ pub enum Opcode {
     // Type operations
     TypeIs = 0xC0,
     Cast = 0xC1,
+    /// Structurally test a value against an inline interface witness.
+    InterfaceIs = 0xC2,
 
     // Typed integer arithmetic (0xD0-0xD5)
     IAdd = 0xD0,
@@ -129,6 +148,8 @@ pub enum Opcode {
 
     // System operations
     Print = 0xF0,
+    Println = 0xF1,
+    Assert = 0xF2,
     Collect = 0xFD,
     Syscall = 0xFE,
     Halt = 0xFF,
@@ -149,6 +170,7 @@ const OPCODE_TABLE: [Option<Opcode>; 256] = [
     Some(Opcode::LoadConst), // 0x01
     Some(Opcode::Pop),       // 0x02
     Some(Opcode::Dup),       // 0x03
+    Some(Opcode::CopyValue), // 0x04
     N,
     N,
     N,
@@ -159,8 +181,7 @@ const OPCODE_TABLE: [Option<Opcode>; 256] = [
     N,
     N,
     N,
-    N,
-    N, // 0x04-0x0F
+    N, // 0x05-0x0F
     // 0x10-0x1F: Local ops + gaps
     Some(Opcode::LoadLocal),  // 0x10
     Some(Opcode::StoreLocal), // 0x11
@@ -264,9 +285,12 @@ const OPCODE_TABLE: [Option<Opcode>; 256] = [
     N,
     N, // 0x63-0x6F
     // 0x70-0x7F: Objects
-    Some(Opcode::GetField),  // 0x70
-    Some(Opcode::SetField),  // 0x71
-    Some(Opcode::NewObject), // 0x72
+    Some(Opcode::GetField),      // 0x70
+    Some(Opcode::SetField),      // 0x71
+    Some(Opcode::NewObject),     // 0x72
+    Some(Opcode::NewStruct),     // 0x73
+    Some(Opcode::InterfaceBox),  // 0x74
+    Some(Opcode::InterfaceCall), // 0x75
     N,
     N,
     N,
@@ -276,17 +300,16 @@ const OPCODE_TABLE: [Option<Opcode>; 256] = [
     N,
     N,
     N,
-    N,
-    N,
-    N,
-    N, // 0x73-0x7F
-    // 0x80-0x8F: Arrays
+    N, // 0x76-0x7F
+    // 0x80-0x8F: Arrays and tuples
     Some(Opcode::NewArray),  // 0x80
     Some(Opcode::ArrayGet),  // 0x81
     Some(Opcode::ArraySet),  // 0x82
     Some(Opcode::ArrayLen),  // 0x83
     Some(Opcode::ArrayPush), // 0x84
     Some(Opcode::ArrayPop),  // 0x85
+    Some(Opcode::NewTuple),  // 0x86
+    Some(Opcode::TupleSet),  // 0x87
     N,
     N,
     N,
@@ -294,9 +317,7 @@ const OPCODE_TABLE: [Option<Opcode>; 256] = [
     N,
     N,
     N,
-    N,
-    N,
-    N, // 0x86-0x8F
+    N, // 0x88-0x8F
     // 0x90-0x9F: Fiber ops
     Some(Opcode::Spawn),   // 0x90
     Some(Opcode::Yield),   // 0x91
@@ -349,8 +370,9 @@ const OPCODE_TABLE: [Option<Opcode>; 256] = [
     N,
     N, // 0xB2-0xBF
     // 0xC0-0xCF: Type ops
-    Some(Opcode::TypeIs), // 0xC0
-    Some(Opcode::Cast),   // 0xC1
+    Some(Opcode::TypeIs),      // 0xC0
+    Some(Opcode::Cast),        // 0xC1
+    Some(Opcode::InterfaceIs), // 0xC2
     N,
     N,
     N,
@@ -363,8 +385,7 @@ const OPCODE_TABLE: [Option<Opcode>; 256] = [
     N,
     N,
     N,
-    N,
-    N, // 0xC2-0xCF
+    N, // 0xC3-0xCF
     // 0xD0-0xDF: Typed integer arithmetic
     Some(Opcode::IAdd), // 0xD0
     Some(Opcode::ISub), // 0xD1
@@ -401,7 +422,9 @@ const OPCODE_TABLE: [Option<Opcode>; 256] = [
     N,
     N, // 0xEC-0xEF
     // 0xF0-0xFF: System ops
-    Some(Opcode::Print), // 0xF0
+    Some(Opcode::Print),   // 0xF0
+    Some(Opcode::Println), // 0xF1
+    Some(Opcode::Assert),  // 0xF2
     N,
     N,
     N,
@@ -411,10 +434,51 @@ const OPCODE_TABLE: [Option<Opcode>; 256] = [
     N,
     N,
     N,
-    N,
-    N,
-    N,                     // 0xF1-0xFC
+    N,                     // 0xF3-0xFC
     Some(Opcode::Collect), // 0xFD
     Some(Opcode::Syscall), // 0xFE
     Some(Opcode::Halt),    // 0xFF
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::Opcode;
+
+    #[test]
+    fn defined_opcode_bytes_round_trip_and_gaps_are_undefined() {
+        // Keep this independently stated from `OPCODE_TABLE`: adding, moving,
+        // or removing an opcode requires an intentional bytecode-format update.
+        let defined_ranges = [
+            0x00..=0x04,
+            0x10..=0x11,
+            0x20..=0x26,
+            0x30..=0x35,
+            0x40..=0x49,
+            0x50..=0x52,
+            0x60..=0x62,
+            0x70..=0x75,
+            0x80..=0x87,
+            0x90..=0x92,
+            0xA0..=0xA3,
+            0xA5..=0xA5,
+            0xB0..=0xB1,
+            0xC0..=0xC2,
+            0xD0..=0xDB,
+            0xE0..=0xEB,
+            0xF0..=0xF2,
+            0xFD..=0xFF,
+        ];
+
+        for byte in u8::MIN..=u8::MAX {
+            let expected = defined_ranges.iter().any(|range| range.contains(&byte));
+            match (expected, Opcode::from_byte(byte)) {
+                (true, Some(opcode)) => assert_eq!(opcode as u8, byte),
+                (false, None) => {}
+                (true, None) => panic!("defined opcode byte 0x{byte:02X} is missing"),
+                (false, Some(opcode)) => {
+                    panic!("undefined opcode byte 0x{byte:02X} maps to {opcode:?}")
+                }
+            }
+        }
+    }
+}

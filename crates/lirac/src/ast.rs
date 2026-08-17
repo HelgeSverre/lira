@@ -536,3 +536,159 @@ pub enum PatternKind {
     /// Binding pattern with @
     Binding { name: String, pattern: Box<Pattern> },
 }
+
+/// Maximum number of concrete alternatives produced while distributing nested
+/// or-patterns through tuple, constructor, struct, range, and `@` patterns.
+/// This keeps adversarial source from causing exponential compiler work.
+pub const MAX_EXPANDED_OR_PATTERN_ALTERNATIVES: usize = 256;
+
+/// Expand every nested [`PatternKind::Or`] into concrete, or-free patterns.
+/// Code generators use this to test and bind the exact alternative that
+/// matched instead of testing an aggregate OR and destructuring its first arm.
+pub fn expand_or_pattern(pattern: &Pattern) -> Result<Vec<Pattern>, String> {
+    fn extend_product<T: Clone>(
+        product: Vec<Vec<T>>,
+        alternatives: Vec<T>,
+    ) -> Result<Vec<Vec<T>>, String> {
+        let expanded_len = product
+            .len()
+            .checked_mul(alternatives.len())
+            .ok_or_else(|| "or-pattern expansion exceeded the compiler's size limit".to_string())?;
+        if expanded_len > MAX_EXPANDED_OR_PATTERN_ALTERNATIVES {
+            return Err(format!(
+                "or-pattern expands to {expanded_len} alternatives; the limit is {MAX_EXPANDED_OR_PATTERN_ALTERNATIVES}"
+            ));
+        }
+        let mut expanded = Vec::with_capacity(expanded_len);
+        for prefix in product {
+            for alternative in &alternatives {
+                let mut combination = prefix.clone();
+                combination.push(alternative.clone());
+                expanded.push(combination);
+            }
+        }
+        Ok(expanded)
+    }
+
+    fn rebuild(pattern: &Pattern, kind: PatternKind) -> Pattern {
+        Pattern {
+            id: pattern.id,
+            kind,
+            span: pattern.span.clone(),
+        }
+    }
+
+    match &pattern.kind {
+        PatternKind::Or(alternatives) => {
+            let mut expanded = Vec::new();
+            for alternative in alternatives {
+                expanded.extend(expand_or_pattern(alternative)?);
+                if expanded.len() > MAX_EXPANDED_OR_PATTERN_ALTERNATIVES {
+                    return Err(format!(
+                        "or-pattern expands to more than {MAX_EXPANDED_OR_PATTERN_ALTERNATIVES} alternatives"
+                    ));
+                }
+            }
+            Ok(expanded)
+        }
+        PatternKind::Binding {
+            name,
+            pattern: inner,
+        } => expand_or_pattern(inner).map(|alternatives| {
+            alternatives
+                .into_iter()
+                .map(|inner| {
+                    rebuild(
+                        pattern,
+                        PatternKind::Binding {
+                            name: name.clone(),
+                            pattern: Box::new(inner),
+                        },
+                    )
+                })
+                .collect()
+        }),
+        PatternKind::Tuple(elements) => {
+            let mut product = vec![Vec::new()];
+            for element in elements {
+                product = extend_product(product, expand_or_pattern(element)?)?;
+            }
+            Ok(product
+                .into_iter()
+                .map(|elements| rebuild(pattern, PatternKind::Tuple(elements)))
+                .collect())
+        }
+        PatternKind::Constructor { name, fields } => {
+            let mut product = vec![Vec::new()];
+            for field in fields {
+                product = extend_product(product, expand_or_pattern(field)?)?;
+            }
+            Ok(product
+                .into_iter()
+                .map(|fields| {
+                    rebuild(
+                        pattern,
+                        PatternKind::Constructor {
+                            name: name.clone(),
+                            fields,
+                        },
+                    )
+                })
+                .collect())
+        }
+        PatternKind::Struct { name, fields, rest } => {
+            let mut product = vec![Vec::new()];
+            for (field_name, field_pattern) in fields {
+                let alternatives = expand_or_pattern(field_pattern)?
+                    .into_iter()
+                    .map(|alternative| (field_name.clone(), alternative))
+                    .collect();
+                product = extend_product(product, alternatives)?;
+            }
+            Ok(product
+                .into_iter()
+                .map(|fields| {
+                    rebuild(
+                        pattern,
+                        PatternKind::Struct {
+                            name: name.clone(),
+                            fields,
+                            rest: *rest,
+                        },
+                    )
+                })
+                .collect())
+        }
+        PatternKind::Range {
+            start,
+            end,
+            inclusive,
+        } => {
+            let starts = expand_or_pattern(start)?;
+            let ends = expand_or_pattern(end)?;
+            let expanded_len = starts.len().checked_mul(ends.len()).ok_or_else(|| {
+                "or-pattern expansion exceeded the compiler's size limit".to_string()
+            })?;
+            if expanded_len > MAX_EXPANDED_OR_PATTERN_ALTERNATIVES {
+                return Err(format!(
+                    "or-pattern expands to {expanded_len} alternatives; the limit is {MAX_EXPANDED_OR_PATTERN_ALTERNATIVES}"
+                ));
+            }
+            let mut expanded = Vec::with_capacity(expanded_len);
+            for start in starts {
+                for end in &ends {
+                    expanded.push(rebuild(
+                        pattern,
+                        PatternKind::Range {
+                            start: Box::new(start.clone()),
+                            end: Box::new(end.clone()),
+                            inclusive: *inclusive,
+                        },
+                    ));
+                }
+            }
+            Ok(expanded)
+        }
+        _ => Ok(vec![pattern.clone()]),
+    }
+}
