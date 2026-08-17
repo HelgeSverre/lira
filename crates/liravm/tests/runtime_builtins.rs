@@ -255,7 +255,7 @@ fn random_int_full_domain_does_not_overflow() {
     for _ in 0..100 {
         let value = rt.random_int(i64::MIN, i64::MAX);
         assert!(
-            value >= i64::MIN && value <= i64::MAX,
+            (i64::MIN..=i64::MAX).contains(&value),
             "out of range: {value}"
         );
     }
@@ -286,7 +286,7 @@ fn random_int_large_range_stays_bounded() {
     for _ in 0..200 {
         let value = rt.random_int(i64::MAX - 10_000, i64::MAX);
         assert!(
-            value >= i64::MAX - 10_000 && value <= i64::MAX,
+            (i64::MAX - 10_000..=i64::MAX).contains(&value),
             "escaped range: {value}"
         );
     }
