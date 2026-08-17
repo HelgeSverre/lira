@@ -3085,13 +3085,59 @@ fn modulo_mixed_operands_have_vm_native_parity() {
 
 #[test]
 fn time_from_components_has_vm_native_parity_and_fails_closed() {
-    // A valid UTC date yields the same epoch millis on both backends, and an
-    // unrepresentable year fails closed to 0 on both (the native C path used to
-    // have signed-overflow UB for extreme years; the VM used to *silently
-    // truncate* the year to a plausible-but-wrong date — both now agree).
+    // The native C path must agree with the bytecode VM (chrono) on both the
+    // valid dates and every rejected input. It used to diverge in three ways:
+    // signed-overflow UB for extreme years, silently truncating an i64 year,
+    // and `timegm` normalizing invalid dates (e.g. Feb 30 -> Mar 1). Now both
+    // backends share: the chronological year bound, leap-year-aware day
+    // validation, hour/min/sec bounds, and an exact proleptic-Gregorian
+    // day count (native no longer depends on the 32-bit `time_t` window).
     assert_any_parity(
-        "println(time_from_components(2020, 1, 2, 3, 4, 5))\nprintln(time_from_components(-9223372036854775808, 1, 1, 0, 0, 0))",
-        &["1577934245000", "0"],
+        r#"
+        // Valid reference date.
+        println(time_from_components(2020, 1, 2, 3, 4, 5))
+        // Invalid month: 0 and 13 are both rejected.
+        println(time_from_components(2020, 0, 1, 0, 0, 0))
+        println(time_from_components(2020, 13, 1, 0, 0, 0))
+        // Leap year: 2020-02-29 is real; 2021-02-29 and 2020-02-30 are not.
+        println(time_from_components(2020, 2, 29, 0, 0, 0))
+        println(time_from_components(2021, 2, 29, 0, 0, 0))
+        println(time_from_components(2020, 2, 30, 0, 0, 0))
+        // Day out of month range.
+        println(time_from_components(2020, 1, 32, 0, 0, 0))
+        // Hour/minute/second out of day range.
+        println(time_from_components(2020, 1, 1, 24, 0, 0))
+        println(time_from_components(2020, 1, 1, 0, 60, 0))
+        println(time_from_components(2020, 1, 1, 0, 0, 60))
+        // Extreme but chrono-valid years (far outside 32-bit time_t).
+        println(time_from_components(100000, 1, 1, 0, 0, 0))
+        println(time_from_components(-100000, 1, 1, 0, 0, 0))
+        println(time_from_components(262142, 1, 1, 0, 0, 0))
+        println(time_from_components(-262143, 1, 1, 0, 0, 0))
+        // Years just outside the chrono range and an unrepresentable i64 year.
+        println(time_from_components(262143, 1, 1, 0, 0, 0))
+        println(time_from_components(-262144, 1, 1, 0, 0, 0))
+        println(time_from_components(-9223372036854775808, 1, 1, 0, 0, 0))
+        "#,
+        &[
+            "1577934245000",
+            "0",
+            "0",
+            "1582934400000",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "3093527980800000",
+            "-3217862419200000",
+            "8210235340800000",
+            "-8334601228800000",
+            "0",
+            "0",
+            "0",
+        ],
     );
 }
 

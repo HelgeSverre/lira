@@ -117,34 +117,67 @@ LiraArray *lira_rt_time_components(int64_t millis) {
     return parts;
 }
 
+/* Days in `month` (1-12) of `year`, using the proleptic Gregorian leap rule
+ * that chrono uses: leap if (year % 4 == 0 && year % 100 != 0) || year % 400 == 0.
+ * `year` is the astronomical year (chrono's numbering). */
+static int lira_days_in_month(int64_t year, int64_t month) {
+    static const int days[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    if (month < 1 || month > 12) {
+        return -1;
+    }
+    int base = days[month - 1];
+    if (month == 2) {
+        int leap = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+        return base + leap;
+    }
+    return base;
+}
+
 int64_t lira_rt_time_from_components(int64_t year, int64_t month, int64_t day, int64_t hour,
                                      int64_t minute, int64_t second) {
-    struct tm utc;
-    memset(&utc, 0, sizeof(utc));
-    /* Clamp component values into the platform `struct tm` (int) ranges so the
-     * signed `year - 1900` / `month - 1` subtraction and the `(int)` casts
-     * cannot overflow (that would be UB for extreme `year` inputs). Values
-     * outside the representable range fail closed (return 0), matching a
-     * `timegm` failure on an out-of-range date. */
-    if (year < INT64_MIN + 1900 || year > (int64_t)INT_MAX + 1900) {
+    /* Guard the only signed subtraction in this function (`month - 1` inside
+     * lira_days_in_month) against overflow at INT64_MIN; every other component
+     * is validated against concrete bounds below. */
+    if (month == INT64_MIN) {
         return 0;
     }
-    int64_t month_shift = month - 1;
-    if (month < INT64_MIN + 1 || month > (int64_t)INT_MAX + 1) {
+    /* The bytecode VM uses chrono, whose NaiveDate supports years
+     * -262143..=262142; outside that range it rejects the date (returns 0).
+     * Replicate the same bound so the native backend agrees. */
+    if (year < -262143 || year > 262142) {
         return 0;
     }
-    if (day > INT_MAX || day < INT_MIN || hour > INT_MAX || hour < INT_MIN ||
-        minute > INT_MAX || minute < INT_MIN || second > INT_MAX || second < INT_MIN) {
+    /* Reject invalid calendar dates the way chrono does, instead of letting a
+     * normalization routine turn an invalid date such as Feb 30 into a
+     * plausible-but-different date: month must be 1-12, day must be a real day
+     * of that month (leap-year aware), and hour/min/sec must be within the
+     * day. */
+    if (month < 1 || month > 12) {
         return 0;
     }
-    utc.tm_year = (int)(year - 1900);
-    utc.tm_mon = (int)(month_shift);
-    utc.tm_mday = (int)day;
-    utc.tm_hour = (int)hour;
-    utc.tm_min = (int)minute;
-    utc.tm_sec = (int)second;
-    time_t seconds = timegm(&utc);
-    return seconds == (time_t)-1 ? 0 : (int64_t)seconds * 1000;
+    int days = lira_days_in_month(year, month);
+    if (days < 0 || day < 1 || day > days) {
+        return 0;
+    }
+    if (hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59) {
+        return 0;
+    }
+
+    /* Convert the civil date to a day count since 1970-01-01 using the exact
+     * proleptic-Gregorian algorithm (Hinnant's days_from_civil) that chrono
+     * matches. We deliberately do not go through `timegm`: its `time_t` is
+     * only 32 bits wide on many platforms, so extreme but valid chrono years
+     * (e.g. -100000) would be unrepresentable and would collapse to 0. */
+    int64_t shifted = year - (month <= 2 ? 1 : 0);
+    int64_t era = (shifted >= 0 ? shifted : shifted - 399) / 400;
+    unsigned yoe = (unsigned)(shifted - era * 400); /* [0, 399] */
+    unsigned month_index = (unsigned)(month + (month > 2 ? -3 : 9));
+    unsigned doy = (153 * month_index + 2) / 5 + (unsigned)day - 1; /* [0, 365] */
+    unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;          /* [0, 146096] */
+    int64_t days_since_epoch = era * 146097 + (int64_t)doe - 719468;
+
+    int64_t seconds = days_since_epoch * 86400 + hour * 3600 + minute * 60 + second;
+    return seconds * 1000;
 }
 
 /* strftime with the caller's format, on the UTC breakdown of `millis`. */

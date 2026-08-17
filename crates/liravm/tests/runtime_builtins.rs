@@ -308,14 +308,52 @@ fn time_from_components_utc_millis_and_fail_closed() {
         0,
         "an unrepresentable year must fail closed"
     );
+    // Month, day, hour, minute, and second bounds are enforced like the
+    // native backend (the native C path used to let timegm normalize these).
+    for invalid in [
+        (2020i64, 0i64, 1i64, 0i64, 0i64, 0i64), // month 0
+        (2020, 13, 1, 0, 0, 0),                  // month 13
+        (2021, 2, 29, 0, 0, 0),                  // non-leap Feb 29
+        (2020, 2, 30, 0, 0, 0),                  // impossible Feb 30
+        (2020, 4, 31, 0, 0, 0),                  // April 31
+        (2020, 1, 32, 0, 0, 0),                  // Jan 32
+        (2020, 1, 1, 24, 0, 0),                  // hour 24
+        (2020, 1, 1, 0, 60, 0),                  // minute 60
+        (2020, 1, 1, 0, 0, 60),                  // second 60
+    ] {
+        assert_eq!(
+            rt.time_from_components(
+                invalid.0, invalid.1, invalid.2, invalid.3, invalid.4, invalid.5
+            ),
+            0,
+            "invalid date must fail closed: {invalid:?}"
+        );
+    }
+    // Leap year: 2020-02-29 is a real date.
     assert_eq!(
-        rt.time_from_components(2020, 0, 1, 0, 0, 0),
-        0,
-        "an invalid month must fail closed"
+        rt.time_from_components(2020, 2, 29, 0, 0, 0),
+        1_582_934_400_000,
+        "2020-02-29 is valid (leap year)"
+    );
+    // chrono (NaiveDate) year bounds: -262143..=262142 inclusive.
+    assert_eq!(
+        rt.time_from_components(262142, 1, 1, 0, 0, 0),
+        8_210_235_340_800_000,
+        "262142 is the upper chrono year bound"
     );
     assert_eq!(
-        rt.time_from_components(2020, 1, 32, 0, 0, 0),
+        rt.time_from_components(262143, 1, 1, 0, 0, 0),
         0,
-        "an invalid day must fail closed"
+        "262143 is outside the chrono year range"
+    );
+    assert_eq!(
+        rt.time_from_components(-262143, 1, 1, 0, 0, 0),
+        -8_334_601_228_800_000,
+        "-262143 is the lower chrono year bound"
+    );
+    assert_eq!(
+        rt.time_from_components(-262144, 1, 1, 0, 0, 0),
+        0,
+        "-262144 is outside the chrono year range"
     );
 }
