@@ -2,10 +2,8 @@
 // Deterministic tests for std.io. Time-based helpers (now_ms) are tested
 // for monotonic/structural properties only, never absolute values.
 //
-// NOTE: the VM has a single Print opcode, so under run_with_capture both
-// print()/print_str() and println()/print_line() yield ONE output entry per
-// call (no in-line concatenation is observable in capture mode). Tests below
-// therefore assert one logical line per call.
+// Core print()/print_str() are newline-free; println()/print_line() terminate
+// the current logical line. Capture mode preserves the same stream boundaries.
 // @expect-contains: line one
 // @expect-contains: part-1
 // @expect-contains: part-2
@@ -23,7 +21,7 @@ println("=== I/O Module Tests ===")
 // print_line writes a line
 print_line("line one")
 
-// print_str: in capture mode each call is its own captured entry
+// print_str concatenates adjacent writes until a later newline.
 print_str("part-1")
 print_str("part-2")
 

@@ -10,7 +10,9 @@
 // @expect-contains: auto gc complete
 
 fn make_cycle(seed: int) -> int {
-    var node = [seed]
+    // The element type is intentionally dynamic: this array contains both the
+    // integer seed and an array reference to itself.
+    var node: [any] = [seed]
     push(node, node) // node[1] == node -> reference cycle
     return len(node)
 }

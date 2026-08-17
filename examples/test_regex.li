@@ -4,6 +4,7 @@
 // @expect-contains: replace test passed
 // @expect-contains: split test passed
 // @expect-contains: email test passed
+// @expect-contains: unicode test passed
 
 import std.regex
 
@@ -18,6 +19,12 @@ if regex_match("hello", "hello world") {
 let found = regex_find("[0-9]+", "abc123def456")
 if found == "123" {
     println("find test passed")
+}
+
+// Rust regex provides Unicode scalar and property semantics consistently in
+// the VM, AOT, and JIT native runtimes.
+if regex_match("^\\p{L}+$", "café") && regex_find("\\p{L}+", "123 café") == "café" {
+    println("unicode test passed")
 }
 
 // Test regex_find_all

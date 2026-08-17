@@ -1,5 +1,10 @@
 // Standard Library Demo
 // Demonstrates patterns from stdlib/ (import system pending Phase 7)
+// @expect-contains: abs(-5): 5
+// @expect-contains: Write successful: true
+// @expect-contains: Hello from stdlib demo!
+// @expect-contains: Sum 0..9999 = 49995000
+// @expect-contains: === All Demos Passed ===
 
 println("=== Core Utilities Demo ===")
 

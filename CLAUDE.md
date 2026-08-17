@@ -15,7 +15,7 @@ just test           # Run all tests (unit + integration)
 just test-verbose   # Run tests with output
 just run <file.li>  # Compile and run a .li file on the bytecode VM
 just build-native <file.li> <out>  # Compile a .li file to a native executable
-just jit <file.li>  # Compile to native code and run it in-process
+just jit <file.li>  # Compile to native code and run it in an isolated worker
 just check          # Type check without building
 just clippy         # Run Rust linter
 just fmt            # Format Rust code
@@ -81,14 +81,16 @@ the bytecode VM.
 - `layout.rs` - Struct/enum memory layout (offsets, alignment)
 - `abi.rs` - Lira types → Cranelift machine types
 - `lower.rs` - AST → Cranelift IR
-- `jit.rs` / `aot.rs` - In-memory execution / standalone executables
+- `jit.rs` / `aot.rs` - JIT lowering / standalone executables
 - `runtime/` - `liblira_rt`: allocator, strings, arrays, fiber scheduler,
   channels, and the x86-64/AArch64 context switch
 
 Entry points:
 
 - `build_native()` - Compile to a standalone executable (`lira build`)
-- `jit_run()` - Compile in memory and run (`lira jit`)
+- `jit_run()` - Compile and run in an isolated worker (`lira jit`)
+- `jit_run_in_process()` - Trusted-only in-process JIT API
+- `jit_run_isolated()` - Explicit isolated-worker API
 
 The backend is deliberately partial: constructs it cannot lower are reported as
 errors rather than mis-compiled, and those programs still run under `lira run`.

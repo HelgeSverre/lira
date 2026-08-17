@@ -2,6 +2,7 @@
 name = "liravm"
 version = "0.1.0"
 edition = "2021"
+rust-version.workspace = true
 description = "Lira Virtual Machine - executes .lic bytecode files"
 license = "MIT"
 
@@ -20,11 +21,11 @@ chrono = "0.4"
 dirs = "6"
 hex = "0.4"
 md-5 = "0.11"
-regex = "1"
-serde_json = "1"
+regex.workspace = true
+serde_json.workspace = true
 sha1 = "0.11"
 sha2 = "0.11"
-ureq = "3"
+ureq.workspace = true
 uuid = { version = "1", features = ["v4", "v7"] }
 getrandom = "0.2"
 # `unstable-stats` exposes `gc::stats()` (live-heap accounting, used to assert

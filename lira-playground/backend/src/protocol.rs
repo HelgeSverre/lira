@@ -422,6 +422,9 @@ pub enum ValueJson {
     Array {
         elements: Vec<ValueJson>,
     },
+    Tuple {
+        elements: Vec<ValueJson>,
+    },
     Object {
         fields: std::collections::HashMap<String, ValueJson>,
     },
@@ -445,36 +448,7 @@ pub enum ValueJson {
 impl ValueJson {
     /// Convert a VM Value to ValueJson
     pub fn from_value(value: &Value) -> Self {
-        match value {
-            Value::Null => ValueJson::Null,
-            Value::Bool(b) => ValueJson::Bool { value: *b },
-            Value::Int(n) => ValueJson::Int { value: *n },
-            Value::Float(f) => ValueJson::Float { value: *f },
-            Value::String(s) => ValueJson::String {
-                value: (**s).clone(),
-            },
-            Value::Array(arr) => {
-                let elements = arr.borrow().iter().map(ValueJson::from_value).collect();
-                ValueJson::Array { elements }
-            }
-            Value::Object(obj) => {
-                let fields = obj
-                    .borrow()
-                    .iter()
-                    .map(|(k, v)| (k.clone(), ValueJson::from_value(v)))
-                    .collect();
-                ValueJson::Object { fields }
-            }
-            Value::Function(offset) => ValueJson::Function {
-                code_offset: *offset,
-            },
-            Value::Closure(c) => ValueJson::Closure {
-                code_offset: c.code_offset,
-                captures: c.captures.iter().map(ValueJson::from_value).collect(),
-            },
-            Value::Fiber(id) => ValueJson::Fiber { id: *id },
-            Value::Channel(id) => ValueJson::Channel { id: *id },
-        }
+        Self::from_rich_value(&RichValue::from_value(value))
     }
 
     /// Convert a RichValue to ValueJson
@@ -486,6 +460,9 @@ impl ValueJson {
             RichValue::Float(f) => ValueJson::Float { value: *f },
             RichValue::String(s) => ValueJson::String { value: s.clone() },
             RichValue::Array(elements) => ValueJson::Array {
+                elements: elements.iter().map(ValueJson::from_rich_value).collect(),
+            },
+            RichValue::Tuple(elements) => ValueJson::Tuple {
                 elements: elements.iter().map(ValueJson::from_rich_value).collect(),
             },
             RichValue::Object(fields) => ValueJson::Object {

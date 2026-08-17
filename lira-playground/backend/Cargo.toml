@@ -2,6 +2,7 @@
 name = "lira-playground"
 version = "0.1.0"
 edition = "2021"
+rust-version.workspace = true
 description = "Web server for Lira Playground - compile and run Lira code in the browser"
 license = "MIT"
 

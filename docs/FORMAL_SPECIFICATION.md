@@ -393,7 +393,10 @@ interface_decl = "interface" , identifier , "{" , { interface_method } , "}" ;
 interface_method = "fn" , identifier , "(" , [ parameters ] , ")" , [ "->" , type_expr ] ;
 ```
 
-**Semantics**: Structural subtyping contract (duck typing).
+**Semantics**: Structural compatibility contract. The current parser accepts no
+generic parameter list, associated-type declaration, variance annotation, or
+method body in an interface. Parameter default expressions are allowed by the
+shared parameter grammar and are part of the method's compatibility contract.
 
 #### 3.2.10 Type Aliases
 
@@ -557,7 +560,7 @@ Primitive ::= int | int8 | int16 | int32 | int64
             | uint8 | uint16 | uint32 | uint64
             | float | bool | string | char | void
 
-Compound ::= Array<T> | Tuple<T₁, ..., Tₙ> | Map<K, V>
+Compound ::= [T] | Tuple<T₁, ..., Tₙ> | Map<K, V>
            | Optional<T> | Result<T, E> | Function<P, R>
 
 UserDefined ::= Struct(name) | Class(name) | Enum(name)
@@ -583,6 +586,11 @@ Special ::= Any | Never | Unknown | TypeParam(name) | Self
 | `char` | 4 | Unicode scalar |
 
 ### 4.3 Type Compatibility
+
+String indexing uses a zero-based Unicode scalar index and produces a
+one-character `string`. A negative index or an index past the final scalar is a
+runtime error. This is distinct from a `char` literal, whose value is a Unicode
+scalar code point.
 
 **Definition**: Type τ₁ is compatible with type τ₂ (written τ₁ ~ τ₂) if values of τ₁ can be used where τ₂ is expected.
 
@@ -610,6 +618,21 @@ Optional<τ₁> ~ Optional<τ₂>  ⟺  τ₁ ~ τ₂
 (* Result types *)
 Result<τ₁, ε₁> ~ Result<τ₂, ε₂>  ⟺  τ₁ ~ τ₂ ∧ ε₁ ~ ε₂
 
+(* Mutable containers are invariant to prevent unsound aliases *)
+ [τ₁] ~ [τ₂]  ⟺  τ₁ = τ₂
+Channel<τ₁> ~ Channel<τ₂>  ⟺  τ₁ ~ τ₂ ∧ τ₂ ~ τ₁
+Map<κ₁, τ₁> ~ Map<κ₂, τ₂>  ⟺
+    κ₁ ~ κ₂ ∧ κ₂ ~ κ₁ ∧ τ₁ ~ τ₂ ∧ τ₂ ~ τ₁
+
+(* Tuple positions are checked element-by-element *)
+(τ₁, ..., τₙ) ~ (σ₁, ..., σₙ)  ⟺  ∀i. τᵢ ~ σᵢ
+
+An array literal may initialize an explicitly annotated array when each
+literal element is compatible with the annotation. This is construction of a
+new mutable value; an existing array value cannot be assigned across element
+types. An explicitly typed `[Animal]` may receive a `Dog` element when `Dog` is
+compatible with `Animal`.
+
 (* Numeric coercion *)
 int ~ float
 float ~ int
@@ -618,6 +641,11 @@ IntegerType ~ float
 
 (* Function types *)
 fn(P₁) → R₁ ~ fn(P₂) → R₂  ⟺  P₁ ~ P₂ ∧ R₁ ~ R₂
+
+(* Structural interfaces *)
+τ ~ Interface(I)  ⟺  every method required by I occurs on τ with a compatible
+                         receiver-stripped signature and default-parameter mask
+Interface(I₁) ~ Interface(I₂)  ⟺  I₁'s required methods satisfy I₂'s contract
 ```
 
 ### 4.4 Subtyping
@@ -626,8 +654,10 @@ fn(P₁) → R₁ ~ fn(P₂) → R₂  ⟺  P₁ ~ P₂ ∧ R₁ ~ R₂
 (* Class inheritance *)
 class B extends A  ⟹  B <: A
 
-(* Interface implementation *)
-class C : I  ⟹  C <: I
+(* Explicit class interface declarations are validated using the same
+   structural method relation; they do not make an otherwise incompatible
+   type compatible. *)
+class C : I  ⟹  C satisfies Interface(I)
 
 (* Trait implementation *)
 impl T for S  ⟹  S <: T  (* for trait bounds *)
@@ -959,8 +989,7 @@ fn print(value: any) -> void
 fn println(value: any) -> void
     (* Writes string representation to stdout with newline *)
 
-fn len<T>(collection: T) -> int
-    where T: Sized
+fn len(collection: any) -> int
     (* Returns number of elements *)
 
 fn assert(condition: bool) -> void
@@ -968,6 +997,16 @@ fn assert(condition: bool) -> void
     requires: condition = true
     ensures: returns normally
 ```
+
+The string representation written by `print` and `println` is deterministic:
+arrays use `[a, b]`, tuples use `(a, b)` (with `(a,)` for a singleton), and
+maps, structs, classes, enum values, and `Result` values use `{key: value}`
+with fields ordered lexicographically by key. Recursive aggregates are rendered
+to a bounded depth and use `...` at a cycle or depth boundary. Opaque runtime
+handles do not expose backend addresses or scheduler ids: functions and
+closures render as `<function>`, channels as `<channel>`, and fibers as
+`<fiber>`. Rendering one value beyond 8 MiB fails instead of emitting partial
+or silently truncated output.
 
 ### 8.2 Collection Contracts
 

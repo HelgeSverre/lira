@@ -1,0 +1,25 @@
+// Deterministic CPU-bound workload for comparing the bytecode VM with the
+// Cranelift JIT and AOT backends. The hot loop performs no allocation or I/O;
+// the single checksum guards against optimizing the work away or comparing
+// programs with different semantics.
+// @expect: 4345129
+
+fn scramble(seed: int, rounds: int) -> int {
+    var x = seed
+    var sum = 0
+    var i = 0
+    while i < rounds {
+        x = (x * 31 + 17) % 1000003
+        sum = (sum + x) % 1000000007
+        i = i + 1
+    }
+    return sum
+}
+
+var checksum = 0
+var seed = 1
+while seed <= 4 {
+    checksum = checksum + scramble(seed, 1000000)
+    seed = seed + 1
+}
+println(checksum)

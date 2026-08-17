@@ -17,6 +17,7 @@ export type Value =
   | { type: 'Float'; value: number }
   | { type: 'String'; value: string }
   | { type: 'Array'; elements: Value[] }
+  | { type: 'Tuple'; elements: Value[] }
   | { type: 'Object'; fields: Record<string, Value> }
   | { type: 'Function'; codeOffset: number }
   | { type: 'Closure'; codeOffset: number; captures: Value[] }
@@ -129,6 +130,10 @@ export function formatValue(value: Value): string {
     case 'Float': return String(value.value);
     case 'String': return `"${value.value}"`;
     case 'Array': return `[${value.elements.map(formatValue).join(', ')}]`;
+    case 'Tuple': {
+      const elements = value.elements.map(formatValue).join(', ');
+      return `(${elements}${value.elements.length === 1 ? ',' : ''})`;
+    }
     case 'Object': {
       const fields = Object.entries(value.fields)
         .map(([k, v]) => `${k}: ${formatValue(v)}`)
@@ -151,6 +156,7 @@ export function getValueTypeName(value: Value): string {
     case 'Float': return 'float';
     case 'String': return 'string';
     case 'Array': return 'array';
+    case 'Tuple': return 'tuple';
     case 'Object': return 'object';
     case 'Function': return 'function';
     case 'Closure': return 'closure';

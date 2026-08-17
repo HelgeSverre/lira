@@ -182,10 +182,10 @@ let empty: string = ""
 
 ```li
 let s = "Hello"
-s.length          // 5 (byte count)
+s.len()           // 5 (byte count)
 s.char_count      // 5 (character count)
 s.is_empty        // false
-s[0]              // 'H' (by byte index, returns char)
+s[0]              // "H" (by Unicode scalar index, returns a one-character string)
 s.chars()         // Iterator over characters
 s.bytes()         // Iterator over bytes
 s + " World"      // Concatenation
@@ -230,47 +230,30 @@ fn handle(value: Result<int, string>) -> int {
 
 ## 3. Compound Types
 
-### 3.1 List Type
+### 3.1 Array Type
 
-`List<T>` is a dynamic array of elements of type `T`:
+`[T]` is a mutable, dynamically sized array whose elements have type `T`:
 
 ```li
-let numbers: List<int> = [1, 2, 3, 4, 5]
-let empty: List<string> = []
-let inferred = [1.0, 2.0, 3.0]  // List<float>
+let numbers: [int] = [1, 2, 3, 4, 5]
+let empty: [string] = []
+let inferred = [1.0, 2.0, 3.0]  // [float]
 ```
 
-#### List Operations
+#### Array Operations
 
 ```li
-let mut list = [1, 2, 3]
+var list: [int] = [1, 2, 3]
 
 // Access
 list[0]                // 1
-list.first             // 1?
-list.last              // 3?
-list.length            // 3
+list.len()             // 3
 
-// Modification (requires mut)
+// Modification (requires a mutable `var` binding)
 list.push(4)           // [1, 2, 3, 4]
 list.pop()             // 4, list is [1, 2, 3]
-list.insert(0, 0)      // [0, 1, 2, 3]
-list.remove(0)         // 0, list is [1, 2, 3]
-list.clear()           // []
-
 // Iteration
 for item in list { }
-for (i, item) in list.enumerate() { }
-
-// Functional
-list.map(|x| x * 2)
-list.filter(|x| x > 0)
-list.reduce(0, |a, b| a + b)
-
-// Slicing
-list[1..3]             // Elements 1 and 2
-list[..2]              // First 2 elements
-list[1..]              // All except first
 ```
 
 ### 3.2 Map Type
@@ -289,7 +272,7 @@ let empty: Map<int, string> = {}
 #### Map Operations
 
 ```li
-let mut map = { "a": 1, "b": 2 }
+var map = { "a": 1, "b": 2 }
 
 // Access
 map["a"]               // 1?
@@ -307,7 +290,7 @@ map.contains_key("a")  // bool
 map.keys()             // Iterator<string>
 map.values()           // Iterator<int>
 map.entries()          // Iterator<(string, int)>
-map.length             // int
+map.len()               // int
 
 // Iteration
 for (key, value) in map { }
@@ -332,7 +315,7 @@ let m: Map<int, int> = {1: 2}      // Map (has colons)
 #### Set Operations
 
 ```li
-let mut set = {1, 2, 3}
+var set = {1, 2, 3}
 
 // Modification
 set.add(4)             // true if new
@@ -341,7 +324,7 @@ set.clear()
 
 // Queries
 set.contains(2)        // bool
-set.length             // int
+set.len()               // int
 set.is_empty           // bool
 
 // Set operations
@@ -443,7 +426,7 @@ let opt: int? = 42
 let a = opt!           // int (or panic)
 
 // Optional chaining
-let len = opt?.to_string().length  // int?
+let len = opt?.to_string().len()   // int?
 
 // Null coalescing
 let b = opt ?? 0       // int (default if null)
@@ -499,11 +482,11 @@ let s: string = "hello"  // Cannot be null
 let n: string? = null    // Can be null
 
 // s = null             // ERROR: Cannot assign null to non-optional
-// let len = n.length   // ERROR: Cannot access member on optional
+// let len = n.len()      // ERROR: Cannot access member on optional
 
 // Must unwrap first
 if let value = n {
-    let len = value.length  // OK
+    let len = value.len()   // OK
 }
 ```
 
@@ -683,12 +666,12 @@ Interfaces define contracts for behavior:
 
 ```li
 interface Drawable {
-    fn draw(this, ctx: GraphicsContext)
-    fn bounds(this) -> Rect
+    fn draw(ctx: GraphicsContext)
+    fn bounds() -> Rect
 }
 
 interface Named {
-    fn name(this) -> string
+    fn name() -> string
 }
 
 // Multiple interface implementation
@@ -696,58 +679,51 @@ class Button : Drawable, Named {
     let label: string
     let rect: Rect
 
-    fn draw(this, ctx: GraphicsContext) {
-        ctx.fill_rect(this.rect, Color.Gray)
-        ctx.draw_text(this.label, this.rect.center())
+    fn draw(self, ctx: GraphicsContext) {
+        ctx.fill_rect(self.rect, Color.Gray)
+        ctx.draw_text(self.label, self.rect.center())
     }
 
-    fn bounds(this) -> Rect {
-        return this.rect
+    fn bounds(self) -> Rect {
+        return self.rect
     }
 
-    fn name(this) -> string {
-        return this.label
+    fn name(self) -> string {
+        return self.label
     }
 }
 ```
 
-#### Interface Default Methods
+#### Interface method declarations
 
 ```li
 interface Comparable {
-    fn compare(this, other: Self) -> int
-
-    // Default implementation
-    fn less_than(this, other: Self) -> bool {
-        return this.compare(other) < 0
-    }
-
-    fn greater_than(this, other: Self) -> bool {
-        return this.compare(other) > 0
-    }
-
-    fn equals(this, other: Self) -> bool {
-        return this.compare(other) == 0
-    }
+    fn compare(other: Self) -> int
 }
 ```
 
-#### Structural Subtyping
+Interface declarations contain signatures only. The parser has no generic
+interface parameter list, associated types, variance annotations, or default
+method bodies. Parameter defaults may appear in a signature and participate in
+structural compatibility.
 
-Interfaces use structural subtyping - any type that implements the required methods is compatible:
+#### Structural compatibility
+
+Interfaces use structural compatibility: any type with the required instance
+methods and compatible receiver-stripped signatures is compatible:
 
 ```li
 interface HasLength {
-    fn length(this) -> int
+    fn len() -> int
 }
 
 // string implicitly implements HasLength
 fn print_length(item: HasLength) {
-    print("Length: ${item.length()}")
+    print("Length: ${item.len()}")
 }
 
-print_length("hello")     // Works: string has length()
-print_length([1, 2, 3])   // Works: List has length()
+print_length("hello")     // Works: string has len()
+print_length([1, 2, 3])   // Works: [int] has len()
 ```
 
 ### 5.5 Traits
@@ -814,11 +790,11 @@ trait Ord: Eq {
 ```li
 // Interface: structural subtyping
 interface HasLength {
-    fn length(self) -> int
+    fn len(self) -> int
 }
 
-fn print_len(x: HasLength) { print(x.length()) }
-print_len("hello")  // Works: string has length()
+fn print_len(x: HasLength) { print(x.len()) }
+print_len("hello")  // Works: string has len()
 
 // Trait: nominal subtyping
 trait Serializable {
@@ -858,7 +834,7 @@ impl string {
     }
 
     /// Split by delimiter
-    fn split(self, delimiter: string) -> List<string> {
+    fn split(self, delimiter: string) -> [string] {
         return __builtin_string_split(self, delimiter)
     }
 
@@ -879,7 +855,7 @@ print("".is_empty())         // true
 #### Generic Inherent Impl
 
 ```li
-impl<T> List<T> {
+impl<T> [T] {
     fn is_empty(self) -> bool {
         return self.len() == 0
     }
@@ -893,16 +869,16 @@ impl<T> List<T> {
         return if n > 0 { self[n - 1] } else { null }
     }
 
-    fn map<U>(self, f: fn(T) -> U) -> List<U> {
-        var result: List<U> = []
+    fn map<U>(self, f: fn(T) -> U) -> [U] {
+        var result: [U] = []
         for item in self {
             result.push(f(item))
         }
         return result
     }
 
-    fn filter(self, predicate: fn(T) -> bool) -> List<T> {
-        var result: List<T> = []
+    fn filter(self, predicate: fn(T) -> bool) -> [T] {
+        var result: [T] = []
         for item in self {
             if predicate(item) {
                 result.push(item)
@@ -956,9 +932,9 @@ impl Clone for string {
 #### Generic Trait Impl
 
 ```li
-// Implement Eq for all Lists where element type is Eq
-impl<T: Eq> Eq for List<T> {
-    fn eq(self, other: List<T>) -> bool {
+// Implement Eq for all arrays where element type is Eq
+impl<T: Eq> Eq for [T] {
+    fn eq(self, other: [T]) -> bool {
         if self.len() != other.len() {
             return false
         }
@@ -1046,7 +1022,7 @@ let v = c.into_value()  // Consuming method (c is invalid after)
 
 ```li
 // Only implement for types where T: Debug
-impl<T: Debug> List<T> {
+impl<T: Debug> [T] {
     fn debug_print(self) {
         print("[")
         for (i, item) in self.enumerate() {
@@ -1183,8 +1159,8 @@ fn swap<T>(a: T, b: T) -> (T, T) {
     return (b, a)
 }
 
-fn first<T>(items: List<T>) -> T? {
-    return if items.length > 0 { items[0] } else { null }
+fn first<T>(items: [T]) -> T? {
+    return if items.len() > 0 { items[0] } else { null }
 }
 
 // Usage (type inferred)
@@ -1210,7 +1186,7 @@ struct Pair<T, U> {
 }
 
 class Stack<T> {
-    priv var items: List<T> = []
+    priv var items: [T] = []
 
     pub fn push(this mut, item: T) {
         this.items.push(item)
@@ -1221,7 +1197,7 @@ class Stack<T> {
     }
 
     pub fn is_empty(this) -> bool {
-        return this.items.length == 0
+        return this.items.len() == 0
     }
 }
 ```
@@ -1232,7 +1208,7 @@ Constrain type parameters with interface bounds:
 
 ```li
 // Single constraint
-fn print_all<T: ToString>(items: List<T>) {
+fn print_all<T: ToString>(items: [T]) {
     for item in items {
         print(item.to_string())
     }
@@ -1246,7 +1222,7 @@ fn compare_and_print<T: Comparable + ToString>(a: T, b: T) {
 }
 
 // Where clause for complex constraints
-fn process<K, V>(map: Map<K, V>) -> List<V>
+fn process<K, V>(map: Map<K, V>) -> [V]
     where K: Hash + Eq,
           V: Clone
 {
@@ -1254,57 +1230,28 @@ fn process<K, V>(map: Map<K, V>) -> List<V>
 }
 ```
 
-### 7.4 Associated Types
+### 7.4 Interface bounds and limitations
+
+An interface can be used as a bound on a generic function, but the interface
+itself is not generic:
 
 ```li
-interface Iterator {
-    type Item
-
-    fn next(this mut) -> Self.Item?
-    fn has_next(this) -> bool
+interface Printable {
+    fn to_string(self) -> string
 }
 
-class RangeIterator : Iterator {
-    type Item = int
-
-    var current: int
-    let end: int
-
-    fn next(this mut) -> int? {
-        if this.current < this.end {
-            let value = this.current
-            this.current += 1
-            return value
-        }
-        return null
-    }
-
-    fn has_next(this) -> bool {
-        return this.current < this.end
+fn print_all<T: Printable>(items: [T]) {
+    for item in items {
+        print(item.to_string())
     }
 }
 ```
 
-### 7.5 Variance
-
-Lira uses declaration-site variance annotations:
-
-```li
-// Covariant: can use subtype where supertype expected
-interface Producer<out T> {
-    fn produce(this) -> T
-}
-
-// Contravariant: can use supertype where subtype expected
-interface Consumer<in T> {
-    fn consume(this, value: T)
-}
-
-// Invariant: must be exact type (default)
-class Container<T> {
-    var value: T
-}
-```
+The current type system has no declaration-site variance model. In particular,
+there are no `out`/`in` interface parameters, no associated types, and no
+interface default bodies. Generic structs, classes, enums, functions, and
+`impl` blocks are separate features; their type arguments are checked by the
+ordinary compatibility rules.
 
 ---
 
@@ -1317,11 +1264,11 @@ class Container<T> {
 let x = 42              // int
 let y = 3.14            // float
 let z = "hello"         // string
-let items = [1, 2, 3]   // List<int>
+let items = [1, 2, 3]   // [int]
 let empty = []          // ERROR: Cannot infer element type
 
 // Explicit when needed
-let empty: List<int> = []
+let empty: [int] = []
 let zero: float = 0     // Without annotation, would be int
 ```
 
@@ -1384,10 +1331,10 @@ Lira uses bidirectional type inference:
 let x = 42
 
 // Backward inference (from expected type)
-let y: List<int> = []
+let y: [int] = []
 
 // Combined inference
-let items: List<_> = [1, 2, 3]  // _ = int inferred
+let items: [_] = [1, 2, 3]  // _ = int inferred
 
 // Flow-sensitive typing
 let maybe: int? = get_value()
@@ -1418,11 +1365,11 @@ let animal: Animal = Dog.new()  // OK: Dog is subtype of Animal
 
 ```li
 interface Printable {
-    fn print(this)
+    fn print()
 }
 
 class Document {
-    fn print(this) { /* ... */ }
+    fn print(self) { /* ... */ }
 }
 
 // Document is compatible with Printable (structural match)
@@ -1551,7 +1498,7 @@ any (top type)
 ├── char
 ├── string
 ├── void
-├── List<T>
+├── [T]
 ├── Map<K, V>
 ├── Set<T>
 ├── (T, U, ...) (tuples)
@@ -1578,7 +1525,7 @@ never (bottom type)
 | `int64`, `uint64`, `float64` | 8 bytes              | 8 bytes             |
 | `char`                       | 4 bytes              | 4 bytes             |
 | `string`                     | 16 bytes (reference) | 8 bytes             |
-| `List<T>`                    | 24 bytes (reference) | 8 bytes             |
+| `[T]`                        | 24 bytes (reference) | 8 bytes             |
 | `Map<K,V>`                   | 24 bytes (reference) | 8 bytes             |
 | Class reference              | 8 bytes              | 8 bytes             |
 | Struct                       | sum of fields        | max field alignment |

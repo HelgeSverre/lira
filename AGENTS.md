@@ -236,7 +236,7 @@ Lira is implemented as a Rust Cargo workspace. The language source files use the
 - Editor support for VS Code, Zed, Neovim/Vim, Helix, and IntelliJ IDEA.
 - A standard library under `stdlib/` and example programs under `examples/`.
 
-The project is MIT licensed and targets Rust 1.70+.
+The project is MIT licensed and targets Rust 1.94+.
 
 ## Technology stack
 

@@ -54,7 +54,7 @@ build-native file out="a.out":
     cargo build --package lira --release
     ./target/release/lira build {{ file }} -o {{ out }}
 
-# Compile a Lira file to native code and run it in-process
+# Compile a Lira file to native code and run it in an isolated worker
 [group('dev')]
 jit file:
     cargo build --package lira --release

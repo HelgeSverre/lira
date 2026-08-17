@@ -77,6 +77,7 @@ export type ValueJson =
   | { type: 'Float'; value: number }
   | { type: 'String'; value: string }
   | { type: 'Array'; elements: ValueJson[] }
+  | { type: 'Tuple'; elements: ValueJson[] }
   | { type: 'Object'; fields: Record<string, ValueJson> }
   | { type: 'Function'; codeOffset: number }
   | { type: 'Closure'; codeOffset: number; captures: ValueJson[] }

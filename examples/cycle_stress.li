@@ -14,7 +14,9 @@
 
 fn build_self_cycle(seed: int) -> int {
     // A fresh array that contains itself: node -> node.
-    var node = [seed]
+    // The element type is intentionally dynamic: this array contains both the
+    // integer seed and an array reference to itself.
+    var node: [any] = [seed]
     push(node, node)
     // Return something derived from it so the work isn't optimized away.
     return len(node)
@@ -22,8 +24,9 @@ fn build_self_cycle(seed: int) -> int {
 
 fn build_mutual_cycle(seed: int) -> int {
     // Two arrays that reference each other: a -> b -> a.
-    var a = [seed]
-    var b = [seed + 1]
+    // Mutual cycles likewise require the opt-in heterogeneous representation.
+    var a: [any] = [seed]
+    var b: [any] = [seed + 1]
     push(a, b)
     push(b, a)
     return len(a) + len(b)

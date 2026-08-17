@@ -1,6 +1,6 @@
 # Lira
 
-[![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/rust-1.94%2B-orange.svg)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.md)
 [![Build](https://img.shields.io/badge/build-passing-brightgreen.svg)]()
 
@@ -19,7 +19,7 @@ A modern systems programming language with Go-like fiber concurrency, pattern ma
 
 ### Prerequisites
 
-- **Rust** 1.70+ ([install](https://rustup.rs/))
+- **Rust** 1.94+ ([install](https://rustup.rs/))
 - **just** command runner ([install](https://github.com/casey/just#installation))
 
 ### Setup
@@ -49,14 +49,14 @@ fn main() {
 
 ### Two backends
 
-The same front end feeds two backends. The bytecode VM is the complete
-implementation and starts instantly; the Cranelift backend emits unboxed machine
+The same front end feeds two backends. The bytecode VM is the reference
+interpreter and starts instantly; the Cranelift backend emits unboxed machine
 code and a standalone binary.
 
 ```bash
 lira run hello.li              # bytecode VM
 lira build hello.li -o hello   # standalone native executable
-lira jit hello.li              # native code, compiled and run in-process
+lira jit hello.li              # native code, compiled and run in an isolated worker
 ```
 
 Because Lira is statically typed, native code carries no tags: an `int` is an
@@ -65,12 +65,14 @@ is a compare against the discriminant. Fibers keep working — each one gets its
 own guarded stack and switches through a hand-written context switch, so
 `spawn` and channels behave the same as on the VM.
 
-The native backend is deliberately partial: what it cannot lower yet — chiefly
-the `json`/`regex`/`http` builtins — is reported as an error rather than
-mis-compiled, and those programs still run under `lira run`. 100 of the 124
-examples compile natively with byte-identical output to the VM. Note that
-natively compiled programs do not yet reclaim memory. See
-[docs/60-native-backend.md](docs/60-native-backend.md).
+Native coverage is checked by
+`every_frontend_valid_example_executes_on_vm_aot_and_jit_and_matches_directives`.
+That bounded exhaustive test recursively discovers 133 files under
+`examples/` and `tests/samples/`, rejects the two fixtures marked as expected
+compile errors, and executes every other frontend-valid source through bounded
+VM, AOT, and JIT runs. The crawler fixture is hermetic, including its TCP
+connect path. See [docs/60-native-backend.md](docs/60-native-backend.md) for
+the backend architecture and resource boundaries.
 
 ## Development
 
@@ -84,7 +86,7 @@ natively compiled programs do not yet reclaim memory. See
 | `just test-verbose`                | Run tests with output                        |
 | `just run <file>`                  | Compile and run a `.li` file on the VM       |
 | `just build-native <file> <out>`   | Compile a `.li` file to a native executable  |
-| `just jit <file>`                  | Compile to native code and run it in-process |
+| `just jit <file>`                  | Compile to native code and run it in an isolated worker |
 | `just check`                       | Type check without building                  |
 | `just clippy`                      | Run Rust linter                              |
 | `just fmt`                         | Format Rust code                             |

@@ -37,14 +37,14 @@ fn mid(t: (int, int, int)) -> string {
 }
 
 fn main() {
-    print(quadrant((0, 0)))
-    print(quadrant((3, 4)))
-    print(quadrant((0, 5)))
-    print(quadrant((3, 0)))
-    print(classify(((0, 0), 0)))
-    print(classify(((0, 0), 5)))
-    print(classify(((1, 2), 0)))
-    print(classify(((1, 2), 3)))
-    print(mid((9, 0, 9)))
-    print(mid((9, 9, 9)))
+    println(quadrant((0, 0)))
+    println(quadrant((3, 4)))
+    println(quadrant((0, 5)))
+    println(quadrant((3, 0)))
+    println(classify(((0, 0), 0)))
+    println(classify(((0, 0), 5)))
+    println(classify(((1, 2), 0)))
+    println(classify(((1, 2), 3)))
+    println(mid((9, 0, 9)))
+    println(mid((9, 9, 9)))
 }

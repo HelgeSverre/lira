@@ -2,6 +2,7 @@
 name = "lira-doc"
 version = "0.1.0"
 edition = "2021"
+rust-version.workspace = true
 description = "Lira documentation generator - generates Markdown docs from .li source files"
 license = "MIT"
 

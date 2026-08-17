@@ -12,20 +12,21 @@ source.li
     ├── codegen.rs ──────────► .lic bytecode ──► liravm      `lira run`
     │
     └── lira-codegen/lower.rs ► Cranelift IR ──► machine code
-                                                  ├─ in-memory  `lira jit`
+                                                  ├─ isolated worker  `lira jit`
                                                   └─ object + link `lira build`
 ```
 
 ```bash
 lira build hello.li -o hello   # standalone native executable
 ./hello
-lira jit hello.li              # compile to native code and run in-process
+lira jit hello.li              # compile to native code in an isolated worker
 lira run hello.li              # bytecode VM (complete implementation)
 ```
 
-The native backend is **partial by design**. Anything it cannot lower is
-reported as an error naming the construct, and the program still runs under
-`lira run`. It never falls back to a slow path or guesses.
+The native backend lowers the checked AST to standalone machine code. A source
+construct that is rejected by native lowering produces a diagnostic naming the
+construct; it is never silently mis-compiled or routed through an unspecified
+fallback. The bytecode path remains available through `lira run`.
 
 ## Why static typing changes the code that comes out
 
@@ -40,8 +41,9 @@ operands are `int`, so native code does not repeat any of that work:
 | `f + 1.0` on `float` | one `fadd` in an FP register |
 | `match shape { Circle(r) => ... }` | load the discriminant, compare, load the payload slot |
 
-No tag bits, no NaN boxing, no guard branches. `fib(30)` runs roughly 70× faster
-natively than on the VM.
+No tag bits, no NaN boxing, no guard branches. This representation is intended
+to reduce dispatch overhead; an accurate release-build benchmark is pending,
+so this document makes no speedup claim.
 
 ## Value representation
 
@@ -52,13 +54,63 @@ Registers (`src/abi.rs`):
 | `int`, `int8`…`int64`, `uint8`…`uint64`, `char` | `i64` |
 | `float` | `f64` |
 | `bool` | `i8` |
-| `string`, arrays, structs, enums, channels | pointer |
+| `string`, arrays, structs, enums, interfaces, `any`, channels | pointer |
 
 Narrow integers widen to `i64` in registers but keep their natural width in
 memory, so a struct field declared `int32` really is four bytes.
 
 A `char` is an integer code point, matching the bytecode VM, which has no
 separate character value and prints `'a'` as `97`.
+
+## Interface ABI and witness dispatch
+
+Interface values are implemented in the native runtime; they are not rejected
+at the lowering boundary. `runtime/lira_rt.h` fixes these layouts:
+
+```c
+typedef struct {
+    const LiraStr *name;
+    const LiraStr *signature;
+} LiraInterfaceMethod;                 // 16 bytes
+
+typedef struct {
+    uint64_t method_count;
+    const LiraInterfaceMethod *methods;
+} LiraInterfaceSpec;                    // 16 bytes
+
+typedef struct {
+    const LiraInterfaceSpec *spec;
+    uint32_t payload_kind;              // ref, i64, f64, or i8
+    uint32_t method_count;
+    void (*method_slots[])(void);       // trailing erased function slots
+} LiraInterfaceWitness;
+
+typedef struct {
+    LiraHeader hdr;
+    uint64_t payload;
+    const LiraInterfaceWitness *witness;
+} LiraInterface;                        // 32 bytes
+```
+
+`layout.rs` emits one immutable `LiraInterfaceSpec` per declaration. For each
+concrete source/target pair, `lower.rs` emits an immutable witness containing
+the target spec, payload representation, and one slot per method. Each slot is
+filled with a generated, typed Cranelift thunk. A thunk extracts the payload
+with `lira_rt_interface_payload`, converts arguments/results to the checked
+method representations, and calls the concrete implementation. Interface-to-
+interface assignments use forwarding thunks. String `len` and array `len`,
+`push`, and `pop` use native intrinsic thunks.
+
+`lira_rt_interface_new` validates the bounded metadata and allocates the
+managed interface object. `lira_rt_interface_is` compares the target method
+spec structurally; it does not rely on a nominal interface-name tag. Method
+slot lookup and payload extraction fail closed when the witness, method count,
+or payload kind is invalid. `Any` boxing preserves an interface's spec and
+witness (`lira_rt_any_box_interface`); unboxing to a target interface checks
+the target descriptor. Lowering can also recover a checked, finite set of
+concrete interface witnesses from erased `Any` values, including raw strings,
+arrays, objects, and supported scalar forms when their source type is
+unambiguous.
 
 ## Memory layout
 
@@ -103,6 +155,46 @@ String literals need no runtime construction at all: the complete object, header
 included, is emitted into read-only data with a negative refcount marking it
 immortal.
 
+## Resource containment
+
+The native runtime places independent hard ceilings on its managed heap and
+live fiber count:
+
+- GC-managed objects plus array, map, and channel backing storage are limited
+  to 256 MiB per process.
+- At most 512 fibers may be live at once. Each fiber has a 256 KiB guarded
+  stack, so runaway `spawn` cannot create an unbounded number of mappings.
+- `LIRA_NATIVE_MEMORY_LIMIT_BYTES` and `LIRA_NATIVE_MAX_FIBERS` may lower those
+  limits for a sandbox or test. Zero, malformed values, overflow, and attempts
+  to raise the compiled limits are runtime errors.
+
+These runtime budgets do not make a standalone AOT executable a sandbox. In
+particular, host-library allocations outside the accounted heap and arbitrary
+filesystem, device, or network access require containment by the process that
+launches the executable.
+
+Native integration tests add a second boundary around generated programs: AOT
+executables and JIT runs execute in child process groups with a wall deadline,
+CPU limits, bounded output capture, kill-and-reap cleanup, and a cross-process
+execution lock. On Linux the test/process supervisor applies an address-space
+limit; on macOS it samples the group's physical memory reactively rather than
+providing a hard OS address-space ceiling. The stdout/stderr caps bound captured
+output, but do not sandbox arbitrary filesystem or device I/O. Recovery tests
+that require several JIT modules to share one runtime execute the complete
+sequence inside the same bounded child.
+
+The public `lira jit` command runs the generated program in a private worker
+process. The worker has its own process group, CPU and wall-clock deadline,
+memory and output ceilings, and is always killed and reaped on a limit breach.
+The library `jit_run()` API has the same fail-closed behavior: it requires
+`LIRA_JIT_WORKER` to name an executable worker. Trusted embedders may opt into
+the explicitly named `jit_run_in_process()` API, but it has no process-level
+deadline and remains uncontained, so it must be isolated by the host.
+`jit_run_isolated()` is the direct library entry point for a caller that already
+has a trusted worker executable. The process-group boundary contains generated
+Lira code; it is not a security sandbox for a hostile worker binary that
+deliberately changes its process group.
+
 ## Classes
 
 A class instance carries a pointer to its virtual method table between the
@@ -139,12 +231,12 @@ struct Box<T> { value: T }     Box { value: 1 }  → Box$int, laid out as a stru
 enum Opt<T> { Some(T), None }  Opt::Some(42)     → Opt$int, tag plus an int slot
 ```
 
-The checker is no help here: it records generics as erased — `sema`'s
-`generic_instantiations` table is documented as never read, and a call to
-`identity(42)` is recorded as returning `T`. So the backend infers the bindings
-itself, by matching each declared type against the actual one: the arguments at
-a call site, the values a literal gives its fields, the payload a variant is
-constructed with. `foo::<int>(x)` names its instantiation outright.
+The backend resolves bindings from the concrete uses it sees: arguments at a
+call site, the values assigned to literal fields, and the payload used to
+construct a variant. `foo::<int>(x)` names its instantiation outright. This
+also covers inline generic methods and methods with their own type parameters;
+their method-level bindings are derived from the call site alongside the
+receiver's bindings.
 
 Instantiations are a worklist, since one can demand another, and each is
 recorded so a generic that calls itself terminates rather than unfolding
@@ -215,9 +307,8 @@ function, and an `Err` is handed back to the caller unchanged.
 ## Maps
 
 A map is a string-keyed open-addressing hash table in the runtime, with the same
-uniform 8-byte cells arrays use for values. String keys match the bytecode VM,
-which represents a map as an object with string field names. `len` works on one
-natively; the VM rejects it.
+uniform 8-byte cells arrays use for values. String keys match the language's
+map representation, and `len` works on a native map.
 
 ## Fibers: the interesting part
 
@@ -286,22 +377,22 @@ block on a channel.
 `tests/native.rs` and a unit test in `src/jit.rs` check that the codegen table,
 the JIT symbol table and the C header stay in step.
 
-## Type information the checker does not record
+## Type information at the lowering boundary
 
-The checker skips the bodies of methods declared inside `struct`, `class` and
-`impl` blocks — it only records member references there for the LSP. Bytecode
-does not care, because it is dynamically typed at run time. Native code does, so
-`lower.rs` carries a small structural inference pass that runs off the names in
-scope, the struct and enum layouts, and the declared signatures. The same pass
-recovers types the checker erases to `any`, such as an enum payload bound by
-`Option::Some(x)`.
+The checker records expression and method-body types in semantic side tables,
+and native lowering consumes those facts where they are available. `lower.rs`
+also carries a small structural inference fallback for contexts whose source
+type is deliberately erased to `any`, such as an enum payload bound by
+`Option::Some(x)`. The fallback is not a substitute for checking: it only
+selects a native representation after the shared checker has accepted the
+program.
 
 ## Built-ins
 
-Around 80 of the language's built-in functions are implemented natively in
-`liblira_rt`: the math library, character-indexed string operations, time,
+Native `liblira_rt` coverage includes the math library, character-indexed string
+operations, time,
 randomness, the environment, files and the filesystem, base64 and URL encoding,
-MD5/SHA-1/SHA-256/SHA-512, UUIDs, and TCP/DNS.
+MD5/SHA-1/SHA-256/SHA-512, UUIDs, TCP/DNS, JSON, regular expressions, and HTTP.
 
 `sqrt`, `abs`, `floor`, `ceil`, `trunc`, `is_nan`, `is_infinite` and `is_finite`
 never reach the runtime at all — they lower to single Cranelift instructions.
@@ -319,92 +410,68 @@ Two invariants keep this honest:
 A user function shadows a built-in of the same name, because the checker
 resolves the call that way: `examples/stdlib_demo.li` defines its own `abs`.
 
-Still missing: `json_*` (needs a dynamic value representation), `regex_*` (needs
-an engine) and `http_*`.
-
 ## What is supported
 
 Functions, methods, `impl` blocks (including `impl int`, `impl string` and
 `impl [int]`, so the standard library's methods on built-in types work), static
 methods, recursion and mutual recursion, named arguments and defaults, type
-aliases, top-level globals; `if`/`else`, `while`, `loop`, `for` over arrays and
-ranges, ranges as values, `break`/`continue`, blocks as expressions;
-`match` with literal, range, wildcard, binding, or, struct and enum-constructor
-patterns, plus guards; structs with nested and narrow fields; enums with
-payloads and `__enum`/`__variant` reflection; tuples, tuple patterns and
-destructuring `let`; lambdas, closures with captures, and functions as values;
-optionals including boxed scalar optionals, `??`, `?.` and `?`; `Result<T, E>`
-with typed payloads; string-keyed maps; `select` with and without a default arm;
-classes with inheritance, virtual dispatch, `override` and `super`; generic
-functions, structs, enums and impls, monomorphised;
-arrays with indexing, assignment, `push`, `pop` and `len`; strings with
-concatenation, interpolation, comparison and `len`; `spawn`, `chan`, `send`,
-`recv`, `close`, `fiber_yield`, `fiber_id`.
+aliases, top-level globals; `if`/`else`, `while`, `loop`, `for` over arrays,
+ranges, tuples, strings, and `Any`, ranges as values, `break`/`continue`, blocks
+as expressions; `match` with literal, range, wildcard, binding, or, struct and
+enum-constructor patterns, plus guards; structs with nested and narrow fields;
+enums with payloads and `__enum`/`__variant` reflection; tuples, tuple patterns
+and destructuring `let`; lambdas, closures with captures, and functions as
+values; optionals including boxed scalar optionals, `??`, `?.` and `?`;
+`Result<T, E>` with typed payloads; string-keyed maps; `select` values, with and
+without a default arm; classes with inheritance, virtual dispatch, `override`
+and `super`; generic functions, structs, enums, impls, and inline generic
+methods, monomorphised; arrays with indexing, assignment, `push`, `pop` and
+`len`; strings with concatenation, interpolation, comparison, Unicode scalar
+indexing, and `len`; `spawn`, `chan`, `send`, `recv`, `close`, `fiber_yield`,
+`fiber_id`; and `Any` values with exact type descriptors.
 
-Of the repository's 124 examples, 100 compile natively and produce byte-identical
-output to the bytecode VM. Eight more compile and run correctly but cannot be
-compared byte-for-byte: they print timestamps, random UUIDs, or `env_args`,
-which differ between an interpreted script and a compiled binary by nature. The
-remaining 23 use constructs listed below and are declined with a reason.
+The bounded exhaustive test
+`every_frontend_valid_example_executes_on_vm_aot_and_jit_and_matches_directives`
+recursively discovers files under `examples/` and `tests/samples/`. It
+rejects the two fixtures marked as expected compile errors and executes every
+other frontend-valid source through bounded VM, AOT, and JIT runs. The local
+crawler fixture is hermetic, including TCP connect coverage.
 
-61 examples are pinned as regression tests in `tests/parity.rs`, and every
-example that type-checks is required to either compile or be declined cleanly —
-an internal error fails the suite.
-
-## What is not supported yet
+## Current native-lowering boundaries
 
 | Not lowered | Notes |
 |---|---|
-| A method with type parameters of its own | `impl<T> Box<T> { fn map<U>(...) }` — the owner's arguments are known, the method's are not until the call site |
-| `json_*`, `regex_*`, `http_*` | Need a dynamic value, a regex engine and an HTTP client |
-| Heterogeneous arrays | `push(node, node)` into an `[int]` is the dynamic escape hatch, and may be right to refuse permanently |
+| Heterogeneous arrays | Use an explicitly erased element type such as `[any]` when heterogeneous values are required |
 | An unconstrained `[]` | Nothing pins the element type; the error says to annotate |
-| String indexing | Needs a decision on byte vs. character indexing |
+| Generic methods called through an interface receiver | `generic methods on interfaces are not lowered yet`; call-site type arguments are not instantiated through an interface witness |
+| Interface methods with `void` parameters | Native witness generation rejects these because the Cranelift/native ABI needs a concrete parameter representation |
+| Flow narrowing after `is` | The shared checker does not refine a binding inside the true branch, so branch-only members are rejected before either backend |
+
+`Any`-typed `is Interface` checks and checked `Any`-to-interface casts are
+lowered. Native descriptors retain exact array element and interface identity;
+raw integer-family values can recover a custom witness only when the finite
+checker-approved conformer set is unambiguous. The bytecode VM still loses
+exact custom primitive and array element identity after some values pass
+through `Any`, so the corresponding exact-descriptor regressions are
+native-only rather than VM-parity claims.
 
 One more limit worth knowing: **`lira jit` runs one program per process.** The
 runtime's scheduler state is process-global and single-threaded.
 
-## Remaining work
+`tcp_connect` performs blocking system name resolution on the native I/O pool.
+The socket connect attempt has a deadline, but POSIX `getaddrinfo` has no
+portable cancellation deadline. Isolated JIT and the test launcher bound the
+whole worker process; a standalone AOT executable must be launched under an
+external wall-time policy when untrusted hostnames are possible.
 
-### Memory is never reclaimed
+## Memory management
 
-Allocations come from `malloc` and are never freed, so a long-running native
-program grows without bound. This is the only correctness gap in the backend —
-everything else it accepts, it compiles correctly.
-
-The `rc` field is already in every object header for the scheme the VM uses. The
-work is emitting the retain/release pairs: at scope exit, on field and element
-stores, across argument passing and returns, and into the closure captures and
-fiber environments that outlive their frames. Cycles need a collector on top,
-which the VM has and which `examples/cycle_auto_gc.li` exercises. The
-alternative is a tracing collector using Cranelift's stack maps, which suits an
-unboxed backend better but needs precise root tracking through the fiber stacks.
-
-Either way it touches every lowering path, which is why it is not half-done: a
-release in the wrong place is a use-after-free, and that is worse than a leak.
-
-### One generics gap
-
-A method that adds type parameters of its own — `impl<T> Box<T> { fn map<U>(...) }`
-— is not instantiated. The owner's arguments are known from the receiver, but
-the method's own have to come from the call site, which means resolving the
-method against a mangled receiver name and splitting the two sets of arguments
-apart. Everything else about generics works; this blocks
-`examples/generic_methods.li` alone.
-
-## Differences from the bytecode VM
-
-- `spawn` really runs the fiber. The VM only executes spawned fibers in fiber
-  mode, so `examples/spawn_expression.li` prints one extra line natively.
-- `pop` on an empty array reports a runtime error instead of returning `null`,
-  because `T?` has no native representation for scalar `T`.
-- `print` terminates the line, matching the VM's `Print` opcode, which always
-  appends a newline. The runtime keeps newline-free entry points for when that
-  is fixed.
-- A function whose body ends in a bare expression returns it. The VM returns
-  null instead, so `examples/null_and_optionals.li` differs — the native result
-  is the one the example's own comments expect.
-- `len` works on a map; the VM reports "cannot get length of non-array/string".
+Heap objects are reclaimed by a conservative tracing collector rather than
+remaining allocated for the lifetime of the process. The collector scans
+managed objects and runtime/fiber roots, and generated top-level globals
+register root slots so a global reference remains live. It handles cycles and
+reclaims unreachable native objects while preserving the hard native heap and
+fiber budgets described above.
 
 ## Platform support
 
