@@ -25,8 +25,8 @@ fn primitive_method_on_function_result_dispatches() {
     // `x.double()` call would fall through to a dynamic field load and fail.
     let source = r#"
 impl int {
-    fn double(self) -> int {
-        return self * 2
+    fn double(this) -> int {
+        return this * 2
     }
 }
 
@@ -40,4 +40,36 @@ println(x.double())
 
     let output = run(source).expect("program should compile and run");
     assert_eq!(output, vec!["42".to_string()]);
+}
+
+#[test]
+fn array_impl_receivers_keep_their_array_element_type() {
+    let source = r#"
+impl [int] {
+    fn first_plus_second(self) -> int {
+        return self[0] + self[1]
+    }
+
+    fn count(this) -> int {
+        return this.len()
+    }
+}
+
+impl [[int]] {
+    fn first_nested(this) -> int {
+        return this[0][0]
+    }
+}
+
+let values = [20, 22]
+println(values.first_plus_second())
+println(values.count())
+println([[42]].first_nested())
+"#;
+
+    let output = run(source).expect("array impl receiver program should compile and run");
+    assert_eq!(
+        output,
+        vec!["42".to_string(), "2".to_string(), "42".to_string()]
+    );
 }

@@ -40,6 +40,28 @@ fn spawn_http_server(count: usize, body: &'static str) -> u16 {
     port
 }
 
+/// One-shot localhost HTTP server with a caller-selected status and body.
+fn spawn_http_response(status: &'static str, body: Vec<u8>) -> u16 {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind http");
+    let port = listener.local_addr().unwrap().port();
+    thread::spawn(move || {
+        let (mut stream, _) = match listener.accept() {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        let mut buf = [0u8; 4096];
+        let _ = stream.read(&mut buf);
+        let header = format!(
+            "HTTP/1.1 {status}\r\nConnection: close\r\nContent-Length: {}\r\n\r\n",
+            body.len()
+        );
+        let _ = stream.write_all(header.as_bytes());
+        let _ = stream.write_all(&body);
+        let _ = stream.flush();
+    });
+    port
+}
+
 #[test]
 fn http_get_post_request_against_local_server() {
     let port = spawn_http_server(3, "ok");
@@ -61,10 +83,41 @@ fn http_get_post_request_against_local_server() {
     assert_eq!(body, "ok");
 
     let (status, body) = rt
-        .http_request("PUT", &base, "X-Test: 1", "data")
+        .http_request("PUT", &base, "not a header\n: invalid\nX-Test: 1", "data")
         .expect("http_request");
     assert_eq!(status, 200);
     assert_eq!(body, "ok");
+}
+
+#[test]
+fn http_get_preserves_error_status_and_body() {
+    let port = spawn_http_response("418 I'm a Teapot", b"short and stout".to_vec());
+    let rt = Runtime::new();
+
+    let (status, _headers, body) = rt
+        .http_get(&format!("http://127.0.0.1:{port}/"))
+        .expect("HTTP error status is a response, not a transport error");
+    assert_eq!(status, 418);
+    assert_eq!(body, "short and stout");
+}
+
+#[test]
+fn http_get_body_limit_preserves_status_and_clears_body() {
+    const MAX_RESPONSE_BODY_BYTES: usize = 10 * 1024 * 1024;
+    let port = spawn_http_response(
+        "413 Payload Too Large",
+        vec![b'x'; MAX_RESPONSE_BODY_BYTES + 1],
+    );
+    let rt = Runtime::new();
+
+    let (status, _headers, body) = rt
+        .http_get(&format!("http://127.0.0.1:{port}/"))
+        .expect("body-limit failure occurs after receiving a response");
+    assert_eq!(status, 413);
+    assert!(
+        body.is_empty(),
+        "oversize response must not leak a partial body"
+    );
 }
 
 #[test]
@@ -192,4 +245,77 @@ fn random_bytes_length_and_variation() {
     assert_eq!(rt.random_bytes(0).len(), 0);
     // Two draws of a decent size should differ (vanishing collision odds).
     assert_ne!(rt.random_bytes(32), rt.random_bytes(32));
+}
+
+#[test]
+fn random_int_full_domain_does_not_overflow() {
+    // A request spanning the entire int64 domain must neither overflow nor
+    // panic: it must produce a value in [i64::MIN, i64::MAX] for every draw.
+    let rt = Runtime::new();
+    for _ in 0..100 {
+        let value = rt.random_int(i64::MIN, i64::MAX);
+        assert!(
+            value >= i64::MIN && value <= i64::MAX,
+            "out of range: {value}"
+        );
+    }
+}
+
+#[test]
+fn random_int_reversed_bounds_return_min() {
+    // When `min > max` the contract is to return `min` (matching native).
+    let rt = Runtime::new();
+    assert_eq!(rt.random_int(5, 3), 5);
+    assert_eq!(rt.random_int(123, 123), 123);
+    assert_eq!(rt.random_int(i64::MIN, i64::MIN), i64::MIN);
+}
+
+#[test]
+fn random_int_single_value_range_is_constant() {
+    let rt = Runtime::new();
+    for _ in 0..100 {
+        assert_eq!(rt.random_int(42, 42), 42);
+    }
+}
+
+#[test]
+fn random_int_large_range_stays_bounded() {
+    // A large but non-full range must never escape [min, max] (the old
+    // float-scaling path lost precision and could overshoot near i64::MAX).
+    let rt = Runtime::new();
+    for _ in 0..200 {
+        let value = rt.random_int(i64::MAX - 10_000, i64::MAX);
+        assert!(
+            value >= i64::MAX - 10_000 && value <= i64::MAX,
+            "escaped range: {value}"
+        );
+    }
+}
+
+#[test]
+fn time_from_components_utc_millis_and_fail_closed() {
+    let rt = Runtime::new();
+    // 2020-01-02 03:04:05 UTC in epoch milliseconds.
+    assert_eq!(
+        rt.time_from_components(2020, 1, 2, 3, 4, 5),
+        1_577_934_245_000
+    );
+    // Extreme components that cannot be represented must fail closed (0),
+    // matching the native backend, rather than silently truncating to a
+    // plausible-but-wrong date.
+    assert_eq!(
+        rt.time_from_components(i64::MIN, 1, 1, 0, 0, 0),
+        0,
+        "an unrepresentable year must fail closed"
+    );
+    assert_eq!(
+        rt.time_from_components(2020, 0, 1, 0, 0, 0),
+        0,
+        "an invalid month must fail closed"
+    );
+    assert_eq!(
+        rt.time_from_components(2020, 1, 32, 0, 0, 0),
+        0,
+        "an invalid day must fail closed"
+    );
 }

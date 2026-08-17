@@ -19,6 +19,81 @@ fn run_source(name: &str, source: &str) -> Vec<String> {
     output
 }
 
+#[test]
+fn chan_rejects_more_than_one_capacity_argument() {
+    let error = lirac::check("let channel = chan(1, 2)")
+        .expect_err("chan must accept zero or one capacity argument");
+    assert!(
+        error.contains("Expected at most 1 arguments, got 2"),
+        "unexpected diagnostic: {error}"
+    );
+}
+
+#[test]
+fn channel_aliases_share_payload_inference() {
+    let source = r#"
+fn main() {
+    let source = chan(1)
+    let alias = source
+    send(alias, 42)
+    println(recv(source))
+}
+"#;
+    assert_eq!(run_source("channel_alias_inference", source), ["42"]);
+
+    let error = lirac::check(
+        r#"
+let source = chan()
+let alias = source
+send(alias, 42)
+send(source, "wrong")
+"#,
+    )
+    .expect_err("aliases of a channel must share one payload type");
+    assert!(
+        error.contains("Argument type mismatch"),
+        "unexpected diagnostic: {error}"
+    );
+}
+
+#[test]
+fn reassigned_channel_alias_starts_a_new_inference_group() {
+    let source = r#"
+fn main() {
+    var original = chan(1)
+    var alias = original
+    alias = chan(1)
+    send(alias, 7)
+    send(original, "separate")
+    println(recv(alias))
+    println(recv(original))
+}
+"#;
+    assert_eq!(
+        run_source("reassigned_channel_alias", source),
+        ["7", "separate"]
+    );
+}
+
+#[test]
+fn reassigned_channel_source_preserves_existing_alias_group() {
+    let source = r#"
+fn main() {
+    var original = chan(1)
+    var alias = original
+    original = chan(1)
+    send(alias, "old")
+    send(original, 9)
+    println(recv(alias))
+    println(recv(original))
+}
+"#;
+    assert_eq!(
+        run_source("reassigned_channel_source", source),
+        ["old", "9"]
+    );
+}
+
 /// Two spawned workers and main interleave via cooperative `fiber_yield`.
 /// Cooperative round-robin scheduling makes the transcript deterministic, and
 /// this also proves spawn ARGUMENTS reach the worker (each worker prints its
@@ -63,8 +138,8 @@ fn main() {
 
 /// A spawned worker receives a channel as a spawn argument and sends a value
 /// over it; main yields, lets the worker run, then receives. The cross-fiber
-/// channel rendezvous (`recv` returns ok = true) proves the worker actually
-/// executed and the scheduler delivered the message back to main.
+/// channel rendezvous proves the worker actually executed and the scheduler
+/// delivered the message back to main.
 #[test]
 fn spawn_worker_channel_handoff() {
     let source = r#"
@@ -77,14 +152,14 @@ fn main() {
     let ch = chan(1)
     spawn worker(ch)
     fiber_yield()
-    let ok = recv(ch)
-    println("recv ok: " + ok)
+    let value = recv(ch)
+    println("recv value: " + value)
 }
 "#;
     let output = run_source("spawn_worker_channel_handoff", source);
     assert_eq!(
         output,
-        vec!["worker sent".to_string(), "recv ok: true".to_string()]
+        vec!["worker sent".to_string(), "recv value: 42".to_string()]
     );
 }
 

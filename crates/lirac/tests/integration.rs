@@ -10,7 +10,13 @@
 //! - `// @skip` - skip this test (for known issues)
 
 use std::fs;
+use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream};
 use std::path::Path;
+use std::sync::mpsc::{self, Receiver};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
 /// Test result for a single example file
 #[derive(Debug)]
@@ -35,12 +41,171 @@ struct StageError {
     is_compile: bool,
 }
 
+#[derive(Debug)]
+struct LocalCrawlerReport {
+    paths: Vec<String>,
+    unknown_paths: Vec<String>,
+    error: Option<String>,
+}
+
+struct LocalCrawlerServer {
+    base_url: String,
+    report_rx: Receiver<LocalCrawlerReport>,
+    join: Option<JoinHandle<()>>,
+}
+
+impl LocalCrawlerServer {
+    fn start(expected_requests: usize) -> Result<Self, String> {
+        let listener = TcpListener::bind("127.0.0.1:0").map_err(|error| error.to_string())?;
+        listener
+            .set_nonblocking(true)
+            .map_err(|error| error.to_string())?;
+        let port = listener
+            .local_addr()
+            .map_err(|error| error.to_string())?
+            .port();
+        let (report_tx, report_rx) = mpsc::channel();
+        let paths = Arc::new(Mutex::new(Vec::new()));
+        let unknown_paths = Arc::new(Mutex::new(Vec::new()));
+        let join = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut error = None;
+            loop {
+                let path_count = paths
+                    .lock()
+                    .map(|paths| paths.len())
+                    .unwrap_or(expected_requests);
+                if path_count >= expected_requests {
+                    break;
+                }
+                if Instant::now() >= deadline {
+                    error = Some(format!(
+                        "local crawler server timed out after {} of {} requests",
+                        path_count, expected_requests
+                    ));
+                    break;
+                }
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        if let Err(connection_error) =
+                            handle_local_crawler_connection(stream, &paths, &unknown_paths)
+                        {
+                            error = Some(connection_error);
+                            break;
+                        }
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(accept_error) => {
+                        error = Some(format!("local crawler accept failed: {accept_error}"));
+                        break;
+                    }
+                }
+            }
+            let report = LocalCrawlerReport {
+                paths: paths.lock().map(|paths| paths.clone()).unwrap_or_default(),
+                unknown_paths: unknown_paths
+                    .lock()
+                    .map(|paths| paths.clone())
+                    .unwrap_or_default(),
+                error,
+            };
+            let _ = report_tx.send(report);
+        });
+        Ok(Self {
+            base_url: format!("http://127.0.0.1:{port}"),
+            report_rx,
+            join: Some(join),
+        })
+    }
+
+    fn finish(mut self) -> Result<LocalCrawlerReport, String> {
+        let report = self
+            .report_rx
+            .recv_timeout(Duration::from_secs(6))
+            .map_err(|error| format!("local crawler server did not finish: {error}"))?;
+        if let Some(join) = self.join.take() {
+            join.join()
+                .map_err(|_| "local crawler server panicked".to_string())?;
+        }
+        Ok(report)
+    }
+}
+
+impl Drop for LocalCrawlerServer {
+    fn drop(&mut self) {
+        if let Some(join) = self.join.take() {
+            let _ = join.join();
+        }
+    }
+}
+
+fn handle_local_crawler_connection(
+    mut stream: TcpStream,
+    paths: &Arc<Mutex<Vec<String>>>,
+    unknown_paths: &Arc<Mutex<Vec<String>>>,
+) -> Result<(), String> {
+    stream
+        .set_nonblocking(false)
+        .map_err(|error| error.to_string())?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .map_err(|error| error.to_string())?;
+    let mut request = Vec::new();
+    let mut chunk = [0_u8; 1024];
+    while request.len() < 8192 && !request.windows(4).any(|window| window == b"\r\n\r\n") {
+        let count = stream.read(&mut chunk).map_err(|error| error.to_string())?;
+        if count == 0 {
+            break;
+        }
+        let remaining = 8192 - request.len();
+        request.extend_from_slice(&chunk[..count.min(remaining)]);
+    }
+    let request = String::from_utf8_lossy(&request);
+    let path = request
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .map(|target| target.split('?').next().unwrap_or(target).to_string())
+        .ok_or_else(|| "local crawler received malformed HTTP request".to_string())?;
+    paths
+        .lock()
+        .map_err(|_| "local crawler path lock poisoned".to_string())?
+        .push(path.clone());
+    let (status, body) = match path.as_str() {
+        "/" => (
+            "200 OK",
+            "<a href=\"/page/1\">1</a><a href=\"/page/2\">2</a><a href=\"/page/3\">3</a><a href=\"http://external.invalid/\">external</a><a href=\"/static/site.css\">asset</a><a href=\"#fragment\">fragment</a>",
+        ),
+        "/page/1" | "/page/2" | "/page/3" => (
+            "200 OK",
+            "<a href=\"/\">root</a><a href=\"/page/1\">1</a><a href=\"/page/2\">2</a><a href=\"/page/3\">3</a>",
+        ),
+        other => {
+            unknown_paths
+                .lock()
+                .map_err(|_| "local crawler unknown-path lock poisoned".to_string())?
+                .push(other.to_string());
+            ("404 Not Found", "unknown")
+        }
+    };
+    let response = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    stream
+        .write_all(response.as_bytes())
+        .map_err(|error| error.to_string())
+}
+
 /// Parse expected output from source file comments
-fn parse_expectations(source: &str) -> (Vec<String>, Vec<String>, ErrorExpectation, bool) {
+fn parse_expectations(source: &str) -> (Vec<String>, Vec<String>, ErrorExpectation, bool, bool) {
     let mut expect_lines = Vec::new();
     let mut expect_contains = Vec::new();
     let mut expect_error = ErrorExpectation::None;
     let mut skip = false;
+    let mut local_crawler = false;
 
     for line in source.lines() {
         let trimmed = line.trim();
@@ -58,10 +223,65 @@ fn parse_expectations(source: &str) -> (Vec<String>, Vec<String>, ErrorExpectati
             expect_error = ErrorExpectation::Any;
         } else if trimmed.starts_with("// @skip") {
             skip = true;
+        } else if trimmed.starts_with("// @test-local-crawler") {
+            local_crawler = true;
         }
     }
 
-    (expect_lines, expect_contains, expect_error, skip)
+    (
+        expect_lines,
+        expect_contains,
+        expect_error,
+        skip,
+        local_crawler,
+    )
+}
+
+fn compile_and_run_local_crawler(
+    source_path: &str,
+    source: &str,
+) -> Result<(Vec<String>, LocalCrawlerReport), StageError> {
+    let server = LocalCrawlerServer::start(4).map_err(|message| StageError {
+        message,
+        is_compile: false,
+    })?;
+    let base_url = server.base_url.clone();
+    let result = (|| {
+        let bytecode =
+            lirac::compile_with_imports(source_path, source).map_err(|message| StageError {
+                message,
+                is_compile: true,
+            })?;
+        let program = liravm::bytecode::load(&bytecode).map_err(|message| StageError {
+            message,
+            is_compile: false,
+        })?;
+        let mut vm = liravm::VM::new(program);
+        vm.set_fiber_mode(true);
+        vm.set_capture_output(true);
+        vm.set_env_override("LIRA_CRAWLER_BASE_URL", base_url);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        vm.set_stop_check(move || Instant::now() >= deadline);
+        match vm.run() {
+            Ok(0) => Ok(vm.get_output().to_vec()),
+            Ok(exit_code) => Err(StageError {
+                message: format!("VM exited with status {exit_code}"),
+                is_compile: false,
+            }),
+            Err(message) => Err(StageError {
+                message,
+                is_compile: false,
+            }),
+        }
+    })();
+    let report = server.finish().map_err(|message| StageError {
+        message,
+        is_compile: false,
+    })?;
+    match result {
+        Ok(output) => Ok((output, report)),
+        Err(error) => Err(error),
+    }
 }
 
 /// Compile and run a Lira source file, returning captured output or stage-aware error
@@ -82,7 +302,18 @@ fn compile_and_run(source_path: &str) -> Result<Vec<String>, StageError> {
     };
 
     match liravm::run_with_capture(&bytecode) {
-        Ok((_exit_code, output)) => Ok(output),
+        Ok((0, output)) => Ok(output),
+        Ok((exit_code, output)) => Err(StageError {
+            message: if output.is_empty() {
+                format!("VM exited with status {exit_code}")
+            } else {
+                format!(
+                    "VM exited with status {exit_code} after output:\n{}",
+                    output.join("\n")
+                )
+            },
+            is_compile: false,
+        }),
         Err(e) => Err(StageError {
             message: e,
             is_compile: false,
@@ -107,7 +338,8 @@ fn test_example(path: &Path) -> TestResult {
         }
     };
 
-    let (expect_lines, expect_contains, expect_error, skip) = parse_expectations(&source);
+    let (expect_lines, expect_contains, expect_error, skip, local_crawler) =
+        parse_expectations(&source);
 
     // Skip if marked
     if skip {
@@ -118,7 +350,30 @@ fn test_example(path: &Path) -> TestResult {
         };
     }
 
-    let result = compile_and_run(&source_path);
+    let local_result = if local_crawler {
+        Some(compile_and_run_local_crawler(&source_path, &source))
+    } else {
+        None
+    };
+    let result = match local_result {
+        Some(Ok((output, report))) => {
+            let expected = ["/", "/page/1", "/page/2", "/page/3"];
+            let mut paths = report.paths.clone();
+            paths.sort();
+            let mut expected = expected.map(str::to_string).to_vec();
+            expected.sort();
+            if report.error.is_some() || !report.unknown_paths.is_empty() || paths != expected {
+                return TestResult {
+                    name,
+                    passed: false,
+                    message: format!("local crawler server report invalid: {report:?}"),
+                };
+            }
+            Ok(output)
+        }
+        Some(Err(error)) => Err(error),
+        None => compile_and_run(&source_path),
+    };
 
     match result {
         Ok(output) => {
@@ -217,9 +472,7 @@ fn test_example(path: &Path) -> TestResult {
                     ErrorExpectation::Any => unreachable!(),
                     ErrorExpectation::None => "",
                 };
-                let detail = if expect_error != ErrorExpectation::None && expected.is_empty() {
-                    format!("{}: {}", expected, e.message)
-                } else if expect_error != ErrorExpectation::None {
+                let detail = if expect_error != ErrorExpectation::None {
                     format!("{}: {}", expected, e.message)
                 } else {
                     format!("Error: {}", e.message)
@@ -913,6 +1166,31 @@ fn test_function_definition_and_call() {
 }
 
 #[test]
+fn test_function_implicit_tail_expression_returns_value() {
+    // A function body's final expression is its implicit return.  This uses a
+    // match expression because it exercises the value-producing control-flow
+    // lowering that previously got popped before the bytecode null fallback.
+    let source = r#"
+        fn describe(x: int) -> string {
+            match x {
+                0 => "zero"
+                1 => "one"
+                _ => "other"
+            }
+        }
+
+        println(describe(0))
+        println(describe(1))
+        println(describe(42))
+    "#;
+
+    let bytecode = lirac::compile(source).expect("Compilation failed");
+    let (_, output) = liravm::run_with_capture(&bytecode).expect("Execution failed");
+
+    assert_eq!(output, vec!["zero", "one", "other"]);
+}
+
+#[test]
 fn test_recursive_function() {
     let source = r#"
         fn factorial(n: int) -> int {
@@ -1127,4 +1405,27 @@ fn main() {
         "Stack should order inner before main, got:\n{}",
         err
     );
+}
+
+#[test]
+fn array_pop_global_and_method_forms_preserve_optional_empty_semantics() {
+    let source = r#"
+        fn id(value) { return value }
+
+        fn main() {
+            let dynamic = id([1])
+            println(pop(dynamic))
+            println(pop(dynamic))
+            println(len(dynamic))
+
+            let typed: [string] = ["word"]
+            println(typed.pop())
+            println(typed.pop())
+            println(len(typed))
+        }
+    "#;
+    let bytecode = lirac::compile(source).expect("pop source should compile");
+    let (exit_code, output) = liravm::run_with_capture(&bytecode).expect("VM should execute");
+    assert_eq!(exit_code, 0);
+    assert_eq!(output, ["1", "null", "0", "word", "null", "0"]);
 }
