@@ -2,8 +2,8 @@
 //!
 //! Generated programs are untrusted test inputs: a lowering bug can turn a
 //! finite source loop into an infinite native loop or allocation storm. Keep
-//! those failures inside a child process, serialize them across integration
-//! test binaries, and cap their lifetime and captured output.
+//! those failures inside a child process, bound their concurrency across
+//! integration test binaries, and cap their lifetime and captured output.
 
 #![allow(dead_code)]
 
@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -339,50 +339,83 @@ pub enum FrontendPreflightOutcome {
     CompileError(Vec<FrontendDiagnostic>),
 }
 
+/// One held slot in the global bounded-concurrency pool. Owning a lock means
+/// one bounded child may execute; the lock is released when the child's whole
+/// lifecycle (compile, link, run, harvest) has finished.
+const DEFAULT_EXECUTION_LANES: usize = 4;
+const MAX_EXECUTION_LANES: usize = 16;
+
+static EXECUTION_LANES: OnceLock<usize> = OnceLock::new();
+static NEXT_LANE_PICK: AtomicU64 = AtomicU64::new(0);
+
+/// Number of bounded child executions that may run at once, across every test
+/// thread and every integration test binary. Historically this was exactly one
+/// (the lock fully serialized native work). More than one lane lets independent
+/// examples run in parallel on the many-core test machines while the cap still
+/// bounds concurrent Cranelift compiles, linker runs, and generated programs,
+/// so a lowering bug cannot starve the machine of memory. Override with
+/// `LIRA_TEST_EXEC_LANES` (clamped to 1..=16).
+pub fn execution_lane_count() -> usize {
+    *EXECUTION_LANES.get_or_init(|| {
+        std::env::var("LIRA_TEST_EXEC_LANES")
+            .ok()
+            .and_then(|value| value.trim().parse::<usize>().ok())
+            .unwrap_or(DEFAULT_EXECUTION_LANES)
+            .clamp(1, MAX_EXECUTION_LANES)
+    })
+}
+
 struct ExecutionLock(File);
 
 impl ExecutionLock {
     fn acquire() -> io::Result<Self> {
-        let file = OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_DIRECTORY)
-            .open("/tmp")?;
-        let metadata = file.metadata()?;
-        if !metadata.file_type().is_dir() {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "native execution lock must be a directory",
-            ));
-        }
+        let lanes = execution_lane_count();
+        // Vary the probe start so many parked test threads spread across the
+        // lanes instead of stampeding the same first lane.
+        let start = NEXT_LANE_PICK.fetch_add(1, Ordering::Relaxed) % lanes as u64;
 
-        // SAFETY: `file` owns this valid descriptor until `ExecutionLock` is
-        // dropped. Nonblocking acquisition lets a stale external runner fail
-        // within a bounded time instead of hanging the test process forever.
-        let deadline = Instant::now() + Duration::from_secs(30);
+        // Nonblocking acquisition lets a stale external runner fail within a
+        // bounded time instead of hanging the test process forever. Each lane
+        // is an exclusive flock on its own file, so up to `lanes` fds across
+        // the machine hold an exclusive lock at once. flock(2) treats fds to
+        // the same file independently, so these files also arbitrate between
+        // threads of one test process.
+        let deadline = Instant::now() + Duration::from_secs(600);
         loop {
-            let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
-            if result == 0 {
-                break;
-            }
-            let error = io::Error::last_os_error();
-            if error.kind() == io::ErrorKind::Interrupted {
-                continue;
-            }
-            if !matches!(
-                error.raw_os_error(),
-                Some(code) if code == libc::EWOULDBLOCK || code == libc::EAGAIN
-            ) {
-                return Err(error);
+            for offset in 0..lanes {
+                let lane = (start + offset as u64) % lanes as u64;
+                let path = std::env::temp_dir().join(format!("lira-bounded-exec-lane-{lane}"));
+                let file = OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .create(true)
+                    .mode(0o600)
+                    .open(&path)?;
+                // SAFETY: `file` owns this valid descriptor until `ExecutionLock`
+                // is dropped.
+                let result =
+                    unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+                if result == 0 {
+                    return Ok(Self(file));
+                }
+                let error = io::Error::last_os_error();
+                if error.kind() != io::ErrorKind::Interrupted
+                    && !matches!(
+                        error.raw_os_error(),
+                        Some(code) if code == libc::EWOULDBLOCK || code == libc::EAGAIN
+                    )
+                {
+                    return Err(error);
+                }
             }
             if Instant::now() >= deadline {
                 return Err(io::Error::new(
                     io::ErrorKind::TimedOut,
-                    "timed out waiting for the global native execution lock",
+                    "timed out waiting for a global native execution lane",
                 ));
             }
             thread::sleep(Duration::from_millis(10));
         }
-        Ok(Self(file))
     }
 }
 

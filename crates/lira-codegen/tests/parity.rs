@@ -6,6 +6,7 @@
 //! strongest evidence that the lowering is faithful.
 
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 mod common;
 
@@ -357,6 +358,62 @@ fn run_jit(path: &Path, source: &str) -> Result<String, String> {
     let stdout = String::from_utf8(stdout)
         .map_err(|error| format!("JIT stdout is not valid UTF-8: {error}"))?;
     Ok(without_final_line_ending(&stdout).to_owned())
+}
+
+/// Run `task` over every item on a small worker pool and concatenate the
+/// per-item failure lists in input order.
+///
+/// Without this the exhaustive parity gates serialize thousands of native
+/// builds and runs inside a single test thread. The pool is sized to the same
+/// bounded lane count the helper children use, so the parent threads never
+/// outrun the global concurrency cap: at most `execution_lane_count` bounded
+/// children exist at once on the machine while every example is still checked.
+fn run_items_parallel<T: Sync>(
+    items: &[T],
+    task: impl Fn(&T) -> Vec<String> + Sync,
+) -> Vec<String> {
+    if items.is_empty() {
+        return Vec::new();
+    }
+    // One worker when there is nothing to gain: a single item, or a pool that
+    // cannot run more than one child anyway.
+    let workers = common::execution_lane_count().min(items.len().max(1));
+    if workers <= 1 {
+        return items.iter().flat_map(task).collect();
+    }
+
+    let next = Mutex::new(0usize);
+    let results: Vec<Mutex<Option<Vec<String>>>> =
+        (0..items.len()).map(|_| Mutex::new(None)).collect();
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            scope.spawn(|| loop {
+                let index = {
+                    let mut next = next.lock().expect("work-queue mutex not poisoned");
+                    let index = *next;
+                    *next += 1;
+                    index
+                };
+                if index >= items.len() {
+                    break;
+                }
+                let failures = task(&items[index]);
+                *results[index]
+                    .lock()
+                    .expect("result-slot mutex not poisoned") = Some(failures);
+            });
+        }
+    });
+    results
+        .into_iter()
+        .flat_map(|slot| {
+            // Mutex::into_inner returns Result<Option<Vec<String>>, _>; the
+            // first flatten collapses the Option layer, the second the Vec.
+            slot.into_inner()
+                .expect("every item was processed by a worker")
+        })
+        .flatten()
+        .collect()
 }
 
 fn run_local_crawler_vm(path: &Path, source: &str, base_url: &str) -> Result<String, String> {
@@ -742,11 +799,12 @@ fn every_frontend_valid_example_executes_on_vm_aot_and_jit_and_matches_directive
         ));
     }
 
-    for example in examples {
+    let example_failures = run_items_parallel(&examples, |example| {
         // Run all three backends even after one fails so the aggregate report
         // identifies every broken backend and every broken source in one run.
         if example.directives.local_crawler {
             let (vm, aot, jit, report) = run_local_crawler(&example.path, &example.source);
+            let mut failures = Vec::new();
             validate_backend_result(&example.name, "VM", vm, &example.directives, &mut failures);
             validate_backend_result(
                 &example.name,
@@ -763,13 +821,14 @@ fn every_frontend_valid_example_executes_on_vm_aot_and_jit_and_matches_directive
                 &mut failures,
             );
             validate_local_crawler_report(&example.name, report, &mut failures);
-            continue;
+            return failures;
         }
 
         let vm = run_bytecode(&example.path, &example.source);
         let aot = run_native(&example.path, &example.source);
         let jit = run_jit(&example.path, &example.source);
 
+        let mut failures = Vec::new();
         validate_backend_result(&example.name, "VM", vm, &example.directives, &mut failures);
         validate_backend_result(
             &example.name,
@@ -785,7 +844,9 @@ fn every_frontend_valid_example_executes_on_vm_aot_and_jit_and_matches_directive
             &example.directives,
             &mut failures,
         );
-    }
+        failures
+    });
+    failures.extend(example_failures);
 
     failures.sort();
     assert!(
@@ -798,30 +859,31 @@ fn every_frontend_valid_example_executes_on_vm_aot_and_jit_and_matches_directive
 #[test]
 fn samples_execute_on_aot_and_match_their_directives() {
     let (files, mut failures) = lira_files_under(&repo_root().join("tests/samples"));
-    for path in files {
+    let sample_failures = run_items_parallel(&files, |path| {
+        let mut failures = Vec::new();
         let name = path
             .strip_prefix(repo_root())
-            .unwrap_or(&path)
+            .unwrap_or(path)
             .to_string_lossy()
             .into_owned();
-        let source = match common::read_source_bounded(&path) {
+        let source = match common::read_source_bounded(path) {
             Ok(source) => source,
             Err(error) => {
                 failures.push(format!("{}: could not read: {}", name, error));
-                continue;
+                return failures;
             }
         };
         let expectations = output_expectations(&source);
         if expectations.exact.is_empty() && expectations.contains.is_empty() {
             failures.push(format!("{}: no output directives found", name));
-            continue;
+            return failures;
         }
 
-        let native = match run_native(&path, &source) {
+        let native = match run_native(path, &source) {
             Ok(output) => output,
             Err(error) => {
                 failures.push(format!("{}: native execution failed: {}", name, error));
-                continue;
+                return failures;
             }
         };
 
@@ -830,19 +892,15 @@ fn samples_execute_on_aot_and_match_their_directives() {
             if native != expected {
                 failures.push(format!(
                     "{}: native output differs from exact directives\n  expected: {:?}\n  native:   {:?}",
-                    name,
-                    expected,
-                    native
+                    name, expected, native
                 ));
             }
 
-            match run_bytecode(&path, &source) {
+            match run_bytecode(path, &source) {
                 Ok(bytecode) if bytecode == native => {}
                 Ok(bytecode) => failures.push(format!(
                     "{}: deterministic sample differs between VM and native\n  bytecode: {:?}\n  native:   {:?}",
-                    name,
-                    bytecode,
-                    native
+                    name, bytecode, native
                 )),
                 Err(error) => failures.push(format!("{}: bytecode VM failed: {}", name, error)),
             }
@@ -857,7 +915,9 @@ fn samples_execute_on_aot_and_match_their_directives() {
                 ));
             }
         }
-    }
+        failures
+    });
+    failures.extend(sample_failures);
 
     failures.sort();
     assert!(
@@ -870,30 +930,31 @@ fn samples_execute_on_aot_and_match_their_directives() {
 #[test]
 fn samples_execute_on_jit_and_match_their_directives() {
     let (files, mut failures) = lira_files_under(&repo_root().join("tests/samples"));
-    for path in files {
+    let sample_failures = run_items_parallel(&files, |path| {
+        let mut failures = Vec::new();
         let name = path
             .strip_prefix(repo_root())
-            .unwrap_or(&path)
+            .unwrap_or(path)
             .to_string_lossy()
             .into_owned();
-        let source = match common::read_source_bounded(&path) {
+        let source = match common::read_source_bounded(path) {
             Ok(source) => source,
             Err(error) => {
                 failures.push(format!("{}: could not read: {}", name, error));
-                continue;
+                return failures;
             }
         };
         let expectations = output_expectations(&source);
         if expectations.exact.is_empty() && expectations.contains.is_empty() {
             failures.push(format!("{}: no output directives found", name));
-            continue;
+            return failures;
         }
 
-        let jit = match run_jit(&path, &source) {
+        let jit = match run_jit(path, &source) {
             Ok(output) => output,
             Err(error) => {
                 failures.push(format!("{}: JIT execution failed: {}", name, error));
-                continue;
+                return failures;
             }
         };
 
@@ -902,19 +963,15 @@ fn samples_execute_on_jit_and_match_their_directives() {
             if jit != expected {
                 failures.push(format!(
                     "{}: JIT output differs from exact directives\n  expected: {:?}\n  JIT:      {:?}",
-                    name,
-                    expected,
-                    jit
+                    name, expected, jit
                 ));
             }
 
-            match run_bytecode(&path, &source) {
+            match run_bytecode(path, &source) {
                 Ok(bytecode) if bytecode == jit => {}
                 Ok(bytecode) => failures.push(format!(
                     "{}: deterministic sample differs between VM and JIT\n  bytecode: {:?}\n  JIT:      {:?}",
-                    name,
-                    bytecode,
-                    jit
+                    name, bytecode, jit
                 )),
                 Err(error) => failures.push(format!("{}: bytecode VM failed: {}", name, error)),
             }
@@ -929,7 +986,9 @@ fn samples_execute_on_jit_and_match_their_directives() {
                 ));
             }
         }
-    }
+        failures
+    });
+    failures.extend(sample_failures);
 
     failures.sort();
     assert!(
@@ -942,15 +1001,15 @@ fn samples_execute_on_jit_and_match_their_directives() {
 #[test]
 fn listed_examples_produce_identical_output_on_both_backends() {
     let dir = examples_dir();
-    let mut failures = Vec::new();
-
-    for name in PARITY_EXAMPLES {
+    let example_failures = run_items_parallel(PARITY_EXAMPLES, |name| {
+        let name = *name;
+        let mut failures = Vec::new();
         let path = dir.join(name);
         let source = match common::read_source_bounded(&path) {
             Ok(source) => source,
             Err(e) => {
                 failures.push(format!("{}: could not read: {}", name, e));
-                continue;
+                return failures;
             }
         };
 
@@ -958,14 +1017,14 @@ fn listed_examples_produce_identical_output_on_both_backends() {
             Ok(output) => output,
             Err(e) => {
                 failures.push(format!("{}: the bytecode VM failed: {}", name, e));
-                continue;
+                return failures;
             }
         };
         let actual = match run_native(&path, &source) {
             Ok(output) => output,
             Err(e) => {
                 failures.push(format!("{}: the native backend failed: {}", name, e));
-                continue;
+                return failures;
             }
         };
 
@@ -975,22 +1034,31 @@ fn listed_examples_produce_identical_output_on_both_backends() {
                 name, expected, actual
             ));
         }
-    }
+        failures
+    });
 
-    assert!(failures.is_empty(), "\n{}", failures.join("\n"));
+    assert!(
+        example_failures.is_empty(),
+        "\n{}",
+        example_failures.join("\n")
+    );
 }
 
 #[test]
 fn every_frontend_valid_example_builds_as_a_bounded_native_artifact() {
     let (examples, mut failures) = frontend_valid_examples();
-    for example in examples {
-        if let Err(error) = common::build_aot(&example.path, &example.source) {
-            failures.push(format!(
-                "{}: bounded native build failed: {}",
-                example.name, error
-            ));
+    let example_failures = run_items_parallel(&examples, |example| {
+        match common::build_aot(&example.path, &example.source) {
+            Ok(()) => Vec::new(),
+            Err(error) => {
+                vec![format!(
+                    "{}: bounded native build failed: {}",
+                    example.name, error
+                )]
+            }
         }
-    }
+    });
+    failures.extend(example_failures);
 
     failures.sort();
     assert!(
@@ -1003,15 +1071,15 @@ fn every_frontend_valid_example_builds_as_a_bounded_native_artifact() {
 #[test]
 fn listed_examples_produce_identical_output_on_vm_and_jit() {
     let dir = examples_dir();
-    let mut failures = Vec::new();
-
-    for name in PARITY_EXAMPLES {
+    let example_failures = run_items_parallel(PARITY_EXAMPLES, |name| {
+        let name = *name;
+        let mut failures = Vec::new();
         let path = dir.join(name);
         let source = match common::read_source_bounded(&path) {
             Ok(source) => source,
             Err(error) => {
                 failures.push(format!("{}: could not read: {}", name, error));
-                continue;
+                return failures;
             }
         };
 
@@ -1019,7 +1087,7 @@ fn listed_examples_produce_identical_output_on_vm_and_jit() {
             Ok(output) => output,
             Err(error) => {
                 failures.push(format!("{}: the bytecode VM failed: {}", name, error));
-                continue;
+                return failures;
             }
         };
         let (status, stdout) =
@@ -1027,13 +1095,13 @@ fn listed_examples_produce_identical_output_on_vm_and_jit() {
                 Ok(result) => result,
                 Err(error) => {
                     failures.push(format!("{}: the JIT failed: {}", name, error));
-                    continue;
+                    return failures;
                 }
             };
 
         if status != 0 {
             failures.push(format!("{}: the JIT exited with status {}", name, status));
-            continue;
+            return failures;
         }
 
         let actual = match String::from_utf8(stdout) {
@@ -1043,7 +1111,7 @@ fn listed_examples_produce_identical_output_on_vm_and_jit() {
                     "{}: JIT stdout is not valid UTF-8: {}",
                     name, error
                 ));
-                continue;
+                return failures;
             }
         };
         if expected != actual {
@@ -1052,11 +1120,12 @@ fn listed_examples_produce_identical_output_on_vm_and_jit() {
                 name, expected, actual
             ));
         }
-    }
+        failures
+    });
 
     assert!(
-        failures.is_empty(),
+        example_failures.is_empty(),
         "deterministic examples must have identical VM/JIT output:\n{}",
-        failures.join("\n")
+        example_failures.join("\n")
     );
 }
