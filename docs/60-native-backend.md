@@ -175,8 +175,11 @@ launches the executable.
 
 Native integration tests add a second boundary around generated programs: AOT
 executables and JIT runs execute in child process groups with a wall deadline,
-CPU limits, bounded output capture, kill-and-reap cleanup, and a cross-process
-execution lock. On Linux the test/process supervisor applies an address-space
+CPU limits, bounded output capture, kill-and-reap cleanup, and a bounded pool of
+cross-process execution lanes. Each lane admits one bounded child at a time, so
+independent examples run in parallel while concurrent native work stays capped
+(default 4 lanes; override with `LIRA_TEST_EXEC_LANES`, clamped to 1-16). On
+Linux the test/process supervisor applies an address-space
 limit; on macOS it samples the group's physical memory reactively rather than
 providing a hard OS address-space ceiling. The stdout/stderr caps bound captured
 output, but do not sandbox arbitrary filesystem or device I/O. Recovery tests
