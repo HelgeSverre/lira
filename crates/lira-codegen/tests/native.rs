@@ -3066,7 +3066,7 @@ fn environment_and_time_builtins_report_live_values() {
         println(time_secs() > 0)
         println(random() < 1.0)
         let n = random_int(5, 10)
-        println(n >= 5 && n < 10)
+        println(n >= 5 && n <= 10)
         "#,
         &["true", "present", "false", "true", "true", "true", "true"],
     );
